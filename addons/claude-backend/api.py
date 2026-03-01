@@ -6728,12 +6728,15 @@ def api_files_list():
 
 @app.route('/api/files/read', methods=['GET'])
 def api_files_read():
-    """Read a file from the HA config dir.
+    """Read a file from the HA config dir (chunked for large files).
 
-    Query param: file — relative path, e.g. 'packages/lights.yaml'
-    Returns: {filename, content, size, truncated}
-    Content truncated at 15000 chars (same limit as read_config_file tool).
+    Query params:
+      file   — relative path, e.g. 'packages/lights.yaml'
+      offset — char offset to start reading from (default 0)
+      chunk  — max chars to return per request (default 0 = whole file)
+    Returns: {filename, content, size, offset, chunk_size, has_more}
     """
+    CHUNK_SIZE = 40000  # chars per page (0 = no chunking)
     filename = request.args.get('file', '').strip()
     if not filename:
         return jsonify({"error": "file parameter is required."}), 400
@@ -6744,15 +6747,29 @@ def api_files_read():
         return jsonify({"error": f"File '{filename}' not found."}), 404
     try:
         with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
-            content = f.read()
-        truncated = len(content) > 15000
-        if truncated:
-            content = content[:15000]
+            full = f.read()
+        total = len(full)
+        try:
+            offset = max(0, int(request.args.get('offset', 0)))
+        except (ValueError, TypeError):
+            offset = 0
+        try:
+            chunk = max(0, int(request.args.get('chunk', 0)))
+        except (ValueError, TypeError):
+            chunk = 0
+        if chunk > 0:
+            content = full[offset:offset + chunk]
+            has_more = (offset + chunk) < total
+        else:
+            content = full[offset:]
+            has_more = False
         return jsonify({
             "filename": filename,
             "content": content,
-            "size": os.path.getsize(filepath),
-            "truncated": truncated,
+            "size": total,
+            "offset": offset,
+            "chunk_size": len(content),
+            "has_more": has_more,
         })
     except Exception as e:
         logger.error(f"api_files_read error: {e}")

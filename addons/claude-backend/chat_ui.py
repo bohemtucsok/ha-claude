@@ -593,10 +593,11 @@ def get_chat_ui():
         }}
         body.resizing, body.resizing * {{ cursor: col-resize !important; user-select: none !important; }}
         .sidebar-header {{ padding: 12px; border-bottom: 1px solid #e0e0e0; font-weight: 600; font-size: 14px; color: #666; }}
-        .sidebar-tabs {{ display: flex; border-bottom: 1px solid #e0e0e0; background: #f8f9fa; }}
-        .sidebar-tab {{ flex: 1; padding: 8px 4px; font-size: 12px; text-align: center; cursor: pointer; border: none; background: none; color: #666; transition: all 0.2s; border-bottom: 2px solid transparent; }}
+        .sidebar-tabs {{ display: flex; flex-wrap: wrap; border-bottom: 1px solid #e0e0e0; background: #f8f9fa; }}
+        .sidebar-tab {{ flex: 1 1 33%; min-width: 0; padding: 6px 2px; font-size: 11px; text-align: center; cursor: pointer; border: none; background: none; color: #666; transition: all 0.2s; border-bottom: 2px solid transparent; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
         .sidebar-tab:hover {{ background: #f0f0f0; }}
         .sidebar-tab.active {{ color: #667eea; border-bottom-color: #667eea; font-weight: 600; }}
+        .sidebar-tab-row-sep {{ width: 100%; height: 1px; background: #e0e0e0; flex-shrink: 0; }}
         .sidebar-content {{ flex: 1; overflow-y: auto; display: none; }}
         .sidebar-content.active {{ display: block; }}
         .chat-list {{ flex: 1; overflow-y: auto; }}
@@ -966,7 +967,8 @@ def get_chat_ui():
             transition: background 0.15s; user-select: none;
         }}
         .file-tree-item:hover {{ background: #f5f5f5; }}
-        .file-tree-item.file-active {{ background: #e8f0fe; color: #1967d2; font-weight: 500; }}
+        .file-tree-item.file-active {{ background: #e8f0fe; color: #1967d2; }}
+        .file-tree-item.file-selected {{ background: #d2e3fc; color: #1967d2; font-weight: 600; }}
         .file-tree-item .file-icon {{ font-size: 14px; flex-shrink: 0; }}
         .file-tree-item .file-name {{ flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
         .file-tree-item .file-size {{ font-size: 10px; color: #999; flex-shrink: 0; }}
@@ -980,7 +982,7 @@ def get_chat_ui():
 
         /* ===== FILE PREVIEW PANEL (middle column) ===== */
         .file-panel {{
-            width: 0; min-width: 0; max-width: 600px;
+            width: 0; min-width: 0;
             background: #fafafa; border-right: 1px solid #e0e0e0;
             display: flex; flex-direction: column; overflow: hidden;
             transition: width 0.22s ease; flex-shrink: 0;
@@ -1034,6 +1036,14 @@ def get_chat_ui():
             padding: 4px 12px; font-size: 10px; color: #e07042;
             background: #fff8f5; border-bottom: 1px solid #fdd; flex-shrink: 0;
         }}
+        .file-load-more {{
+            display: block; width: calc(100% - 24px); margin: 8px 12px 12px;
+            padding: 6px 12px; font-size: 12px; cursor: pointer;
+            background: #f0f4ff; color: #667eea; border: 1px solid #c5d0ff;
+            border-radius: 6px; text-align: center; transition: background 0.2s;
+        }}
+        .file-load-more:hover {{ background: #e0e8ff; }}
+        .file-load-more:disabled {{ opacity: 0.6; cursor: default; }}
 
         /* YAML syntax highlight */
         .yaml-viewer {{
@@ -1183,6 +1193,7 @@ def get_chat_ui():
         body.dark-mode .file-tree-item {{ color: #d0d0d0; border-bottom-color: #2a2a2a; }}
         body.dark-mode .file-tree-item:hover {{ background: #2a2a2a; }}
         body.dark-mode .file-tree-item.file-active {{ background: #1e3a8a; color: #8ab4f8; }}
+        body.dark-mode .file-tree-item.file-selected {{ background: #1a3568; color: #93c5fd; font-weight: 600; }}
         body.dark-mode .file-tree-breadcrumb {{ background: #1a1a1a; color: #8ab4f8; border-bottom-color: #3a3a3a; }}
         body.dark-mode .file-tree-breadcrumb:hover {{ background: #222; }}
         body.dark-mode .yaml-viewer {{ color: #d0d0d0; }}
@@ -1581,10 +1592,11 @@ def get_chat_ui():
             <div class="sidebar-tabs">
                 <button class="sidebar-tab active" data-tab="chat" onclick="switchSidebarTab('chat')">\U0001f4ac {ui_js['tab_chat']}</button>
                 <button class="sidebar-tab" data-tab="bubble" onclick="switchSidebarTab('bubble')">\U0001f4ad {ui_js['tab_bubble']}</button>
+                <button class="sidebar-tab" data-tab="messaging" onclick="switchSidebarTab('messaging')">{ui_js['tab_messaging']}</button>
+                <div class="sidebar-tab-row-sep"></div>
+                <button class="sidebar-tab" data-tab="files" onclick="switchSidebarTab('files')">{ui_js['tab_files']}</button>
                 <button class="sidebar-tab" data-tab="backups" onclick="switchSidebarTab('backups')">\U0001f4be {ui_js['tab_backups']}</button>
                 <button class="sidebar-tab" data-tab="devices" onclick="switchSidebarTab('devices')">⚙️ {ui_js['tab_devices']}</button>
-                <button class="sidebar-tab" data-tab="messaging" onclick="switchSidebarTab('messaging')">{ui_js['tab_messaging']}</button>
-                <button class="sidebar-tab" data-tab="files" onclick="switchSidebarTab('files')">{ui_js['tab_files']}</button>
             </div>
             <div class="sidebar-content active" id="tabChat">
                 <div class="chat-list" id="chatList"></div>
@@ -1825,25 +1837,35 @@ def get_chat_ui():
             if (!filePanelEl || !fileSplitterEl) return;
             if (window.matchMedia('(max-width: 599px)').matches) return;
 
-            const minW = 180, maxW = 600;
+            const minW = 180;
+            const MIN_CHAT = 300; // always leave at least 300px for the chat area
             const storageKey = 'chatFilePanelWidth';
 
             let dragging = false, startX = 0, startWidth = 0;
+
+            function getMaxW() {{
+                // Available width = window minus sidebar minus splitters, leave MIN_CHAT for chat
+                const sidebarW = sidebarEl ? sidebarEl.getBoundingClientRect().width : 240;
+                return Math.max(minW, window.innerWidth - sidebarW - 10 - MIN_CHAT);
+            }}
 
             function startDrag(x) {{
                 dragging = true; startX = x;
                 startWidth = filePanelEl.getBoundingClientRect().width;
                 document.body.classList.add('resizing');
+                // Remove transition during drag for smooth feel
+                filePanelEl.style.transition = 'none';
             }}
             function moveDrag(x) {{
                 if (!dragging) return;
-                const next = Math.max(minW, Math.min(maxW, startWidth + (x - startX)));
+                const next = Math.max(minW, Math.min(getMaxW(), startWidth + (x - startX)));
                 filePanelEl.style.width = next + 'px';
             }}
             function endDrag() {{
                 if (!dragging) return;
                 dragging = false;
                 document.body.classList.remove('resizing');
+                filePanelEl.style.transition = '';
                 safeLocalStorageSet(storageKey, String(Math.round(filePanelEl.getBoundingClientRect().width)));
             }}
 
@@ -1897,11 +1919,18 @@ def get_chat_ui():
             }}
             const dirs  = entries.filter(e => e.type === 'directory');
             const files = entries.filter(e => e.type === 'file');
+            // The currently visible tab path (for selected highlight)
+            const activeTabPath = fileActiveTabIdx >= 0 && fileOpenTabs[fileActiveTabIdx]
+                ? fileOpenTabs[fileActiveTabIdx].path : null;
             [...dirs, ...files].forEach(entry => {{
                 const item = document.createElement('div');
                 item.className = 'file-tree-item';
                 if (!entry.type || entry.type === 'file') {{
-                    if (fileOpenTabs.some(t => t.path === entry.path)) item.classList.add('file-active');
+                    if (entry.path === activeTabPath) {{
+                        item.classList.add('file-selected'); // currently shown in panel
+                    }} else if (fileOpenTabs.some(t => t.path === entry.path)) {{
+                        item.classList.add('file-active'); // open in background tab
+                    }}
                 }}
                 const icon = document.createElement('span');
                 icon.className = 'file-icon';
@@ -1943,6 +1972,8 @@ def get_chat_ui():
         }}
 
         // ===== FILE PANEL — open / close / tabs =====
+        const FILE_CHUNK = 40000; // chars per page (matches server default)
+
         async function openFileInPanel(path, name) {{
             if (window.matchMedia('(max-width: 599px)').matches) return; // mobile: skip
             const existing = fileOpenTabs.findIndex(t => t.path === path);
@@ -1951,20 +1982,23 @@ def get_chat_ui():
                 fileOpenTabs.shift();
                 if (fileActiveTabIdx > 0) fileActiveTabIdx--;
             }}
-            fileOpenTabs.push({{ path, name, content: null, loading: true }});
+            fileOpenTabs.push({{ path, name, content: null, loading: true, offset: 0, hasMore: false, size: 0 }});
             const newIdx = fileOpenTabs.length - 1;
             setActivePanelTab(newIdx);
             openFilePanel();
             renderPanelTabs();
             filePanelContentEl.innerHTML = '<div class="file-panel-loading">Loading...</div>';
             try {{
-                const resp = await fetch(apiUrl('api/files/read') + '?file=' + encodeURIComponent(path), {{credentials:'same-origin'}});
+                const url = apiUrl('api/files/read') + '?file=' + encodeURIComponent(path) + '&chunk=' + FILE_CHUNK;
+                const resp = await fetch(url, {{credentials:'same-origin'}});
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
                 const data = await resp.json();
                 if (data.error) throw new Error(data.error);
-                fileOpenTabs[newIdx].content   = data.content;
-                fileOpenTabs[newIdx].truncated = data.truncated;
-                fileOpenTabs[newIdx].loading   = false;
+                fileOpenTabs[newIdx].content  = data.content;
+                fileOpenTabs[newIdx].offset   = data.chunk_size || data.content.length;
+                fileOpenTabs[newIdx].hasMore  = data.has_more || false;
+                fileOpenTabs[newIdx].size     = data.size || 0;
+                fileOpenTabs[newIdx].loading  = false;
             }} catch(e) {{
                 fileOpenTabs[newIdx].error   = e.message || 'Error';
                 fileOpenTabs[newIdx].loading = false;
@@ -1975,12 +2009,42 @@ def get_chat_ui():
             if (fileTreeEl.children.length > 0) loadFileTree(fileCurrentPath);
         }}
 
+        async function loadMoreFileContent(idx) {{
+            const tab = fileOpenTabs[idx];
+            if (!tab || !tab.hasMore) return;
+            const loadMoreBtn = filePanelContentEl.querySelector('.file-load-more');
+            if (loadMoreBtn) {{ loadMoreBtn.disabled = true; loadMoreBtn.textContent = 'Loading...'; }}
+            try {{
+                const url = apiUrl('api/files/read') + '?file=' + encodeURIComponent(tab.path)
+                          + '&chunk=' + FILE_CHUNK + '&offset=' + tab.offset;
+                const resp = await fetch(url, {{credentials:'same-origin'}});
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+                if (data.error) throw new Error(data.error);
+                tab.content  += data.content;
+                tab.offset   += data.chunk_size || data.content.length;
+                tab.hasMore   = data.has_more || false;
+            }} catch(e) {{
+                if (loadMoreBtn) {{ loadMoreBtn.disabled = false; loadMoreBtn.textContent = '⬇ Load more'; }}
+                return;
+            }}
+            renderActivePanelContent();
+            // Scroll to where new content starts (approx)
+            if (filePanelContentEl) {{
+                const viewer = filePanelContentEl.querySelector('.yaml-viewer');
+                if (viewer) {{
+                    const newBtn = filePanelContentEl.querySelector('.file-load-more');
+                    if (newBtn) newBtn.scrollIntoView({{behavior:'smooth', block:'center'}});
+                }}
+            }}
+        }}
+
         function openFilePanel() {{
             if (!filePanelEl || !fileSplitterEl) return;
             filePanelEl.classList.add('open');
             fileSplitterEl.classList.add('visible');
             const saved = parseInt(safeLocalStorageGet('chatFilePanelWidth') || '', 10);
-            if (!Number.isNaN(saved) && saved >= 180) filePanelEl.style.width = Math.min(600, saved) + 'px';
+            if (!Number.isNaN(saved) && saved >= 180) filePanelEl.style.width = saved + 'px';
         }}
 
         function closeFilePanel() {{
@@ -2034,16 +2098,20 @@ def get_chat_ui():
             if (tab.loading) {{ filePanelContentEl.innerHTML = '<div class="file-panel-loading">Loading...</div>'; return; }}
             if (tab.error)   {{ filePanelContentEl.innerHTML = '<div class="file-panel-error">Error: ' + tab.error + '</div>'; return; }}
             filePanelContentEl.innerHTML = '';
-            if (tab.truncated) {{
-                const notice = document.createElement('div');
-                notice.className = 'file-panel-truncated';
-                notice.textContent = '\u26a0 File truncated at 15,000 chars';
-                filePanelContentEl.appendChild(notice);
-            }}
             const viewer = document.createElement('div');
             viewer.className = 'yaml-viewer';
             viewer.innerHTML = syntaxHighlightYaml(tab.content || '');
             filePanelContentEl.appendChild(viewer);
+            if (tab.hasMore) {{
+                const loaded = tab.offset || 0;
+                const total  = tab.size || 0;
+                const pct    = total > 0 ? Math.round(loaded / total * 100) : '';
+                const btn = document.createElement('button');
+                btn.className = 'file-load-more';
+                btn.textContent = '\u2b07 Load more' + (pct ? ' (' + pct + '% loaded)' : '');
+                btn.onclick = () => loadMoreFileContent(fileActiveTabIdx);
+                filePanelContentEl.appendChild(btn);
+            }}
         }}
 
         // ===== YAML SYNTAX HIGHLIGHT (lightweight, line-by-line) =====
