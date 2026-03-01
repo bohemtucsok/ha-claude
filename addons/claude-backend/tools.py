@@ -2362,18 +2362,20 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             except Exception:
                 diff_unified = ""
 
-            return json.dumps({
+            result_obj = {
                 "status": "success",
                 "message": " ".join(msg_parts),
                 "updated_via": updated_via,
                 "old_yaml": old_yaml,
                 "new_yaml": new_yaml,
-                "diff_unified": diff_unified,
                 "snapshot": snapshot.get("snapshot_id", "") if (updated_via == "yaml" and isinstance(snapshot, dict)) else "N/A (REST API)",
                 "reload_result": reload_result if updated_via == "yaml" else "N/A (REST API)",
                 "tip": "Changes applied immediately via REST API. No reload needed." if updated_via == "rest_api" else "Automations reloaded automatically after YAML update.",
-                "IMPORTANT": "DONE. Show the user old_yaml and new_yaml AND the diff_unified (lines -/+). Stop. Do NOT call any more tools."
-            }, ensure_ascii=False, default=str)
+                "IMPORTANT": "DONE. Confirm the change briefly. Do NOT repeat the YAML. Stop.",
+            }
+            if diff_unified:
+                result_obj["diff"] = diff_unified
+            return json.dumps(result_obj, ensure_ascii=False, default=str)
 
         elif tool_name == "trigger_automation":
             entity_id = tool_input.get("entity_id", "")
@@ -3687,9 +3689,29 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
                 msg = f"File '{filename}' saved successfully."
                 if snapshot.get("snapshot_id"):
                     msg += f" Backup snapshot created: {snapshot['snapshot_id']}"
-                return json.dumps({"status": "success", "message": msg, "snapshot": snapshot,
-                                   "old_yaml": old_content, "new_yaml": content,
-                                   "tip": "Call check_config to validate the configuration."}, ensure_ascii=False, default=str)
+                # Compute diff for UI rendering
+                diff_str = ""
+                if old_content and old_content != content:
+                    try:
+                        import difflib as _difflib
+                        _diff_lines = list(_difflib.unified_diff(
+                            old_content.splitlines(keepends=True),
+                            content.splitlines(keepends=True),
+                            fromfile="before.yaml", tofile="after.yaml", lineterm=""
+                        ))
+                        _MAX = 200
+                        diff_str = "".join(_diff_lines[:_MAX])
+                        if len(_diff_lines) > _MAX:
+                            diff_str += f"\n... ({len(_diff_lines) - _MAX} more lines)"
+                    except Exception:
+                        pass
+                result = {"status": "success", "message": msg, "snapshot": snapshot,
+                          "old_yaml": old_content, "new_yaml": content,
+                          "file": filename,
+                          "tip": "Call check_config to validate the configuration."}
+                if diff_str:
+                    result["diff"] = diff_str
+                return json.dumps(result, ensure_ascii=False, default=str)
             except Exception as e:
                 return json.dumps({"error": f"Failed to write '{filename}': {str(e)}", "snapshot": snapshot})
 

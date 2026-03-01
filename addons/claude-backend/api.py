@@ -3586,13 +3586,14 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                     if fn_name in _read_only_tools:
                         _tool_cache[_sig] = result
 
-                # Extract diff for UI rendering (strip before feeding to model)
+                # Extract diff + modified filename for UI rendering (strip before feeding to model)
                 try:
                     _result_obj = json.loads(result)
                     if isinstance(_result_obj, dict) and "diff" in _result_obj:
                         _diff_content = _result_obj.pop("diff")
+                        _modified_file = _result_obj.get("file", "")  # relative path if set
                         result = json.dumps(_result_obj, ensure_ascii=False)
-                        yield {"type": "diff", "content": _diff_content}
+                        yield {"type": "diff", "content": _diff_content, "file": _modified_file}
                 except Exception:
                     pass
 

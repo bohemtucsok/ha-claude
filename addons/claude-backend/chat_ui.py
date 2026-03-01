@@ -3243,6 +3243,29 @@ def get_chat_ui():
                                     const diffEl = renderDiff(evt.content);
                                     if (diffEl) div.appendChild(diffEl);
                                 }}
+                                // If the modified file is currently open in the file panel, reload it
+                                if (evt.file && fileOpenTabs.length > 0) {{
+                                    const tabIdx = fileOpenTabs.findIndex(t => t.path === evt.file);
+                                    if (tabIdx !== -1) {{
+                                        const tab = fileOpenTabs[tabIdx];
+                                        tab.loading = true; tab.content = null; tab.offset = 0; tab.hasMore = false;
+                                        if (tabIdx === fileActiveTabIdx) renderActivePanelContent();
+                                        fetch(apiUrl('api/files/read') + '?file=' + encodeURIComponent(evt.file) + '&chunk=40000', {{credentials:'same-origin'}})
+                                            .then(r => r.json())
+                                            .then(data => {{
+                                                if (data.error) {{ tab.error = data.error; }} else {{
+                                                    tab.content = data.content; tab.error = null;
+                                                    tab.offset = data.chunk_size || data.content.length;
+                                                    tab.hasMore = data.has_more || false;
+                                                    tab.size = data.size || 0;
+                                                }}
+                                                tab.loading = false;
+                                                if (tabIdx === fileActiveTabIdx) renderActivePanelContent();
+                                            }})
+                                            .catch(e => {{ tab.error = e.message; tab.loading = false;
+                                                if (tabIdx === fileActiveTabIdx) renderActivePanelContent(); }});
+                                    }}
+                                }}
                             }} else if (evt.type === 'error') {{
                                 removeThinking();
                                 addMessage('\u274c ' + evt.message, 'system');
