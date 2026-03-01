@@ -65,6 +65,16 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "qa_fix_log_text": "How can I fix this log error? Give me step-by-step instructions",
             "qa_show_errors_text": "Show me all current errors and warnings from the HA logs",
             "qa_fix_logs_text": "What are the most critical issues in the logs and how to fix them?",
+            "context_card_editor": "Card editor",
+            "qa_card_explain": "Explain this card",
+            "qa_card_optimize": "Improve this card",
+            "qa_card_explain_text": "Explain what this Lovelace card does and how it works",
+            "qa_card_optimize_text": "Suggest improvements for this Lovelace card YAML",
+            "qa_card_add_feature": "Add feature",
+            "qa_card_add_feature_text": "What features could I add to this Lovelace card? Suggest one and show the YAML",
+            "qa_card_fix": "Fix this card",
+            "qa_card_fix_text": "Check this Lovelace card YAML for errors or issues and fix them",
+            "card_editor_btn": "🤖 Ask AI",
             "confirm_yes": "Yes, confirm",
             "confirm_no": "No, cancel",
             "confirm_yes_value": "yes",
@@ -103,6 +113,16 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "qa_fix_log_text": "Come posso risolvere questo errore di log? Dammi le istruzioni passo per passo",
             "qa_show_errors_text": "Mostrami tutti gli errori e avvisi attuali nei log di Home Assistant",
             "qa_fix_logs_text": "Quali sono i problemi più critici nei log e come risolverli?",
+            "context_card_editor": "Editor card",
+            "qa_card_explain": "Spiega questa card",
+            "qa_card_optimize": "Migliora questa card",
+            "qa_card_explain_text": "Spiega cosa fa questa card Lovelace e come funziona",
+            "qa_card_optimize_text": "Suggerisci miglioramenti per questo YAML della card Lovelace",
+            "qa_card_add_feature": "Aggiungi funzione",
+            "qa_card_add_feature_text": "Che funzionalità potrei aggiungere a questa card Lovelace? Suggerisci qualcosa e mostrami lo YAML",
+            "qa_card_fix": "Correggi card",
+            "qa_card_fix_text": "Controlla questo YAML della card Lovelace per errori o problemi e correggili",
+            "card_editor_btn": "🤖 Chiedi all'AI",
             "confirm_yes": "Sì, conferma",
             "confirm_no": "No, annulla",
             "confirm_yes_value": "si",
@@ -141,6 +161,16 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "qa_fix_log_text": "¿Cómo puedo corregir este error de registro? Dame instrucciones paso a paso",
             "qa_show_errors_text": "Muéstrame todos los errores y avisos actuales en los registros de Home Assistant",
             "qa_fix_logs_text": "¿Cuáles son los problemas más críticos en los registros y cómo solucionarlos?",
+            "context_card_editor": "Editor de tarjeta",
+            "qa_card_explain": "Explicar tarjeta",
+            "qa_card_optimize": "Mejorar tarjeta",
+            "qa_card_explain_text": "Explica qué hace esta tarjeta Lovelace y cómo funciona",
+            "qa_card_optimize_text": "Sugiere mejoras para el YAML de esta tarjeta Lovelace",
+            "qa_card_add_feature": "Añadir función",
+            "qa_card_add_feature_text": "¿Qué funciones podría añadir a esta tarjeta Lovelace? Sugiere una y muéstrame el YAML",
+            "qa_card_fix": "Corregir tarjeta",
+            "qa_card_fix_text": "Revisa el YAML de esta tarjeta Lovelace en busca de errores y corrígelos",
+            "card_editor_btn": "🤖 Preguntar a IA",
             "confirm_yes": "Sí, confirma",
             "confirm_no": "No, cancela",
             "confirm_yes_value": "si",
@@ -179,6 +209,16 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "qa_fix_log_text": "Comment puis-je corriger cette erreur de journal ? Donne-moi des instructions étape par étape",
             "qa_show_errors_text": "Montre-moi toutes les erreurs et avertissements actuels dans les journaux Home Assistant",
             "qa_fix_logs_text": "Quels sont les problèmes les plus critiques dans les journaux et comment les corriger ?",
+            "context_card_editor": "Éditeur de carte",
+            "qa_card_explain": "Expliquer la carte",
+            "qa_card_optimize": "Améliorer la carte",
+            "qa_card_explain_text": "Explique ce que fait cette carte Lovelace et comment elle fonctionne",
+            "qa_card_optimize_text": "Suggère des améliorations pour le YAML de cette carte Lovelace",
+            "qa_card_add_feature": "Ajouter fonction",
+            "qa_card_add_feature_text": "Quelles fonctionnalités pourrais-je ajouter à cette carte Lovelace ? Suggère-en une et montre-moi le YAML",
+            "qa_card_fix": "Corriger la carte",
+            "qa_card_fix_text": "Vérifie le YAML de cette carte Lovelace pour des erreurs et corrige-les",
+            "card_editor_btn": "🤖 Demander à l'IA",
             "confirm_yes": "Oui, confirme",
             "confirm_no": "Non, annule",
             "confirm_yes_value": "oui",
@@ -312,9 +352,82 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
     return iframes;
   }}
 
+  // Extract YAML from the HA card editor modal (walks Shadow DOM)
+  // Returns the raw YAML string or '' if no editor is open
+  function extractCardYaml() {{
+    try {{
+      function walkForYaml(root, depth) {{
+        if (!root || depth > 15) return '';
+        // Try: ha-code-editor, CodeMirror, textarea inside card editor modals
+        const selectors = [
+          'hui-card-editor', 'hui-entity-editor', 'ha-yaml-editor',
+          'ha-code-editor', 'hui-dialog-edit-card',
+        ];
+        for (const sel of selectors) {{
+          const els = root.querySelectorAll ? root.querySelectorAll(sel) : [];
+          for (const el of els) {{
+            // Try CodeMirror editor value
+            if (el._value !== undefined) return String(el._value || '');
+            if (el.value !== undefined && typeof el.value === 'string' && el.value.trim()) return el.value.trim();
+            // Walk into shadow root of the editor element
+            if (el.shadowRoot) {{
+              const inner = walkForYaml(el.shadowRoot, depth + 1);
+              if (inner) return inner;
+            }}
+            // Try textarea inside
+            const ta = el.querySelector ? el.querySelector('textarea') : null;
+            if (ta && ta.value && ta.value.trim()) return ta.value.trim();
+          }}
+        }}
+        // Recurse into all shadow roots
+        const allEls = root.querySelectorAll ? root.querySelectorAll('*') : [];
+        for (const el of allEls) {{
+          if (el.shadowRoot) {{
+            const found = walkForYaml(el.shadowRoot, depth + 1);
+            if (found) return found;
+          }}
+        }}
+        return '';
+      }}
+      return walkForYaml(document, 0);
+    }} catch(e) {{ return ''; }}
+  }}
+
+  // Check if the HA card editor dialog is currently open in the DOM
+  function isCardEditorOpen() {{
+    try {{
+      function walkForEditor(root, depth) {{
+        if (!root || depth > 12) return false;
+        const editorSelectors = [
+          'hui-dialog-edit-card', 'hui-card-editor', 'ha-yaml-editor'
+        ];
+        for (const sel of editorSelectors) {{
+          const els = root.querySelectorAll ? root.querySelectorAll(sel) : [];
+          if (els.length > 0) return true;
+        }}
+        const allEls = root.querySelectorAll ? root.querySelectorAll('*') : [];
+        for (const el of allEls) {{
+          if (el.shadowRoot && walkForEditor(el.shadowRoot, depth + 1)) return true;
+        }}
+        return false;
+      }}
+      return walkForEditor(document, 0);
+    }} catch(e) {{ return false; }}
+  }}
+
   function detectContext() {{
     const path = window.location.pathname;
     const ctx = {{ type: null, id: null, label: null, entities: null }};
+
+    // Card editor detection: a modal can be open on top of any page
+    // Check DOM before URL-based detection so it takes priority
+    if (isCardEditorOpen()) {{
+      const yaml = extractCardYaml();
+      ctx.type = 'card_editor';
+      ctx.label = T.context_card_editor;
+      if (yaml) ctx.cardYaml = yaml;
+      return ctx;
+    }}
 
     let m = path.match(/\\/config\\/automation\\/edit\\/([^/]+)/);
     if (m) {{ ctx.type = 'automation'; ctx.id = m[1]; ctx.label = T.context_automation + ': ' + m[1]; return ctx; }}
@@ -445,6 +558,16 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
   function buildContextPrefix() {{
     const ctx = detectContext();
     if (!ctx.type) return '';
+    if (ctx.type === 'card_editor') {{
+      let p = '[CONTEXT: User is editing a Lovelace card in the HA card editor.';
+      if (ctx.cardYaml) {{
+        p += ' The current card YAML is:\\n```yaml\\n' + ctx.cardYaml + '\\n```\\n'
+           + 'To apply changes, output the complete updated YAML only. '
+           + 'Do NOT use write_config_file — the user will paste it manually in the editor.';
+      }}
+      p += ']';
+      return p + ' ';
+    }}
     if (ctx.type === 'automation' && ctx.id)
       return '[CONTEXT: User is viewing automation id="' + ctx.id + '". '
            + 'The automation_id for modify operations is: ' + ctx.id + '. '
@@ -491,6 +614,12 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
   function getQuickActions() {{
     const ctx = detectContext();
     if (!ctx.type) return [];
+    if (ctx.type === 'card_editor') return [
+      {{ label: T.qa_card_explain, text: T.qa_card_explain_text }},
+      {{ label: T.qa_card_optimize, text: T.qa_card_optimize_text }},
+      {{ label: T.qa_card_add_feature, text: T.qa_card_add_feature_text }},
+      {{ label: T.qa_card_fix, text: T.qa_card_fix_text }},
+    ];
     if (ctx.type === 'automation') return [
       {{ label: T.qa_analyze, text: 'Analyze this automation and tell me what it does' }},
       {{ label: T.qa_optimize, text: 'Optimize this automation - suggest improvements' }},
@@ -1181,7 +1310,87 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
         if (isOpen) {{ updateContextBar(); updateQuickActions(); }}
       }}
     }}
+    // Card editor detection — open/close triggers context bar + quick actions update
+    const cardOpen = isCardEditorOpen();
+    if (cardOpen !== _lastCardEditorOpen) {{
+      _lastCardEditorOpen = cardOpen;
+      if (isOpen) {{ updateContextBar(); updateQuickActions(); }}
+      if (cardOpen) injectCardEditorButton(); else removeCardEditorButton();
+    }}
+    // Re-inject button if editor is open but button was removed (e.g. HA re-rendered)
+    if (cardOpen && !document.getElementById('amira-card-editor-btn')) {{
+      injectCardEditorButton();
+    }}
   }}, 1000);
+
+  // ---- Card editor button injection ----
+  let _lastCardEditorOpen = false;
+  const CARD_BTN_ID = 'amira-card-editor-btn';
+
+  function injectCardEditorButton() {{
+    if (document.getElementById(CARD_BTN_ID)) return;
+    // Find the card editor dialog footer or toolbar in the shadow DOM
+    function findEditorFooter(root, depth) {{
+      if (!root || depth > 15) return null;
+      // HA 2024+: hui-dialog-edit-card → shadowRoot → div.buttons or mwc-button row
+      const targets = [
+        'hui-dialog-edit-card',
+        'ha-dialog',
+      ];
+      for (const sel of targets) {{
+        const els = root.querySelectorAll ? root.querySelectorAll(sel) : [];
+        for (const el of els) {{
+          if (el.shadowRoot) {{
+            // Look for the button row inside
+            const btnRow = el.shadowRoot.querySelector('.buttons, [slot="primaryAction"], ha-dialog-header, div.header, .card-actions');
+            if (btnRow) return btnRow;
+            // Deeper search
+            const inner = findEditorFooter(el.shadowRoot, depth + 1);
+            if (inner) return inner;
+          }}
+        }}
+      }}
+      // General shadow root walk
+      const allEls = root.querySelectorAll ? root.querySelectorAll('*') : [];
+      for (const el of allEls) {{
+        if (el.shadowRoot) {{
+          const found = findEditorFooter(el.shadowRoot, depth + 1);
+          if (found) return found;
+        }}
+      }}
+      return null;
+    }}
+
+    const footer = findEditorFooter(document, 0);
+    if (!footer) return;
+
+    const btn = document.createElement('button');
+    btn.id = CARD_BTN_ID;
+    btn.textContent = T.card_editor_btn || '🤖 Ask AI';
+    btn.style.cssText = [
+      'margin-right:8px', 'padding:6px 14px', 'font-size:13px', 'font-weight:500',
+      'cursor:pointer', 'border:none', 'border-radius:18px',
+      'background:linear-gradient(135deg,#667eea,#764ba2)', 'color:#fff',
+      'box-shadow:0 2px 6px rgba(102,126,234,0.4)', 'transition:opacity 0.2s',
+      'vertical-align:middle', 'z-index:9999', 'position:relative',
+    ].join(';');
+    btn.onmouseenter = () => {{ btn.style.opacity = '0.85'; }};
+    btn.onmouseleave = () => {{ btn.style.opacity = '1'; }};
+    btn.onclick = (e) => {{
+      e.stopPropagation();
+      // Open bubble panel with card YAML pre-loaded in context
+      if (!isOpen) togglePanel();
+      // Update context bar immediately
+      updateContextBar(); updateQuickActions();
+    }};
+    // Prepend so it appears before the HA buttons
+    footer.insertBefore(btn, footer.firstChild);
+  }}
+
+  function removeCardEditorButton() {{
+    const existing = document.getElementById(CARD_BTN_ID);
+    if (existing) existing.remove();
+  }}
 
   // ---- Auto-resize textarea ----
   input.addEventListener('input', () => {{ input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 80) + 'px'; }});
