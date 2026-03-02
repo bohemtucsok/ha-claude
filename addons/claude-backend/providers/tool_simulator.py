@@ -75,11 +75,11 @@ Available tools and their argument schemas are listed in the TOOLS section below
 CRITICAL RULES — follow exactly:
 
 READ-ONLY tools (get_*, search_*, list_*, get_automations, get_scripts, \
-get_entities, search_entities):
+get_entities, search_entities, manage_statistics with action='validate'):
   - Output ONLY the <tool_call> block. NO introductory text, NO explanation before it.
   - After receiving the tool result, answer the user using the data returned.
 
-WRITE/DESTRUCTIVE tools (create_*, update_*, delete_*, manage_*, \
+WRITE/DESTRUCTIVE tools (create_*, update_*, delete_*, manage_* with write actions, \
 create_automation, update_automation, create_script, update_script):
   - First describe to the user what you plan to do and ask for confirmation \
 (sì / yes / ok / confirm).

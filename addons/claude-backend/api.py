@@ -3453,8 +3453,20 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                                 # For read-only tool calls, suppress the introductory text:
                                 # the model will respond properly once it sees the tool results.
                                 # For write tool calls, show the confirmation text to the user.
+                                def _is_read_only_call(tc):
+                                    name = tc.get("name", "")
+                                    if name in _read_only_tools:
+                                        return True
+                                    # manage_statistics(action=validate) is read-only
+                                    if name == "manage_statistics":
+                                        try:
+                                            args = json.loads(tc.get("arguments", "{}") or "{}")
+                                        except Exception:
+                                            args = {}
+                                        return args.get("action") == "validate"
+                                    return False
                                 _all_read_only = all(
-                                    tc.get("name", "") in _read_only_tools
+                                    _is_read_only_call(tc)
                                     for tc in _sim_calls
                                 )
                                 if not _all_read_only:

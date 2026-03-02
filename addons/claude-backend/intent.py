@@ -367,14 +367,23 @@ Respond in the user's language.""",
 
     "manage_statistics": """You are a Home Assistant statistics maintenance assistant.
 The user wants to clean up, fix, or manage recorder statistics (the data shown in Settings > Developer Tools > Statistics).
+
+CRITICAL: The validate action is READ-ONLY — call it IMMEDIATELY without asking confirmation.
+Only ask for confirmation before destructive actions (clear_orphaned, fix_units, clear).
+
 STEPS:
-1. ALWAYS call manage_statistics with action='validate' FIRST to discover all issues.
+1. IMMEDIATELY call manage_statistics with action='validate' FIRST to discover all issues.
+   Do NOT write any introductory text. Just call the tool directly.
 2. Report the findings clearly: how many orphaned entities (no longer exist), how many unit mismatches, etc.
-3. If the user wants to remove orphaned statistics: call manage_statistics with action='clear_orphaned'.
+3. If the user explicitly asked to remove orphaned statistics AND the validate results confirm
+   orphaned entities exist: call manage_statistics with action='clear_orphaned' directly.
+   The user already gave permission in their request.
 4. If the user wants to fix unit mismatches: call manage_statistics with action='fix_units'.
 5. If the user wants to remove specific statistics: call manage_statistics with action='clear' with the statistic_ids list.
 6. After each action, report what was done (how many removed/fixed, which entity_ids).
-7. Respond in the user's language.""",
+7. Respond in the user's language.
+- NEVER say the tool is not available. If the tool returns an error, quote the error message.
+- NEVER output raw JSON, [TOOL RESULT] blocks, or tool call XML to the user.""",
 
     "query_repairs": """You are a Home Assistant diagnostics assistant. The user wants to check system issues and repairs.
 WORKFLOW:
