@@ -1505,10 +1505,10 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
     if (_cardInputEl && !presetText) {{ _cardInputEl.value = ''; _cardInputEl.style.height = 'auto'; }}
     _cardPanelAddMsg('user', text);
     const thinkEl = _cardPanelAddMsg('assistant', T.thinking + '…');
-    const ctx = detectContext();
-    const prefix = buildContextPrefix(ctx);
-    const fullMsg = prefix ? prefix + '\\n\\n' + text : text;
     try {{
+      const ctx = detectContext();
+      const prefix = buildContextPrefix(ctx);
+      const fullMsg = prefix ? prefix + '\\n\\n' + text : text;
       const resp = await fetch(API_BASE + '/api/chat', {{
         method: 'POST',
         headers: {{'Content-Type': 'application/json'}},
@@ -1517,7 +1517,8 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
       const data = await resp.json();
       if (thinkEl) thinkEl.innerHTML = _renderInlineMd(data.response || data.error || '?');
     }} catch(e) {{
-      if (thinkEl) thinkEl.textContent = T.error_connection;
+      console.error('[Amira card panel] send error:', e);
+      if (thinkEl) thinkEl.textContent = T.error_connection + ' (' + e.message + ')';
     }}
     if (_cardMsgsEl) _cardMsgsEl.scrollTop = _cardMsgsEl.scrollHeight;
   }}
