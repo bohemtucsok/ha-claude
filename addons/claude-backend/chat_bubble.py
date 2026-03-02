@@ -1365,9 +1365,15 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
   // The backdrop is div.mdc-dialog__scrim which uses pointer-events to block clicks,
   // making the bubble panel (in document.body) unclickable when the editor is open.
   // Fix: set pointer-events:none on the scrim when the bubble is active.
-  // The bubble itself stays in document.body at all times (no reparenting needed).
-  let _scrimEl = null;                // the mdc-dialog__scrim we temporarily disable
-  let _scrimDisabled = false;
+  // The bubble stays in document.body. The problem is that home-assistant (a custom
+  // element covering the full page) intercepts all pointer events via its shadow DOM,
+  // so clicks never reach #ha-claude-bubble even though z-index is 99999.
+  // Fix: inject a <style> tag into document.head that sets pointer-events:none on
+  // home-assistant while the bubble panel is active. The bubble itself keeps
+  // pointer-events:auto so it still receives clicks.
+  // We also disable the MWC scrim for good measure.
+  let _scrimEl = null;
+  let _cardEditorStyleTag = null;
 
   function _getScrim() {{
     try {{
@@ -1380,18 +1386,24 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
   }}
 
   function disableScrim() {{
-    if (_scrimDisabled) return;
+    if (_cardEditorStyleTag) return;  // already active
+    // Disable pointer-events on home-assistant (covers full page via shadow DOM)
+    // while keeping the bubble itself interactive
+    const s = document.createElement('style');
+    s.id = 'amira-card-editor-pe';
+    s.textContent = 'home-assistant {{ pointer-events: none !important; }} #ha-claude-bubble {{ pointer-events: auto !important; }}';
+    document.head.appendChild(s);
+    _cardEditorStyleTag = s;
+    // Also disable the MWC scrim
     _scrimEl = _getScrim();
-    if (!_scrimEl) return;
-    _scrimEl.style.pointerEvents = 'none';
-    _scrimDisabled = true;
-    // Also hide the floating bubble button — footer "Ask AI" is the trigger
+    if (_scrimEl) _scrimEl.style.pointerEvents = 'none';
+    // Hide the floating bubble button — footer Amira button is the trigger
     btn.style.display = 'none';
   }}
 
   function restoreScrim() {{
+    if (_cardEditorStyleTag) {{ _cardEditorStyleTag.remove(); _cardEditorStyleTag = null; }}
     if (_scrimEl) {{ _scrimEl.style.pointerEvents = ''; _scrimEl = null; }}
-    _scrimDisabled = false;
     btn.style.display = '';
   }}
 
