@@ -1434,7 +1434,7 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
       const escaped = code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       const placeholder = '___CODEBLOCK_' + codeBlocks.length + '___';
       codeBlocks.push('<div style="position:relative;margin:6px 0;">'
-        + '<button onclick="window.__amiraCopyCode(this)" style="position:absolute;top:4px;right:4px;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.25);color:var(--primary-text-color,#ccc);border-radius:4px;padding:2px 8px;font-size:10px;cursor:pointer;">Copia</button>'
+        + '<button onclick="window.__amiraCopyCode(this)" style="position:absolute;top:6px;right:6px;background:#334155;border:1px solid #475569;color:#e2e8f0;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:500;letter-spacing:0.3px;transition:background .15s;z-index:1;" onmouseover="this.style.background=\\'#475569\\'" onmouseout="this.style.background=\\'#334155\\'">Copia</button>'
         + '<pre style="background:#1e293b;color:#e2e8f0;padding:8px 10px;border-radius:6px;font-size:12px;overflow-x:auto;margin:0;white-space:pre-wrap;word-break:break-word;"><code>' + escaped + '</code></pre></div>');
       return placeholder;
     }});
