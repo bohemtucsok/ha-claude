@@ -3405,6 +3405,7 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
             "get_dashboard_config", "read_config_file",
             "list_config_files", "get_frontend_resources",
             "search_entities", "get_entity_state", "get_entities",
+            "get_integration_entities",
         }
 
         while _tool_round < _MAX_TOOL_ROUNDS:
@@ -3461,8 +3462,12 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                                 # Do NOT yield done yet — let the tool loop continue
                                 break
                             # No tool_calls found → plain text response, flush as-is
+                            # Strip any [TOOL RESULT] blocks the model may echo
                             if full_buf:
-                                yield {"type": "token", "content": full_buf}
+                                from providers.tool_simulator import clean_display_text
+                                _display = clean_display_text(full_buf)
+                                if _display:
+                                    yield {"type": "token", "content": _display}
                             _text_buffer = []
 
                         # Flush buffer for html dashboard (no tool call → clarifying question)
@@ -3546,6 +3551,12 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
             # --- Execute tool calls and prepare next round ---
             text_so_far = "".join(_streamed_text_parts)
             _streamed_text_parts = []
+
+            # For no-tool providers, clean <tool_call> XML from assistant history
+            # so the model doesn't see raw XML in its conversation context.
+            if _is_no_tool_provider and text_so_far:
+                from providers.tool_simulator import clean_response_text as _crt
+                text_so_far = _crt(text_so_far)
 
             # Append assistant message with tool_calls (OpenAI format)
             messages.append({

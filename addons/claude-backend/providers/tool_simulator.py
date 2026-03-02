@@ -195,6 +195,22 @@ def clean_response_text(text: str) -> str:
     return cleaned.strip()
 
 
+# Regex to match [TOOL RESULT: name] ... [/TOOL RESULT] blocks that the model
+# may echo back in its response (learned from flatten_tool_messages history).
+_TOOL_RESULT_RE = re.compile(
+    r"\[TOOL RESULT:.*?\][\s\S]*?\[/TOOL RESULT\]",
+    re.IGNORECASE,
+)
+
+
+def clean_display_text(text: str) -> str:
+    """Remove both <tool_call> and [TOOL RESULT] blocks for user display."""
+    cleaned = _TOOL_CALL_RE.sub("", text)
+    cleaned = _TOOL_RESULT_RE.sub("", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
 # ---------------------------------------------------------------------------
 # Message normaliser — flatten tool-call history for no-native-tool providers
 # ---------------------------------------------------------------------------
