@@ -1499,7 +1499,7 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
     const thinkEl = _cardPanelAddMsg('assistant', T.thinking + '…');
     const ctx = detectContext();
     const prefix = buildContextPrefix(ctx);
-    const fullMsg = prefix ? prefix + '\n\n' + text : text;
+    const fullMsg = prefix ? prefix + '\\n\\n' + text : text;
     try {{
       const resp = await fetch(API_BASE + '/api/chat', {{
         method: 'POST',
