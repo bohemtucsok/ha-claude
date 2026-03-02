@@ -433,18 +433,24 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
     }} catch(e) {{ return null; }}
   }}
 
-  // Returns the native <dialog open> element inside ha-dialog's shadow root.
-  // This element is in the browser top-layer — children appended here can use
-  // position:fixed and receive pointer events above the backdrop.
-  function getCardEditorNativeDialog() {{
+  // Returns the best container inside ha-dialog's shadow root to host the bubble.
+  // HA uses MWC (Material Web Components) — structure inside ha-dialog shadow root:
+  //   div.mdc-dialog
+  //     div.mdc-dialog__scrim   ← backdrop, intercepts pointer events
+  //     div.mdc-dialog__container
+  //       div.mdc-dialog__surface  ← the actual visible dialog card
+  // We append the bubble as a sibling AFTER the scrim, inside div.mdc-dialog,
+  // so it renders above the scrim (later in DOM = higher stacking order).
+  // The bubble uses position:fixed so it is not affected by the dialog's layout.
+  function getCardEditorMdcDialog() {{
     try {{
       const editCardEl = _findEditCardEl();
       if (!editCardEl || !editCardEl.shadowRoot) return null;
       const haDialog = editCardEl.shadowRoot.querySelector('ha-dialog[open]');
       if (!haDialog || !haDialog.shadowRoot) return null;
-      // The native <dialog open> inside ha-dialog's shadow root
-      const nativeDlg = haDialog.shadowRoot.querySelector('dialog[open]');
-      return nativeDlg || null;
+      const sr = haDialog.shadowRoot;
+      // Prefer div.mdc-dialog — appending here puts the bubble after the scrim
+      return sr.querySelector('div.mdc-dialog') || sr.firstElementChild || null;
     }} catch(e) {{ return null; }}
   }}
 
@@ -1387,20 +1393,37 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
   // Inside a <dialog>, position:fixed still works (it resolves to the viewport), so
   // the panel keeps its correct on-screen position. When the editor closes we move it back.
   let _bubbleOriginalParent = null;   // body reference saved before the move
+  let _scrimEl = null;                // the mdc-dialog__scrim we temporarily disable
+
+  function _getScrim() {{
+    try {{
+      const editCardEl = _findEditCardEl();
+      if (!editCardEl?.shadowRoot) return null;
+      const haDialog = editCardEl.shadowRoot.querySelector('ha-dialog[open]');
+      if (!haDialog?.shadowRoot) return null;
+      return haDialog.shadowRoot.querySelector('.mdc-dialog__scrim') || null;
+    }} catch(e) {{ return null; }}
+  }}
 
   function liftBubbleIntoDialog() {{
     if (_bubbleOriginalParent) return;   // already lifted
-    const nativeDlg = getCardEditorNativeDialog();
-    if (!nativeDlg) return;
+    const mdcDlg = getCardEditorMdcDialog();
+    if (!mdcDlg) return;
     _bubbleOriginalParent = root.parentNode;
+    // Disable the scrim's pointer-events so it no longer absorbs clicks
+    // that should reach the bubble panel
+    _scrimEl = _getScrim();
+    if (_scrimEl) _scrimEl.style.pointerEvents = 'none';
     // Hide the floating bubble button while the card editor is open
     // (the "Ask AI" button in the footer serves as the trigger instead)
     btn.style.display = 'none';
-    nativeDlg.appendChild(root);
+    mdcDlg.appendChild(root);
   }}
 
   function lowerBubbleFromDialog() {{
     if (!_bubbleOriginalParent) return;
+    // Restore the scrim's pointer-events
+    if (_scrimEl) {{ _scrimEl.style.pointerEvents = ''; _scrimEl = null; }}
     // Close panel silently before moving back to avoid position glitches
     if (isOpen) {{ isOpen = false; panel.classList.remove('open'); }}
     _bubbleOriginalParent.appendChild(root);
