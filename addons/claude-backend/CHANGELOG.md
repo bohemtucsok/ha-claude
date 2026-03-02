@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.3.7 — Card editor: warning when in GUI mode (no YAML readable)
+- **GUI mode warning**: when the HA card editor is open in visual/GUI mode, the bubble context bar now shows a yellow warning `⚠️ Editor card — passa alla modalità codice per leggere lo YAML` (translated for all 4 languages) instead of the normal green label
+- **Quick actions hidden in GUI mode**: the card quick-action chips (Explain, Improve, Add feature, Fix) are hidden when no YAML is readable — they are useless without the card code
+- **CSS `context-bar--warn`**: new class with amber background (`#fff3cd`) applied to the context bar only when card is in GUI mode
+
 ## 4.3.6 — manage_statistics: tool implementation added
 - **Fix `manage_statistics` Unknown tool error**: tool was referenced in the intent system and prompt but never implemented in `execute_tool` — every call returned `{"error": "Unknown tool: manage_statistics"}`; added full implementation with `recorder/validate_statistics`, `recorder/clear_statistics`, `recorder/update_statistics_metadata` WebSocket calls
 - **Tool definition added to `HA_TOOLS_DESCRIPTION`**: `manage_statistics` now has a proper JSON schema with `action` enum (`validate`, `clear_orphaned`, `fix_units`) so all providers can see and call it correctly

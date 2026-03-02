@@ -74,6 +74,7 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "qa_card_add_feature_text": "What features could I add to this Lovelace card? Suggest one and show the YAML",
             "qa_card_fix": "Fix this card",
             "qa_card_fix_text": "Check this Lovelace card YAML for errors or issues and fix them",
+            "card_no_yaml_warn": "\u26a0\ufe0f Card editor \u2014 switch to code mode to read YAML",
             "confirm_yes": "Yes, confirm",
             "confirm_no": "No, cancel",
             "confirm_yes_value": "yes",
@@ -128,6 +129,7 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "qa_card_add_feature_text": "Che funzionalità potrei aggiungere a questa card Lovelace? Suggerisci qualcosa e mostrami lo YAML",
             "qa_card_fix": "Correggi card",
             "qa_card_fix_text": "Controlla questo YAML della card Lovelace per errori o problemi e correggili",
+            "card_no_yaml_warn": "\u26a0\ufe0f Editor card \u2014 passa alla modalit\u00e0 codice per leggere lo YAML",
             "confirm_yes": "Sì, conferma",
             "confirm_no": "No, annulla",
             "confirm_yes_value": "si",
@@ -182,6 +184,7 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "qa_card_add_feature_text": "¿Qué funciones podría añadir a esta tarjeta Lovelace? Sugiere una y muéstrame el YAML",
             "qa_card_fix": "Corregir tarjeta",
             "qa_card_fix_text": "Revisa el YAML de esta tarjeta Lovelace en busca de errores y corrígelos",
+            "card_no_yaml_warn": "\u26a0\ufe0f Editor de tarjeta \u2014 cambia al modo c\u00f3digo para leer el YAML",
             "confirm_yes": "Sí, confirma",
             "confirm_no": "No, cancela",
             "confirm_yes_value": "si",
@@ -236,6 +239,7 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "qa_card_add_feature_text": "Quelles fonctionnalités pourrais-je ajouter à cette carte Lovelace ? Suggère-en une et montre-moi le YAML",
             "qa_card_fix": "Corriger la carte",
             "qa_card_fix_text": "Vérifie le YAML de cette carte Lovelace pour des erreurs et corrige-les",
+            "card_no_yaml_warn": "\u26a0\ufe0f \u00c9diteur de carte \u2014 passe en mode code pour lire le YAML",
             "confirm_yes": "Oui, confirme",
             "confirm_no": "Non, annule",
             "confirm_yes_value": "oui",
@@ -751,12 +755,16 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
   function getQuickActions() {{
     const ctx = detectContext();
     if (!ctx.type) return [];
-    if (ctx.type === 'card_editor') return [
-      {{ label: T.qa_card_explain, text: T.qa_card_explain_text }},
-      {{ label: T.qa_card_optimize, text: T.qa_card_optimize_text }},
-      {{ label: T.qa_card_add_feature, text: T.qa_card_add_feature_text }},
-      {{ label: T.qa_card_fix, text: T.qa_card_fix_text }},
-    ];
+    if (ctx.type === 'card_editor') {{
+      // In GUI mode the YAML is not readable — hide quick actions (they need the YAML)
+      if (!ctx.cardYaml) return [];
+      return [
+        {{ label: T.qa_card_explain, text: T.qa_card_explain_text }},
+        {{ label: T.qa_card_optimize, text: T.qa_card_optimize_text }},
+        {{ label: T.qa_card_add_feature, text: T.qa_card_add_feature_text }},
+        {{ label: T.qa_card_fix, text: T.qa_card_fix_text }},
+      ];
+    }}
     if (ctx.type === 'automation') return [
       {{ label: T.qa_analyze, text: 'Analyze this automation and tell me what it does' }},
       {{ label: T.qa_optimize, text: 'Optimize this automation - suggest improvements' }},
@@ -928,6 +936,10 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
       font-size: 11px; color: var(--secondary-text-color, #666);
       border-bottom: 1px solid var(--divider-color, #e0e0e0);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0;
+    }}
+    #ha-claude-bubble .context-bar--warn {{
+      background: #fff3cd; color: #856404;
+      border-bottom-color: #ffc107;
     }}
     #ha-claude-bubble .quick-actions {{
       display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px;
@@ -1399,9 +1411,18 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
       let text = ctx.label;
       if (ctx.entities && ctx.entities.length > 0) text += ' (' + ctx.entities.length + ' entities)';
       if (ctx.type === 'logs' && (ctx.logEntry || _cachedLogEntry)) text += ' \u2022 log selezionato';
+      // Card editor in GUI mode (no YAML readable) — show warning
+      const noYaml = ctx.type === 'card_editor' && !ctx.cardYaml;
+      if (noYaml) {{
+        text = T.card_no_yaml_warn;
+        contextBar.classList.add('context-bar--warn');
+      }} else {{
+        contextBar.classList.remove('context-bar--warn');
+      }}
       contextBar.style.display = 'block'; contextBar.textContent = text;
       btn.classList.add('has-context');
     }} else {{
+      contextBar.classList.remove('context-bar--warn');
       contextBar.style.display = 'none'; btn.classList.remove('has-context');
     }}
   }}
