@@ -609,7 +609,7 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
           const haEl = document.querySelector('home-assistant');
           const hass = haEl && haEl.hass;
           if (hass && hass.states) {{
-            const entityRe = /entity:\s+([\w]+\.[\w]+)/g;
+            const entityRe = /entity:\\s+([\\w]+\\.[\\w]+)/g;
             let em;
             const checks = [];
             while ((em = entityRe.exec(ctx.cardYaml)) !== null) {{
