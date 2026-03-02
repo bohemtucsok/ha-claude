@@ -433,27 +433,6 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
     }} catch(e) {{ return null; }}
   }}
 
-  // Returns the best container inside ha-dialog's shadow root to host the bubble.
-  // HA uses MWC (Material Web Components) — structure inside ha-dialog shadow root:
-  //   div.mdc-dialog
-  //     div.mdc-dialog__scrim   ← backdrop, intercepts pointer events
-  //     div.mdc-dialog__container
-  //       div.mdc-dialog__surface  ← the actual visible dialog card
-  // We append the bubble as a sibling AFTER the scrim, inside div.mdc-dialog,
-  // so it renders above the scrim (later in DOM = higher stacking order).
-  // The bubble uses position:fixed so it is not affected by the dialog's layout.
-  function getCardEditorMdcDialog() {{
-    try {{
-      const editCardEl = _findEditCardEl();
-      if (!editCardEl || !editCardEl.shadowRoot) return null;
-      const haDialog = editCardEl.shadowRoot.querySelector('ha-dialog[open]');
-      if (!haDialog || !haDialog.shadowRoot) return null;
-      const sr = haDialog.shadowRoot;
-      // Prefer div.mdc-dialog — appending here puts the bubble after the scrim
-      return sr.querySelector('div.mdc-dialog') || sr.firstElementChild || null;
-    }} catch(e) {{ return null; }}
-  }}
-
   // Returns the footer#actions element (for button injection).
   function getCardEditorFooter() {{
     try {{
@@ -1375,7 +1354,7 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
       }} else {{
         removeCardEditorButton();
         _cardBtnInjected = false;
-        lowerBubbleFromDialog();  // move bubble back to body when editor closes
+        restoreScrim();  // re-enable scrim pointer-events when editor closes
       }}
     }}
     // Re-inject button if editor open but button disappeared (HA re-rendered)
@@ -1386,14 +1365,13 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
   }}, 1000);
 
   // ---- Bubble top-layer lift (card editor mode) ----
-  // When the HA card editor is open its native <dialog> is in the browser top-layer.
-  // The scrim/backdrop inside that top-layer absorbs ALL pointer events from document.body,
-  // so the bubble panel (which lives in body) becomes unclickable.
-  // Fix: move the entire #ha-claude-bubble root INTO the native <dialog open> element.
-  // Inside a <dialog>, position:fixed still works (it resolves to the viewport), so
-  // the panel keeps its correct on-screen position. When the editor closes we move it back.
-  let _bubbleOriginalParent = null;   // body reference saved before the move
+  // HA uses MWC (Material Web Components) — no native <dialog> element.
+  // The backdrop is div.mdc-dialog__scrim which uses pointer-events to block clicks,
+  // making the bubble panel (in document.body) unclickable when the editor is open.
+  // Fix: set pointer-events:none on the scrim when the bubble is active.
+  // The bubble itself stays in document.body at all times (no reparenting needed).
   let _scrimEl = null;                // the mdc-dialog__scrim we temporarily disable
+  let _scrimDisabled = false;
 
   function _getScrim() {{
     try {{
@@ -1405,37 +1383,25 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
     }} catch(e) {{ return null; }}
   }}
 
-  function liftBubbleIntoDialog() {{
-    if (_bubbleOriginalParent) return;   // already lifted
-    const mdcDlg = getCardEditorMdcDialog();
-    if (!mdcDlg) return;
-    _bubbleOriginalParent = root.parentNode;
-    // Disable the scrim's pointer-events so it no longer absorbs clicks
-    // that should reach the bubble panel
+  function disableScrim() {{
+    if (_scrimDisabled) return;
     _scrimEl = _getScrim();
-    if (_scrimEl) _scrimEl.style.pointerEvents = 'none';
-    // Hide the floating bubble button while the card editor is open
-    // (the "Ask AI" button in the footer serves as the trigger instead)
+    if (!_scrimEl) return;
+    _scrimEl.style.pointerEvents = 'none';
+    _scrimDisabled = true;
+    // Also hide the floating bubble button — footer "Ask AI" is the trigger
     btn.style.display = 'none';
-    mdcDlg.appendChild(root);
   }}
 
-  function lowerBubbleFromDialog() {{
-    if (!_bubbleOriginalParent) return;
-    // Restore the scrim's pointer-events
+  function restoreScrim() {{
     if (_scrimEl) {{ _scrimEl.style.pointerEvents = ''; _scrimEl = null; }}
-    // Close panel silently before moving back to avoid position glitches
-    if (isOpen) {{ isOpen = false; panel.classList.remove('open'); }}
-    _bubbleOriginalParent.appendChild(root);
-    _bubbleOriginalParent = null;
-    // Restore the floating bubble button
+    _scrimDisabled = false;
     btn.style.display = '';
   }}
 
   // ---- Card editor button injection ----
-  // The "Ask AI" button is injected into footer#actions (already in the top-layer).
-  // When the user clicks it the bubble panel is lifted into the native dialog so
-  // it can be interacted with despite the backdrop.
+  // The "Ask AI" button is injected into footer#actions (shadow DOM, inside MWC dialog).
+  // When clicked it disables the scrim pointer-events so the bubble panel is reachable.
   let _lastCardEditorOpen = false;
   let _cardBtnInjected = false;       // flag: true once button is in the DOM
   let _cardBtnParent = null;          // reference to footer#actions we inserted into
@@ -1491,8 +1457,8 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
     const openBubble = (e) => {{
       e.stopPropagation();
       e.preventDefault();
-      // Move bubble into the native dialog top-layer so the panel is interactive
-      liftBubbleIntoDialog();
+      // Disable the MWC scrim so it stops absorbing pointer events
+      disableScrim();
       if (!isOpen) togglePanel();
       updateContextBar();
       updateQuickActions();
