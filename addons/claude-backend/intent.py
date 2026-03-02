@@ -472,6 +472,12 @@ def detect_intent(user_message: str, smart_context: str, previous_intent: str | 
         return {"intent": "card_editor", "tools": INTENT_TOOL_SETS["card_editor"],
                 "prompt": INTENT_PROMPTS.get("card_editor"), "specific_target": True}
 
+    # --- STATISTICS PAGE CONTEXT (from bubble) ---
+    if "[CONTEXT: User is on the Home Assistant Statistics page" in user_message:
+        logger.info("Statistics page context detected — routing to manage_statistics intent")
+        return {"intent": "manage_statistics", "tools": INTENT_TOOL_SETS["manage_statistics"],
+                "prompt": INTENT_PROMPTS.get("manage_statistics"), "specific_target": True}
+
     # Strip bubble context prefix and embedded HTML before keyword matching
     clean_msg = user_message
     # Remove [CURRENT_DASHBOARD_HTML]...[/CURRENT_DASHBOARD_HTML] block

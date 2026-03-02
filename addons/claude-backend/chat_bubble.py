@@ -79,6 +79,13 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "confirm_yes_value": "yes",
             "confirm_no_value": "no",
             "confirm_delete_yes": "Delete",
+            "context_statistics": "Statistics",
+            "qa_stats_validate": "Find issues",
+            "qa_stats_validate_text": "Check my statistics for issues: orphaned entities that no longer exist and unit mismatches",
+            "qa_stats_clean": "Remove orphaned",
+            "qa_stats_clean_text": "Find and remove all orphaned statistics for entities that no longer exist",
+            "qa_stats_fix_units": "Fix units",
+            "qa_stats_fix_units_text": "Find and fix all unit of measurement mismatches in my statistics",
         },
         "it": {
             "placeholder": "Chiedi qualcosa su questa pagina...",
@@ -126,6 +133,13 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "confirm_yes_value": "si",
             "confirm_no_value": "no",
             "confirm_delete_yes": "Elimina",
+            "context_statistics": "Statistiche",
+            "qa_stats_validate": "Trova problemi",
+            "qa_stats_validate_text": "Controlla le mie statistiche: trova entit\u00e0 orfane che non esistono pi\u00f9 e problemi di unit\u00e0 di misura",
+            "qa_stats_clean": "Elimina orfane",
+            "qa_stats_clean_text": "Trova e rimuovi tutte le statistiche di entit\u00e0 che non esistono pi\u00f9",
+            "qa_stats_fix_units": "Correggi unit\u00e0",
+            "qa_stats_fix_units_text": "Trova e correggi tutti i problemi di unit\u00e0 di misura nelle statistiche",
         },
         "es": {
             "placeholder": "Pregunta sobre esta página...",
@@ -173,6 +187,13 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "confirm_yes_value": "si",
             "confirm_no_value": "no",
             "confirm_delete_yes": "Eliminar",
+            "context_statistics": "Estad\u00edsticas",
+            "qa_stats_validate": "Buscar problemas",
+            "qa_stats_validate_text": "Revisa mis estad\u00edsticas: encuentra entidades hu\u00e9rfanas y problemas de unidades",
+            "qa_stats_clean": "Eliminar hu\u00e9rfanas",
+            "qa_stats_clean_text": "Encuentra y elimina todas las estad\u00edsticas de entidades que ya no existen",
+            "qa_stats_fix_units": "Corregir unidades",
+            "qa_stats_fix_units_text": "Encuentra y corrige todos los problemas de unidades de medida en las estad\u00edsticas",
         },
         "fr": {
             "placeholder": "Posez une question sur cette page...",
@@ -220,6 +241,13 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "confirm_yes_value": "oui",
             "confirm_no_value": "non",
             "confirm_delete_yes": "Supprimer",
+            "context_statistics": "Statistiques",
+            "qa_stats_validate": "Trouver probl\u00e8mes",
+            "qa_stats_validate_text": "V\u00e9rifie mes statistiques : trouve les entit\u00e9s orphelines et les probl\u00e8mes d'unit\u00e9s",
+            "qa_stats_clean": "Supprimer orphelines",
+            "qa_stats_clean_text": "Trouve et supprime toutes les statistiques des entit\u00e9s qui n'existent plus",
+            "qa_stats_fix_units": "Corriger unit\u00e9s",
+            "qa_stats_fix_units_text": "Trouve et corrige tous les probl\u00e8mes d'unit\u00e9s de mesure dans les statistiques",
         },
     }
 
@@ -517,6 +545,13 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
       return ctx;
     }}
 
+    // Detect statistics page (developer-tools/statistics)
+    if (path.includes('/developer-tools/statistics') || path.includes('/config/developer-tools/statistics')) {{
+      ctx.type = 'statistics';
+      ctx.label = T.context_statistics;
+      return ctx;
+    }}
+
     // Detect logs/system log page
     if (path.includes('/config/logs') || path.includes('/config/log')) {{
       ctx.type = 'logs';
@@ -673,6 +708,13 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
       }}
       return p + '] ';
     }}
+    if (ctx.type === 'statistics') {{
+      return '[CONTEXT: User is on the Home Assistant Statistics page (Developer Tools > Statistics). '
+           + 'This page shows recorder statistics and their issues (orphaned entities, unit mismatches). '
+           + 'Use manage_statistics with action=validate to find all issues. '
+           + 'Then offer to fix them: clear_orphaned to remove statistics for deleted entities, '
+           + 'fix_units to correct unit mismatches. Always validate FIRST, then act on user request.] ';
+    }}
     if (ctx.type === 'logs') {{
       let p = '[CONTEXT: User is on the Home Assistant system logs page. '
             + 'Use get_ha_logs to fetch recent errors and warnings. ';
@@ -717,6 +759,11 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
     ];
     if (ctx.type === 'device') return [
       {{ label: T.qa_analyze, text: 'Show me all entities for this device and their current states' }},
+    ];
+    if (ctx.type === 'statistics') return [
+      {{ label: T.qa_stats_validate, text: T.qa_stats_validate_text }},
+      {{ label: T.qa_stats_clean, text: T.qa_stats_clean_text }},
+      {{ label: T.qa_stats_fix_units, text: T.qa_stats_fix_units_text }},
     ];
     if (ctx.type === 'logs') {{
       // Use live logEntry from ctx, or fall back to cached entry (persists after
