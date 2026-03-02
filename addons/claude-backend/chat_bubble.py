@@ -356,27 +356,47 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
   // Returns the raw YAML string or '' if no editor is open
   function extractCardYaml() {{
     try {{
+      // Try to read from a ha-code-editor or ha-yaml-editor element
+      function readEditorValue(el) {{
+        if (!el) return '';
+        // 1. Direct .value property (ha-yaml-editor exposes this)
+        if (typeof el.value === 'string' && el.value.trim()) return el.value.trim();
+        // 2. ._value internal property (older HA versions)
+        if (typeof el._value === 'string' && el._value.trim()) return el._value.trim();
+        // 3. CodeMirror 6: editor state via .editor?.state?.doc?.toString()
+        try {{
+          const cm = el.editor || el._editor || el.codemirror;
+          if (cm && cm.state && cm.state.doc) {{
+            const v = cm.state.doc.toString();
+            if (v.trim()) return v.trim();
+          }}
+        }} catch(e) {{}}
+        // 4. CodeMirror 6: .cm-content div innerText (visible text in the editor)
+        const cmContent = el.querySelector ? el.querySelector('.cm-content') : null;
+        if (cmContent && cmContent.innerText && cmContent.innerText.trim()) {{
+          return cmContent.innerText.trim();
+        }}
+        // 5. Fallback: textarea inside
+        const ta = el.querySelector ? el.querySelector('textarea') : null;
+        if (ta && ta.value && ta.value.trim()) return ta.value.trim();
+        return '';
+      }}
+
       function walkForYaml(root, depth) {{
         if (!root || depth > 15) return '';
-        // Try: ha-code-editor, CodeMirror, textarea inside card editor modals
-        const selectors = [
-          'hui-card-editor', 'hui-entity-editor', 'ha-yaml-editor',
-          'ha-code-editor', 'hui-dialog-edit-card',
+        const editorSelectors = [
+          'ha-yaml-editor', 'ha-code-editor',
+          'hui-card-editor', 'hui-entity-editor', 'hui-dialog-edit-card',
         ];
-        for (const sel of selectors) {{
+        for (const sel of editorSelectors) {{
           const els = root.querySelectorAll ? root.querySelectorAll(sel) : [];
           for (const el of els) {{
-            // Try CodeMirror editor value
-            if (el._value !== undefined) return String(el._value || '');
-            if (el.value !== undefined && typeof el.value === 'string' && el.value.trim()) return el.value.trim();
-            // Walk into shadow root of the editor element
+            const v = readEditorValue(el);
+            if (v) return v;
             if (el.shadowRoot) {{
               const inner = walkForYaml(el.shadowRoot, depth + 1);
               if (inner) return inner;
             }}
-            // Try textarea inside
-            const ta = el.querySelector ? el.querySelector('textarea') : null;
-            if (ta && ta.value && ta.value.trim()) return ta.value.trim();
           }}
         }}
         // Recurse into all shadow roots
@@ -1367,12 +1387,21 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
 
   function reparentBubbleToDialog() {{
     const dlg = getCardEditorDialog();
-    if (!dlg || dlg.contains(root)) return;  // already inside or not found
+    if (!dlg || dlg.contains(root)) return;
+    // Make root a zero-size fixed anchor so it doesn't affect dialog layout.
+    // Its children (panel, btn) keep their own position:fixed and render
+    // relative to the viewport as normal — but now they're IN the top-layer
+    // so they receive pointer events above the dialog backdrop.
+    root.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;overflow:visible;';
+    // Ensure panel and btn keep their own pointer-events
+    if (panel) panel.style.pointerEvents = 'auto';
+    if (btn)   btn.style.pointerEvents   = 'auto';
     dlg.appendChild(root);
   }}
 
   function reparentBubbleToBody() {{
-    if (root.parentNode === document.body) return;  // already in body
+    if (root.parentNode === document.body) return;
+    root.style.cssText = '';  // restore normal styles (position:fixed is on the element itself via stylesheet)
     document.body.appendChild(root);
   }}
 
