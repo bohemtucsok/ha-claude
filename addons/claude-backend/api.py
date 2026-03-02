@@ -3401,6 +3401,8 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
         _tool_round = 0
         _tool_cache: dict = {}
         _tool_call_history: set = set()  # tracks all (name, args_json) to detect loops
+        _duplicate_count = 0             # how many consecutive duplicate rounds
+        _skip_tool_extraction = False    # after dedup, skip ToolSimulator next round
         _read_only_tools = {
             "get_automations", "get_scripts", "get_dashboards",
             "get_dashboard_config", "read_config_file",
@@ -3442,7 +3444,7 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                         full_buf = "".join(_text_buffer)
 
                         # ── Tool Simulator: extract <tool_call> blocks from buffered text ──
-                        if _is_no_tool_provider and full_buf and not _is_html_dash:
+                        if _is_no_tool_provider and full_buf and not _is_html_dash and not _skip_tool_extraction:
                             from providers.tool_simulator import extract_tool_calls, clean_response_text
                             _sim_calls = extract_tool_calls(full_buf)
                             if _sim_calls:
@@ -3570,10 +3572,42 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                     _all_dupes = False
                     break
             if _all_dupes and _pending_tool_calls:
+                _duplicate_count += 1
                 logger.warning(
-                    f"Tool loop detected (round {_tool_round}): all {len(_pending_tool_calls)} "
-                    f"call(s) are duplicates — forcing final answer"
+                    f"Tool loop detected (round {_tool_round}, dup #{_duplicate_count}): "
+                    f"all {len(_pending_tool_calls)} call(s) are duplicates — forcing final answer"
                 )
+
+                # ── No-tool providers (github_copilot, etc.): the model ignores
+                # ── [DUPLICATE] messages and keeps generating <tool_call> XML.
+                # ── Strategy: give it ONE more round but disable ToolSimulator
+                # ── extraction so any <tool_call> in its text is stripped and the
+                # ── response is treated as plain text → loop ends naturally.
+                if _is_no_tool_provider:
+                    if _duplicate_count >= 2:
+                        # Already tried once — force-break now
+                        logger.warning("No-tool provider: 2nd duplicate → breaking loop")
+                        # Emit whatever text the model accumulated (cleaned)
+                        if text_so_far:
+                            from providers.tool_simulator import clean_display_text as _cdt_brk
+                            _cleaned_brk = _cdt_brk(text_so_far)
+                            if _cleaned_brk:
+                                yield {"type": "token", "content": _cleaned_brk}
+                        yield {"type": "done"}
+                        break
+                    # First duplicate for no-tool provider: inject [DUPLICATE] but
+                    # disable tool extraction for the next round so the loop ends.
+                    _skip_tool_extraction = True
+
+                # For native-tool providers: after 2 consecutive duplicate rounds
+                # the model is truly stuck — force-break as well.
+                elif _duplicate_count >= 2:
+                    logger.warning("Native provider: 2nd duplicate → breaking loop")
+                    if text_so_far:
+                        yield {"type": "token", "content": text_so_far}
+                    yield {"type": "done"}
+                    break
+
                 # Append assistant message so the conversation stays well-formed
                 messages.append({
                     "role": "assistant",

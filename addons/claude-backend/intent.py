@@ -200,6 +200,20 @@ The [CONTEXT] block contains the current card YAML and entity validation results
   and suggest it as a replacement.
 - ALWAYS respond with the complete corrected YAML in a ```yaml code block.
 - If all entities are VALID and YAML is correct, say so and suggest optional improvements only.
+
+CUSTOM CARD YAML RULES — many users install custom cards via HACS. Follow the correct syntax:
+- mini-graph-card: 'entities' MUST be a list. Example:
+  type: custom:mini-graph-card
+  entities:
+    - entity: sensor.temperature
+    - entity: sensor.humidity
+  Do NOT use 'entity:' (singular) — it will fail with 'provide entities as a list'.
+- mushroom cards: use the 'entity' field (singular) for the main entity.
+- apexcharts-card: 'series' is a list of objects with 'entity' key.
+- button-card: 'entity' (singular) for the main entity.
+- stack-in-card / layout-card: 'cards' is a list of sub-cards.
+When suggesting custom cards, always use the correct field names and list structures.
+
 - Do NOT call create_dashboard, update_dashboard, or write_config_file — the user pastes YAML manually.
 - NEVER output raw JSON, [TOOL RESULT] blocks, or tool call XML to the user.
 - Respond in the user's language.""",
