@@ -413,36 +413,49 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
     }} catch(e) {{ return ''; }}
   }}
 
-  // Navigate the exact shadow DOM path of the HA card editor dialog and
-  // return the footer#actions element where action buttons live.
-  // Path: hui-dialog-edit-card → shadowRoot → ha-dialog → shadowRoot → footer#actions
-  // Returns null if the editor is closed or the path cannot be resolved.
-  function getCardEditorFooter() {{
+  // Navigate the shadow DOM of the HA card editor and return useful elements.
+  // Path: hui-dialog-edit-card → shadowRoot → ha-dialog[open] → shadowRoot → ...
+  // All return null when the editor is closed or path cannot be resolved.
+
+  function _findEditCardEl() {{
     try {{
-      // 1. Find hui-dialog-edit-card anywhere in the document
-      function findEditCardEl(root, depth) {{
+      function walk(root, depth) {{
         if (!root || depth > 8) return null;
         const direct = root.querySelector ? root.querySelector('hui-dialog-edit-card') : null;
         if (direct) return direct;
         const allEls = root.querySelectorAll ? root.querySelectorAll('*') : [];
         for (const el of allEls) {{
-          if (el.shadowRoot) {{
-            const found = findEditCardEl(el.shadowRoot, depth + 1);
-            if (found) return found;
-          }}
+          if (el.shadowRoot) {{ const f = walk(el.shadowRoot, depth + 1); if (f) return f; }}
         }}
         return null;
       }}
-      const editCardEl = findEditCardEl(document, 0);
-      if (!editCardEl || !editCardEl.shadowRoot) return null;
+      return walk(document, 0);
+    }} catch(e) {{ return null; }}
+  }}
 
-      // 2. Inside its shadowRoot, find ha-dialog[open]
+  // Returns the native <dialog open> element inside ha-dialog's shadow root.
+  // This element is in the browser top-layer — children appended here can use
+  // position:fixed and receive pointer events above the backdrop.
+  function getCardEditorNativeDialog() {{
+    try {{
+      const editCardEl = _findEditCardEl();
+      if (!editCardEl || !editCardEl.shadowRoot) return null;
       const haDialog = editCardEl.shadowRoot.querySelector('ha-dialog[open]');
       if (!haDialog || !haDialog.shadowRoot) return null;
+      // The native <dialog open> inside ha-dialog's shadow root
+      const nativeDlg = haDialog.shadowRoot.querySelector('dialog[open]');
+      return nativeDlg || null;
+    }} catch(e) {{ return null; }}
+  }}
 
-      // 3. Inside ha-dialog's shadowRoot, find footer#actions
-      const footer = haDialog.shadowRoot.querySelector('footer#actions');
-      return footer || null;
+  // Returns the footer#actions element (for button injection).
+  function getCardEditorFooter() {{
+    try {{
+      const editCardEl = _findEditCardEl();
+      if (!editCardEl || !editCardEl.shadowRoot) return null;
+      const haDialog = editCardEl.shadowRoot.querySelector('ha-dialog[open]');
+      if (!haDialog || !haDialog.shadowRoot) return null;
+      return haDialog.shadowRoot.querySelector('footer#actions') || null;
     }} catch(e) {{ return null; }}
   }}
 
@@ -1356,6 +1369,7 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
       }} else {{
         removeCardEditorButton();
         _cardBtnInjected = false;
+        lowerBubbleFromDialog();  // move bubble back to body when editor closes
       }}
     }}
     // Re-inject button if editor open but button disappeared (HA re-rendered)
@@ -1365,12 +1379,40 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
     }}
   }}, 1000);
 
+  // ---- Bubble top-layer lift (card editor mode) ----
+  // When the HA card editor is open its native <dialog> is in the browser top-layer.
+  // The scrim/backdrop inside that top-layer absorbs ALL pointer events from document.body,
+  // so the bubble panel (which lives in body) becomes unclickable.
+  // Fix: move the entire #ha-claude-bubble root INTO the native <dialog open> element.
+  // Inside a <dialog>, position:fixed still works (it resolves to the viewport), so
+  // the panel keeps its correct on-screen position. When the editor closes we move it back.
+  let _bubbleOriginalParent = null;   // body reference saved before the move
+
+  function liftBubbleIntoDialog() {{
+    if (_bubbleOriginalParent) return;   // already lifted
+    const nativeDlg = getCardEditorNativeDialog();
+    if (!nativeDlg) return;
+    _bubbleOriginalParent = root.parentNode;
+    // Hide the floating bubble button while the card editor is open
+    // (the "Ask AI" button in the footer serves as the trigger instead)
+    btn.style.display = 'none';
+    nativeDlg.appendChild(root);
+  }}
+
+  function lowerBubbleFromDialog() {{
+    if (!_bubbleOriginalParent) return;
+    // Close panel silently before moving back to avoid position glitches
+    if (isOpen) {{ isOpen = false; panel.classList.remove('open'); }}
+    _bubbleOriginalParent.appendChild(root);
+    _bubbleOriginalParent = null;
+    // Restore the floating bubble button
+    btn.style.display = '';
+  }}
+
   // ---- Card editor button injection ----
-  // Strategy: inject the "Ask AI" button directly into the footer#actions element
-  // of the HA card editor dialog. That footer is already inside the browser
-  // top-layer (because it lives inside the native <dialog> opened by HA), so
-  // our button is naturally interactive — no z-index tricks needed.
-  // The bubble panel itself stays in document.body and opens normally on click.
+  // The "Ask AI" button is injected into footer#actions (already in the top-layer).
+  // When the user clicks it the bubble panel is lifted into the native dialog so
+  // it can be interacted with despite the backdrop.
   let _lastCardEditorOpen = false;
   let _cardBtnInjected = false;       // flag: true once button is in the DOM
   let _cardBtnParent = null;          // reference to footer#actions we inserted into
@@ -1404,12 +1446,12 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
     if (!footer) return;  // editor not open yet — will retry next tick
 
     // Use a <span> with mwc-button-like styling to blend with HA's Annulla/Salva buttons
-    const btn = document.createElement('span');
-    btn.id = CARD_BTN_ID;
-    btn.setAttribute('role', 'button');
-    btn.setAttribute('tabindex', '0');
-    btn.textContent = T.card_editor_btn || '🤖 Ask AI';
-    btn.style.cssText = [
+    const aiBtn = document.createElement('span');
+    aiBtn.id = CARD_BTN_ID;
+    aiBtn.setAttribute('role', 'button');
+    aiBtn.setAttribute('tabindex', '0');
+    aiBtn.textContent = T.card_editor_btn || '🤖 Ask AI';
+    aiBtn.style.cssText = [
       'display:inline-flex', 'align-items:center', 'justify-content:center',
       'padding:0 16px', 'height:36px', 'min-width:64px',
       'font-size:13px', 'font-weight:600', 'letter-spacing:0.05em',
@@ -1421,18 +1463,20 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
       'margin-left:8px',  // spacing from the existing Annulla/Salva buttons
       'vertical-align:middle',
     ].join(';');
-    btn.onmouseenter = () => {{ btn.style.opacity = '0.85'; btn.style.transform = 'scale(1.03)'; }};
-    btn.onmouseleave = () => {{ btn.style.opacity = '1'; btn.style.transform = 'scale(1)'; }};
+    aiBtn.onmouseenter = () => {{ aiBtn.style.opacity = '0.85'; aiBtn.style.transform = 'scale(1.03)'; }};
+    aiBtn.onmouseleave = () => {{ aiBtn.style.opacity = '1'; aiBtn.style.transform = 'scale(1)'; }};
     const openBubble = (e) => {{
       e.stopPropagation();
       e.preventDefault();
+      // Move bubble into the native dialog top-layer so the panel is interactive
+      liftBubbleIntoDialog();
       if (!isOpen) togglePanel();
       updateContextBar();
       updateQuickActions();
     }};
-    btn.addEventListener('click', openBubble);
-    btn.addEventListener('keydown', (e) => {{ if (e.key === 'Enter' || e.key === ' ') openBubble(e); }});
-    footer.appendChild(btn);
+    aiBtn.addEventListener('click', openBubble);
+    aiBtn.addEventListener('keydown', (e) => {{ if (e.key === 'Enter' || e.key === ' ') openBubble(e); }});
+    footer.appendChild(aiBtn);
     _cardBtnParent = footer;
     _cardBtnInjected = true;
   }}
