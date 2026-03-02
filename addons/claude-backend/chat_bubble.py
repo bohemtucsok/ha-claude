@@ -604,12 +604,13 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
       if (ctx.cardYaml) {{
         p += ' The current card YAML is:\\n```yaml\\n' + ctx.cardYaml + '\\n```\\n'
            + 'IMPORTANT RULES for card editing:\\n'
-           + '1. Use search_entities to VERIFY that ALL entity IDs in the YAML actually exist before suggesting changes. Do NOT ask the user to check — verify yourself.\\n'
-           + '2. When suggesting a modification, ALWAYS show the complete corrected YAML in a ```yaml code block with a brief explanation of what changed.\\n'
-           + '3. Keep your response concise: list only real problems found (not hypothetical ones), show the corrected YAML, done.\\n'
-           + '4. Do NOT suggest changes based on guesses about entity names (e.g. adding \"a\" to make it feminine). Only flag an entity if search_entities confirms it does not exist.\\n'
-           + '5. If all entities are valid and the YAML has no structural issues, say so clearly and suggest only optional improvements (like adding graph: line).\\n'
-           + '6. The user will paste the YAML manually in the editor — do NOT use write_config_file or update_dashboard.';
+           + '1. Use search_entities to VERIFY that ALL entity IDs in the YAML actually exist. Do NOT ask the user to check — verify yourself.\\n'
+           + '2. If an entity does NOT exist, immediately use search_entities with keywords from its name (e.g. "tigo production", "epcube consumo") to FIND the correct entity_id. Replace the wrong entity with the correct one you found.\\n'
+           + '3. When suggesting a modification, ALWAYS show the complete corrected YAML in a ```yaml code block with a brief explanation of what changed.\\n'
+           + '4. Keep your response concise: list only real problems found (not hypothetical ones), show the corrected YAML, done.\\n'
+           + '5. Do NOT suggest changes based on guesses about entity names. Only flag an entity if search_entities confirms it does not exist, and only replace it if you found a valid alternative via search.\\n'
+           + '6. If all entities are valid and the YAML has no structural issues, say so clearly and suggest only optional improvements (like adding graph: line).\\n'
+           + '7. The user will paste the YAML manually in the editor — do NOT use write_config_file or update_dashboard.';
       }}
       p += ']';
       return p + ' ';
@@ -1408,6 +1409,24 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
     }} catch(e) {{ return null; }}
   }}
 
+  // Global copy helper — clipboard API needs HTTPS; fallback with textarea for HTTP
+  window.__amiraCopyCode = function(btn) {{
+    var code = btn.parentElement.querySelector('code');
+    if (!code) return;
+    var txt = code.textContent;
+    function ok() {{ btn.textContent = 'Copiato!'; setTimeout(function(){{ btn.textContent = 'Copia'; }}, 1500); }}
+    function fallback() {{
+      var ta = document.createElement('textarea');
+      ta.value = txt; ta.style.cssText = 'position:fixed;left:-9999px;';
+      document.body.appendChild(ta); ta.select();
+      try {{ document.execCommand('copy'); ok(); }} catch(e) {{ btn.textContent = 'Errore'; }}
+      document.body.removeChild(ta);
+    }}
+    if (navigator.clipboard && navigator.clipboard.writeText) {{
+      navigator.clipboard.writeText(txt).then(ok).catch(fallback);
+    }} else {{ fallback(); }}
+  }};
+
   function _renderInlineMd(text) {{
     // Fenced code blocks: ```lang + newline + content + ``` -> styled pre with copy button
     const codeBlocks = [];
@@ -1415,7 +1434,7 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
       const escaped = code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       const placeholder = '___CODEBLOCK_' + codeBlocks.length + '___';
       codeBlocks.push('<div style="position:relative;margin:6px 0;">'
-        + '<button onclick="(function(b){{ var c=b.parentElement.querySelector(\\'code\\'); if(c)navigator.clipboard.writeText(c.textContent).then(function(){{ b.textContent=\\'Done\\'; setTimeout(function(){{ b.textContent=\\'Copy\\'; }},1500); }}); }})(this)" style="position:absolute;top:4px;right:4px;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.25);color:var(--primary-text-color,#ccc);border-radius:4px;padding:2px 8px;font-size:10px;cursor:pointer;">Copy</button>'
+        + '<button onclick="window.__amiraCopyCode(this)" style="position:absolute;top:4px;right:4px;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.25);color:var(--primary-text-color,#ccc);border-radius:4px;padding:2px 8px;font-size:10px;cursor:pointer;">Copia</button>'
         + '<pre style="background:#1e293b;color:#e2e8f0;padding:8px 10px;border-radius:6px;font-size:12px;overflow-x:auto;margin:0;white-space:pre-wrap;word-break:break-word;"><code>' + escaped + '</code></pre></div>');
       return placeholder;
     }});
