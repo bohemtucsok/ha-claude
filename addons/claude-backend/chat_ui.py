@@ -2449,7 +2449,7 @@ def get_chat_ui():
         function _stripCodeBlocks(text) {{
             // Remove fenced code blocks (``` ... ```) to avoid false-positive entity parsing
             // inside YAML / Jinja2 snippets shown by the AI
-            return String(text || '').replace(/```[\\s\\S]*?```/g, '').replace(/`[^`\n]+`/g, '');
+            return String(text || '').replace(/```[\\s\\S]*?```/g, '').replace(/`[^`\\n]+`/g, '');
         }}
 
         function extractNumberedEntityOptions(text) {{

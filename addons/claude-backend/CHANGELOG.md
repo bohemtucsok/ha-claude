@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.3.2 — Fix chat UI completely broken (send + sidebar)
+- **Root cause**: bare `\n` (Python newline) inside a JS regex character class in `_stripCodeBlocks()` was inserted as a literal newline in the generated HTML, splitting the regex across two lines and causing a `SyntaxError: Invalid regular expression: missing /`
+- **Impact**: the syntax error prevented the entire `<script>` block from executing — send button, conversation sidebar, and all JS features stopped working
+- **Fix**: replaced `\n` with `\\n` in the regex `/`[^`\n]+`/g` so it produces the correct JS regex `/`[^`\n]+`/g`
+- **validate.sh**: added check for bare `\n` inside JS regex character classes in `chat_ui.py` source
+
 ## 4.3.1 — Split-view file explorer
 - **New sidebar tab "Files"** (📁): browse `/config` directory tree directly from the chat UI — shows dirs and files with icons, size, and breadcrumb navigation
 - **File preview panel**: clicking a file opens a resizable middle panel (default 320px, drag splitter to resize, min 180px / max 600px) with tabbed view — up to 3 files open at once

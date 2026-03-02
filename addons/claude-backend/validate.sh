@@ -58,6 +58,19 @@ for i, line in enumerate(src_lines, 1):
         print(f'chat_bubble.py line {i}: possible bare newline in JS string: {line.strip()[:80]}')
         errors.append('chat_bubble.py:' + str(i))
 
+# Check chat_ui.py source for bare \\n inside JS regex character classes [^...\\n...]
+# A bare \\n in Python becomes a literal newline, splitting the JS regex across lines
+with open('$ADDON_DIR/chat_ui.py') as f:
+    ui_src = f.read()
+ui_lines = ui_src.split('\n')
+for i, line in enumerate(ui_lines, 1):
+    # Detect /regex[^...\\n...]/ patterns where \\n is a bare Python newline (not \\\\n)
+    if re.search(r'/[^/]*\[([^\]]*[^\\\\])\\\\n', line) and '\\\\\\\\n' not in line:
+        # Only flag lines that are inside JS (contain replace, match, test, etc.)
+        if any(kw in line for kw in ('replace(/', '.test(/', '.match(/', '.search(/', 'RegExp')):
+            print(f'chat_ui.py line {i}: bare \\\\n in JS regex (use \\\\\\\\n): {line.strip()[:80]}')
+            errors.append('chat_ui.py:' + str(i))
+
 if not errors:
     print('JS generation: OK')
 else:
