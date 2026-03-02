@@ -74,7 +74,6 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "qa_card_add_feature_text": "What features could I add to this Lovelace card? Suggest one and show the YAML",
             "qa_card_fix": "Fix this card",
             "qa_card_fix_text": "Check this Lovelace card YAML for errors or issues and fix them",
-            "card_editor_btn": "🤖 Amira",
             "confirm_yes": "Yes, confirm",
             "confirm_no": "No, cancel",
             "confirm_yes_value": "yes",
@@ -122,7 +121,6 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "qa_card_add_feature_text": "Che funzionalità potrei aggiungere a questa card Lovelace? Suggerisci qualcosa e mostrami lo YAML",
             "qa_card_fix": "Correggi card",
             "qa_card_fix_text": "Controlla questo YAML della card Lovelace per errori o problemi e correggili",
-            "card_editor_btn": "🤖 Amira",
             "confirm_yes": "Sì, conferma",
             "confirm_no": "No, annulla",
             "confirm_yes_value": "si",
@@ -170,7 +168,6 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "qa_card_add_feature_text": "¿Qué funciones podría añadir a esta tarjeta Lovelace? Sugiere una y muéstrame el YAML",
             "qa_card_fix": "Corregir tarjeta",
             "qa_card_fix_text": "Revisa el YAML de esta tarjeta Lovelace en busca de errores y corrígelos",
-            "card_editor_btn": "🤖 Amira",
             "confirm_yes": "Sí, confirma",
             "confirm_no": "No, cancela",
             "confirm_yes_value": "si",
@@ -218,7 +215,6 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "qa_card_add_feature_text": "Quelles fonctionnalités pourrais-je ajouter à cette carte Lovelace ? Suggère-en une et montre-moi le YAML",
             "qa_card_fix": "Corriger la carte",
             "qa_card_fix_text": "Vérifie le YAML de cette carte Lovelace pour des erreurs et corrige-les",
-            "card_editor_btn": "🤖 Amira",
             "confirm_yes": "Oui, confirme",
             "confirm_no": "Non, annule",
             "confirm_yes_value": "oui",
@@ -1439,7 +1435,7 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
     aiBtn.id = CARD_BTN_ID;
     aiBtn.setAttribute('role', 'button');
     aiBtn.setAttribute('tabindex', '0');
-    aiBtn.textContent = T.card_editor_btn || '🤖 Amira';
+    aiBtn.textContent = '🤖 Amira';
     aiBtn.style.cssText = [
       'display:inline-flex', 'align-items:center', 'justify-content:center',
       'padding:0 16px', 'height:36px', 'min-width:64px',
