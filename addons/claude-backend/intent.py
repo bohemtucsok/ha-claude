@@ -35,6 +35,7 @@ INTENT_TOOL_SETS = {
     "notifications": ["send_notification", "search_entities"],
     "helpers": ["manage_helpers", "search_entities"],
     "query_repairs": ["get_repairs", "dismiss_repair"],
+    "manage_statistics": ["manage_statistics"],
 }
 
 # Compact focused prompts by intent
@@ -349,6 +350,17 @@ DESIGN FREEDOM — be creative! Vary these across dashboards:
 - Background: solid, gradient, subtle patterns, mesh gradients
 
 Respond in the user's language.""",
+
+    "manage_statistics": """You are a Home Assistant statistics maintenance assistant.
+The user wants to clean up, fix, or manage recorder statistics (the data shown in Settings > Developer Tools > Statistics).
+STEPS:
+1. ALWAYS call manage_statistics with action='validate' FIRST to discover all issues.
+2. Report the findings clearly: how many orphaned entities (no longer exist), how many unit mismatches, etc.
+3. If the user wants to remove orphaned statistics: call manage_statistics with action='clear_orphaned'.
+4. If the user wants to fix unit mismatches: call manage_statistics with action='fix_units'.
+5. If the user wants to remove specific statistics: call manage_statistics with action='clear' with the statistic_ids list.
+6. After each action, report what was done (how many removed/fixed, which entity_ids).
+7. Respond in the user's language.""",
 
     "query_repairs": """You are a Home Assistant diagnostics assistant. The user wants to check system issues and repairs.
 WORKFLOW:
@@ -667,6 +679,18 @@ def detect_intent(user_message: str, smart_context: str, previous_intent: str | 
     if any(k in msg for k in delete_kw) and (has_auto or has_script or has_dash):
         return {"intent": "delete", "tools": INTENT_TOOL_SETS["delete"],
                 "prompt": None, "specific_target": False}
+
+    # --- STATISTICS MANAGEMENT --- (must come BEFORE history: "statistiche elimina" is management, not query)
+    # Detect when user wants to clean/fix/manage recorder statistics (not just query them)
+    statistics_manage_kw = lang_keywords.get("statistics_manage", [])
+    has_stats_word = any(k in msg for k in ["statistich", "statistic", "estadístic", "statistique"])
+    has_manage_signal = any(k in msg for k in delete_kw + modify_kw) or any(
+        k in msg for k in ["non esist", "orfan", "orphan", "obsolet", "puliz", "clean", "purge",
+                           "correggi", "fix", "converti", "convert", "valuta", "unità", "unit"]
+    )
+    if any(k in msg for k in statistics_manage_kw) or (has_stats_word and has_manage_signal):
+        return {"intent": "manage_statistics", "tools": INTENT_TOOL_SETS["manage_statistics"],
+                "prompt": INTENT_PROMPTS["manage_statistics"], "specific_target": False}
 
     # --- HISTORY --- (must come BEFORE query_state: "storico temperatura" should be history, not state)
     if any(k in msg for k in history_kw):
