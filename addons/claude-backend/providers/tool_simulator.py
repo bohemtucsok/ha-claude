@@ -88,7 +88,8 @@ create_automation, update_automation, create_script, update_script):
 OTHER rules:
 - NEVER invent entity_ids — only use ids found in the CONTEXT or DATA sections.
 - ALWAYS respond in the user's language.
-- You MAY emit multiple <tool_call> blocks in one response if needed.
+- Emit exactly ONE <tool_call> block per message. Do NOT combine multiple tool calls.
+  Wait for the result before deciding the next action.
 """
 
 

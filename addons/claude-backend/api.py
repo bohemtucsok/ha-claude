@@ -3476,6 +3476,25 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                                     else:
                                         logger.debug(f"ToolSimulator: skipping duplicate call in same response: {tc.get('name', '')}")
                                 _sim_calls = _deduped_calls
+
+                                # ── Limit to ONE call per tool name per round ──
+                                # No-tool providers sometimes emit e.g. manage_statistics(validate)
+                                # + manage_statistics(clear_orphaned) in one turn. The write action
+                                # already validates internally, so running both wastes a round and
+                                # confuses the dedup logic.  Keep only the LAST call per tool name
+                                # (the model emits validate first, then the action — we want the action).
+                                _seen_names: dict = {}
+                                for i, tc in enumerate(_sim_calls):
+                                    _seen_names[tc.get("name", "")] = i
+                                if len(_seen_names) < len(_sim_calls):
+                                    _kept = [_sim_calls[i] for i in sorted(_seen_names.values())]
+                                    _removed_count = len(_sim_calls) - len(_kept)
+                                    logger.info(
+                                        f"ToolSimulator: collapsed {_removed_count} extra call(s) "
+                                        f"to same tool name — keeping last per name"
+                                    )
+                                    _sim_calls = _kept
+
                                 # Inject as pending tool calls — the normal loop below handles them
                                 _pending_tool_calls = _sim_calls
                                 # For read-only tool calls, suppress the introductory text:
