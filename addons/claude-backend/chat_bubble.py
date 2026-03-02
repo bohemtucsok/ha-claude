@@ -355,11 +355,23 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
       // Try to read from a ha-code-editor or ha-yaml-editor element
       function readEditorValue(el) {{
         if (!el) return '';
-        // 1. Direct .value property (ha-yaml-editor exposes this)
+        // 1. Direct .value property (ha-code-editor exposes this reliably)
         if (typeof el.value === 'string' && el.value.trim()) return el.value.trim();
         // 2. ._value internal property (older HA versions)
         if (typeof el._value === 'string' && el._value.trim()) return el._value.trim();
-        // 3. CodeMirror 6: editor state via .editor?.state?.doc?.toString()
+        // 3. ha-yaml-editor wraps ha-code-editor in its shadowRoot — read from there
+        if (el.shadowRoot) {{
+          const codeEl = el.shadowRoot.querySelector('ha-code-editor');
+          if (codeEl) {{
+            if (typeof codeEl.value === 'string' && codeEl.value.trim()) return codeEl.value.trim();
+            // CodeMirror 6: .cm-content inside ha-code-editor's shadowRoot
+            const cmContent = codeEl.shadowRoot ? codeEl.shadowRoot.querySelector('.cm-content') : null;
+            if (cmContent && cmContent.innerText && cmContent.innerText.trim()) {{
+              return cmContent.innerText.trim();
+            }}
+          }}
+        }}
+        // 4. CodeMirror 6: editor state via .editor?.state?.doc?.toString()
         try {{
           const cm = el.editor || el._editor || el.codemirror;
           if (cm && cm.state && cm.state.doc) {{
@@ -367,12 +379,12 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             if (v.trim()) return v.trim();
           }}
         }} catch(e) {{}}
-        // 4. CodeMirror 6: .cm-content div innerText (visible text in the editor)
+        // 5. CodeMirror 6: .cm-content div innerText (visible text in the editor)
         const cmContent = el.querySelector ? el.querySelector('.cm-content') : null;
         if (cmContent && cmContent.innerText && cmContent.innerText.trim()) {{
           return cmContent.innerText.trim();
         }}
-        // 5. Fallback: textarea inside
+        // 6. Fallback: textarea inside
         const ta = el.querySelector ? el.querySelector('textarea') : null;
         if (ta && ta.value && ta.value.trim()) return ta.value.trim();
         return '';
@@ -591,8 +603,13 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
       let p = '[CONTEXT: User is editing a Lovelace card in the HA card editor.';
       if (ctx.cardYaml) {{
         p += ' The current card YAML is:\\n```yaml\\n' + ctx.cardYaml + '\\n```\\n'
-           + 'To apply changes, output the complete updated YAML only. '
-           + 'Do NOT use write_config_file — the user will paste it manually in the editor.';
+           + 'IMPORTANT RULES for card editing:\\n'
+           + '1. Use search_entities to VERIFY that ALL entity IDs in the YAML actually exist before suggesting changes. Do NOT ask the user to check — verify yourself.\\n'
+           + '2. When suggesting a modification, ALWAYS show the complete corrected YAML in a ```yaml code block with a brief explanation of what changed.\\n'
+           + '3. Keep your response concise: list only real problems found (not hypothetical ones), show the corrected YAML, done.\\n'
+           + '4. Do NOT suggest changes based on guesses about entity names (e.g. adding \"a\" to make it feminine). Only flag an entity if search_entities confirms it does not exist.\\n'
+           + '5. If all entities are valid and the YAML has no structural issues, say so clearly and suggest only optional improvements (like adding graph: line).\\n'
+           + '6. The user will paste the YAML manually in the editor — do NOT use write_config_file or update_dashboard.';
       }}
       p += ']';
       return p + ' ';
@@ -1392,11 +1409,27 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
   }}
 
   function _renderInlineMd(text) {{
-    return text
+    // Fenced code blocks: ```lang\ncontent\n``` -> styled <pre> with copy button
+    const codeBlocks = [];
+    text = text.replace(/```(\w*)\\n([\\s\\S]*?)```/g, function(m, lang, code) {{
+      const escaped = code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const placeholder = '___CODEBLOCK_' + codeBlocks.length + '___';
+      codeBlocks.push('<div style="position:relative;margin:6px 0;">'
+        + '<button onclick="(function(b){{ var c=b.parentElement.querySelector(\'code\'); if(c)navigator.clipboard.writeText(c.textContent).then(function(){{ b.textContent=\'\u2713\'; setTimeout(function(){{ b.textContent=\'\ud83d\udccb\'; }},1500); }}); }})(this)" style="position:absolute;top:4px;right:4px;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.25);color:var(--primary-text-color,#ccc);border-radius:4px;padding:2px 8px;font-size:10px;cursor:pointer;">\ud83d\udccb</button>'
+        + '<pre style="background:#1e293b;color:#e2e8f0;padding:8px 10px;border-radius:6px;font-size:12px;overflow-x:auto;margin:0;white-space:pre-wrap;word-break:break-word;"><code>' + escaped + '</code></pre></div>');
+      return placeholder;
+    }});
+    // Process remaining markdown (HTML-escape only outside code blocks)
+    text = text
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
       .replace(/[*][*](.+?)[*][*]/g,'<b>$1</b>')
       .replace(/`([^`]+)`/g,'<code style="background:rgba(0,0,0,0.08);padding:1px 4px;border-radius:3px;font-size:12px">$1</code>')
       .replace(/\\n/g,'<br>');
+    // Restore code blocks (already HTML-safe, not double-escaped)
+    codeBlocks.forEach(function(block, i) {{
+      text = text.replace('___CODEBLOCK_' + i + '___', block);
+    }});
+    return text;
   }}
 
   function openCardPanel() {{
@@ -1404,23 +1437,51 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
     const surface = _getCardSurface();
     if (!surface) return;
 
-    surface.style.cssText += ';display:flex !important;flex-direction:column !important;max-height:90vh !important;overflow:hidden !important;';
+    // Keep original surface width — only adjust overflow so the panel fits inside
+    surface.style.cssText += ';display:flex !important;flex-direction:column !important;max-height:90vh !important;overflow:hidden !important;width:' + surface.offsetWidth + 'px !important;max-width:' + surface.offsetWidth + 'px !important;';
 
     const panel = document.createElement('div');
     panel.id = CARD_PANEL_ID;
-    panel.style.cssText = 'display:flex;flex-direction:column;border-top:2px solid #667eea;background:var(--card-background-color,#fff);flex-shrink:0;height:300px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
+    panel.style.cssText = 'display:flex;flex-direction:column;border-top:2px solid #667eea;background:var(--card-background-color,#fff);flex-shrink:0;height:300px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;width:100%;box-sizing:border-box;overflow:hidden;';
 
     // Header
     const hdr = document.createElement('div');
-    hdr.style.cssText = 'display:flex;align-items:center;padding:8px 12px;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;flex-shrink:0;';
+    hdr.style.cssText = 'display:flex;align-items:center;padding:6px 12px;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;flex-shrink:0;gap:8px;';
     const hdrTitle = document.createElement('span');
     hdrTitle.textContent = '🤖 Amira';
-    hdrTitle.style.cssText = 'font-weight:600;font-size:13px;flex:1;';
+    hdrTitle.style.cssText = 'font-weight:600;font-size:13px;white-space:nowrap;';
+    // Provider select — mirrors haProviderSelect
+    const _mainProvSel = document.getElementById('haProviderSelect');
+    const _mainModSel  = document.getElementById('haModelSelect');
+    const cardProvSel = document.createElement('select');
+    cardProvSel.style.cssText = 'font-size:11px;padding:2px 4px;border-radius:4px;border:none;background:rgba(255,255,255,0.2);color:#fff;cursor:pointer;max-width:150px;min-width:0;flex-shrink:1;';
+    if (_mainProvSel) {{
+      Array.from(_mainProvSel.options).forEach(o => {{
+        const opt = document.createElement('option');
+        opt.value = o.value; opt.textContent = o.textContent;
+        if (o.selected) opt.selected = true;
+        cardProvSel.appendChild(opt);
+      }});
+      cardProvSel.addEventListener('change', () => {{ _mainProvSel.value = cardProvSel.value; _mainProvSel.dispatchEvent(new Event('change')); }});
+    }}
+    const cardModSel = document.createElement('select');
+    cardModSel.style.cssText = 'font-size:11px;padding:2px 4px;border-radius:4px;border:none;background:rgba(255,255,255,0.2);color:#fff;cursor:pointer;max-width:200px;min-width:0;flex-shrink:1;';
+    if (_mainModSel) {{
+      Array.from(_mainModSel.options).forEach(o => {{
+        const opt = document.createElement('option');
+        opt.value = o.value; opt.textContent = o.textContent;
+        if (o.selected) opt.selected = true;
+        cardModSel.appendChild(opt);
+      }});
+      cardModSel.addEventListener('change', () => {{ _mainModSel.value = cardModSel.value; _mainModSel.dispatchEvent(new Event('change')); }});
+    }}
     const hdrClose = document.createElement('button');
     hdrClose.textContent = '✕';
-    hdrClose.style.cssText = 'background:none;border:none;color:#fff;cursor:pointer;font-size:16px;padding:0 4px;line-height:1;';
+    hdrClose.style.cssText = 'background:none;border:none;color:#fff;cursor:pointer;font-size:16px;padding:0 4px;line-height:1;margin-left:auto;';
     hdrClose.onclick = closeCardPanel;
     hdr.appendChild(hdrTitle);
+    if (_mainProvSel && _mainProvSel.options.length) hdr.appendChild(cardProvSel);
+    if (_mainModSel  && _mainModSel.options.length)  hdr.appendChild(cardModSel);
     hdr.appendChild(hdrClose);
 
     // Quick actions
@@ -1478,6 +1539,8 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
       surface.style.flexDirection = '';
       surface.style.maxHeight = '';
       surface.style.overflow = '';
+      surface.style.width = '';
+      surface.style.maxWidth = '';
     }}
     if (_cardPanelEl) _cardPanelEl.remove();
     _cardPanelEl = null;
@@ -1518,7 +1581,13 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
         headers: {{'Content-Type': 'application/json'}},
         body: JSON.stringify({{ message: fullMsg, provider: _provider, model: _model, session_id: _session, stream: false }})
       }});
-      const data = await resp.json();
+      const rawText = await resp.text();
+      let data;
+      try {{ data = JSON.parse(rawText); }} catch(e) {{
+        console.error('[Amira card panel] non-JSON response (status=' + resp.status + '):', rawText.substring(0, 200));
+        if (thinkEl) thinkEl.textContent = T.error_connection + ' (HTTP ' + resp.status + ')';
+        return;
+      }}
       if (thinkEl) thinkEl.innerHTML = _renderInlineMd(data.response || data.error || '?');
     }} catch(e) {{
       console.error('[Amira card panel] send error:', e);

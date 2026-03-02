@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.3.3 — Card editor panel: width, selectors, smarter YAML analysis
+- **Panel width fix**: opening the Amira chat in the card editor no longer expands the dialog — the panel now locks to the original `surface.offsetWidth` and resets it on close
+- **Agent selector wider**: provider dropdown max-width raised from 90px→150px, model from 110px→200px — labels are now fully readable
+- **Smarter YAML prompt**: Amira now uses `search_entities` to verify entity IDs autonomously instead of asking the user to check; only flags real problems; shows corrected YAML in a code block
+- **Code block rendering in card panel**: `_renderInlineMd()` now renders fenced ````yaml` blocks as styled `<pre>` with a working 📋 copy button (placeholder-based approach avoids double HTML-escaping)
+
 ## 4.3.2 — Fix chat UI completely broken (send + sidebar)
 - **Root cause**: bare `\n` (Python newline) inside a JS regex character class in `_stripCodeBlocks()` was inserted as a literal newline in the generated HTML, splitting the regex across two lines and causing a `SyntaxError: Invalid regular expression: missing /`
 - **Impact**: the syntax error prevented the entire `<script>` block from executing — send button, conversation sidebar, and all JS features stopped working
