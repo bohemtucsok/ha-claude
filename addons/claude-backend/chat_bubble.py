@@ -603,6 +603,8 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
       let p = '[CONTEXT: User is editing a Lovelace card in the HA card editor.';
       if (ctx.cardYaml) {{
         // Pre-validate entities against hass.states
+        // hass.states is the AUTHORITATIVE source for the frontend — if an entity
+        // is NOT in hass.states, HA cards CANNOT use it (disabled/unavailable/wrong id).
         let entityReport = '';
         let hasNotFound = false;
         try {{
@@ -616,14 +618,14 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
               const eid = em[1];
               const st = hass.states[eid];
               if (st) {{
-                checks.push(eid + ': CONFIRMED (state=' + st.state + ')');
+                checks.push(eid + ': VALID (state=' + st.state + ')');
               }} else {{
-                checks.push(eid + ': UNCONFIRMED — not in hass.states cache, verify with get_integration_entities');
+                checks.push(eid + ': INVALID — NOT in hass.states, card WILL show error. Find the correct entity_id.');
                 hasNotFound = true;
               }}
             }}
             if (checks.length > 0) {{
-              entityReport = '\\nENTITY CHECK (hass.states snapshot):\\n' + checks.join('\\n') + '\\n';
+              entityReport = '\\nENTITY VALIDATION (hass.states — authoritative for cards):\\n' + checks.join('\\n') + '\\n';
             }}
           }}
         }} catch(e) {{}}
@@ -631,12 +633,12 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
         p += ' The current card YAML is:\\n```yaml\\n' + ctx.cardYaml + '\\n```\\n'
            + entityReport
            + 'IMPORTANT RULES for card editing:\\n'
-           + '1. Entities marked CONFIRMED definitely exist. Entities marked UNCONFIRMED were not in the frontend cache — use get_integration_entities to verify whether they exist before marking them as errors.\\n'
-           + '2. If an entity is marked CONFIRMED, it exists — no need to re-verify.\\n'
-           + '3. When suggesting a modification, ALWAYS show the complete corrected YAML in a ```yaml code block with a brief explanation of what changed.\\n'
-           + '4. Keep your response concise: list only real problems found (not hypothetical ones), show the corrected YAML, done.\\n'
+           + '1. TRUST the validation above completely. hass.states is the ONLY source that matters for Lovelace cards. If an entity is INVALID here, the card WILL show an error — period.\\n'
+           + '2. For INVALID entities: call get_integration_entities to find the correct entity_id from the same integration. The correct entity may have a different name (e.g. sensor.epcube_today_consumption instead of sensor.epcube_consumo_oggi). Compare the list and pick the one with matching device_class/unit.\\n'
+           + '3. Entities marked VALID exist and work — no need to re-verify.\\n'
+           + '4. When suggesting a modification, ALWAYS show the complete corrected YAML in a ```yaml code block with a brief explanation of what changed.\\n'
            + '5. Do NOT suggest changes based on guesses about entity names. Only replace an entity if you found a valid alternative via get_integration_entities or search_entities.\\n'
-           + '6. If all entities are verified and the YAML has no structural issues, say so clearly and suggest only optional improvements (like adding graph: line).\\n'
+           + '6. If all entities are VALID and the YAML has no structural issues, say so clearly and suggest only optional improvements (like adding graph: line).\\n'
            + '7. The user will paste the YAML manually in the editor — do NOT use write_config_file or update_dashboard.\\n'
            + '8. NEVER show [TOOL RESULT] blocks or raw JSON data to the user — only show the final human-readable answer.';
       }}
