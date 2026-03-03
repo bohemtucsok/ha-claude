@@ -4781,7 +4781,7 @@ def get_chat_ui():
             }}
         }}
 
-        (function bootUI() {{
+        (async function bootUI() {{
             try {{
                 // Initialize dark mode before anything else
                 if (darkMode) {{
@@ -4877,6 +4877,14 @@ def get_chat_ui():
         window.changeModel = changeModel;
         window.handleButtonClick = handleButtonClick;
         window.refreshModels = refreshModels;
+        window.switchSidebarTab = switchSidebarTab;
+        window.newChat = newChat;
+        window.toggleSidebar = toggleSidebar;
+        window.sendSuggestion = sendSuggestion;
+        window.testNvidiaModel = testNvidiaModel;
+        window.revokeCodexOAuth = revokeCodexOAuth;
+        window.toggleDarkMode = toggleDarkMode;
+        window.toggleReadOnly = toggleReadOnly;
         // File explorer exports
         window.loadFileTree = loadFileTree;
         window.openFileInPanel = openFileInPanel;
