@@ -3119,6 +3119,29 @@ def _format_write_tool_response(tool_name: str, result_data: dict) -> str:
 
 
 
+def _strip_context_blocks(text: str) -> str:
+    """Strip [CONTEXT: ...] blocks from text, handling nested brackets like [TOOL RESULT]."""
+    import re as _re
+    result = text
+    while '[CONTEXT:' in result:
+        idx = result.index('[CONTEXT:')
+        depth = 0
+        end = len(result) - 1
+        for i in range(idx, len(result)):
+            if result[i] == '[':
+                depth += 1
+            elif result[i] == ']':
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        after = end + 1
+        while after < len(result) and result[after] in (' ', '\n', '\r'):
+            after += 1
+        result = result[:idx] + result[after:]
+    return result.strip()
+
+
 def stream_chat_with_ai(user_message: str, session_id: str = "default", image_data: str = None, read_only: bool = False):
     """Stream chat events for all providers with optional image support. Yields SSE event dicts.
     Uses LOCAL intent detection + smart context to minimize tokens sent to AI API."""
@@ -3129,6 +3152,8 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
     saved_user_message = user_message
     import re
     saved_user_message = re.sub(r'\[CONTEXT:.*?\]\[CURRENT_DASHBOARD_HTML\].*?\[/CURRENT_DASHBOARD_HTML\]\n*', '', saved_user_message, flags=re.DOTALL)
+    # Also strip standalone [CONTEXT: ...] blocks (handling nested brackets like [TOOL RESULT])
+    saved_user_message = _strip_context_blocks(saved_user_message)
     saved_user_message = saved_user_message.strip()
     
     if not ai_client:
@@ -5817,6 +5842,11 @@ def api_conversation_messages(session_id):
         content = m.get("content", "")
         # Skip messages with empty content or only whitespace
         if m.get("role") in ("user", "assistant") and isinstance(content, str) and content.strip():
+            # Strip [CONTEXT: ...] blocks from user messages
+            if m.get("role") == "user":
+                content = _strip_context_blocks(content)
+                if not content.strip():
+                    continue
             msg_data = {"role": m["role"], "content": content}
             # Include model/provider/usage info for assistant messages
             if m.get("role") == "assistant":
@@ -5840,13 +5870,15 @@ def api_conversations_list():
         # Exclude messaging sessions — they have their own dedicated UI section
         if sid.startswith(("whatsapp_", "telegram_")):
             continue
-        # Extract first user message as title
+        # Extract first user message as title (strip [CONTEXT: ...] blocks)
         title = "Nuova conversazione"
         for msg in msgs:
             if msg.get("role") == "user":
                 content = msg.get("content", "")
                 if isinstance(content, str):
-                    title = content[:50] + ("..." if len(content) > 50 else "")
+                    clean = _strip_context_blocks(content)
+                    if clean:
+                        title = clean[:50] + ("..." if len(clean) > 50 else "")
                     break
         # Determine source: bubble sessions start with "bubble_"
         source = "bubble" if sid.startswith("bubble_") else "chat"
@@ -5990,6 +6022,11 @@ def api_conversation_get(session_id):
                 # Skip internal tool-call artifact messages
                 if role == "assistant" and _is_tool_call_artifact(content, m):
                     continue
+                # Strip [CONTEXT: ...] blocks from user messages for clean display
+                if role == "user":
+                    content = _strip_context_blocks(content)
+                    if not content.strip():
+                        continue
                 msg_data = {"role": role, "content": content}
                 # Include model/provider metadata for assistant messages
                 if role == "assistant":

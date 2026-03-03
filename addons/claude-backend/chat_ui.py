@@ -601,15 +601,21 @@ def get_chat_ui():
         .sidebar-content {{ flex: 1; overflow-y: auto; display: none; }}
         .sidebar-content.active {{ display: block; }}
         .chat-list {{ flex: 1; overflow-y: auto; }}
-        .chat-item {{ padding: 12px; border-bottom: 1px solid #f0f0f0; cursor: pointer; transition: background 0.2s; display: flex; justify-content: space-between; align-items: center; }}
-        .chat-item:hover {{ background: #f8f9fa; }}
-        .chat-item.active {{ background: #e8f0fe; border-left: 3px solid #667eea; }}
-        .chat-item-title {{ font-size: 13px; color: #333; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
-        .chat-item-info {{ font-size: 11px; color: #999; }}
-        .chat-item-delete {{ color: #ef4444; font-size: 16px; padding: 4px 8px; opacity: 0.6; transition: all 0.2s; cursor: pointer; flex-shrink: 0; background: none; border: none; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; }}
+        .chat-item {{ padding: 14px 16px; margin: 4px 8px; border-radius: 12px; cursor: pointer; transition: all 0.25s ease; display: flex; justify-content: space-between; align-items: center; background: linear-gradient(135deg, #f8f9ff 0%, #f0f4ff 100%); border: 1px solid rgba(102, 126, 234, 0.08); position: relative; overflow: hidden; }}
+        .chat-item::before {{ content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: linear-gradient(180deg, #667eea, #764ba2); border-radius: 0 4px 4px 0; opacity: 0; transition: opacity 0.25s; }}
+        .chat-item:hover {{ background: linear-gradient(135deg, #eef1ff 0%, #e8edff 100%); transform: translateX(2px); box-shadow: 0 2px 12px rgba(102, 126, 234, 0.12); }}
+        .chat-item:hover::before {{ opacity: 1; }}
+        .chat-item.active {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-color: transparent; box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3); }}
+        .chat-item.active::before {{ opacity: 0; }}
+        .chat-item-title {{ font-size: 13px; color: #2d3748; font-weight: 500; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.4; }}
+        .chat-item.active .chat-item-title {{ color: #ffffff; }}
+        .chat-item-info {{ font-size: 11px; color: #8b95a5; font-weight: 400; }}
+        .chat-item.active .chat-item-info {{ color: rgba(255,255,255,0.75); }}
+        .chat-item-delete {{ color: #e53e3e; font-size: 14px; padding: 6px; opacity: 0; transition: all 0.2s; cursor: pointer; flex-shrink: 0; background: rgba(254, 226, 226, 0.6); border: none; border-radius: 8px; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; }}
         .chat-item:hover .chat-item-delete {{ opacity: 1; }}
-        .chat-item-delete:hover {{ color: #dc2626; background: rgba(239,68,68,0.1); }}
-        .chat-group-title {{ padding: 10px 12px; font-size: 11px; color: #999; text-transform: uppercase; letter-spacing: 0.04em; border-top: 1px solid #f0f0f0; }}
+        .chat-item.active .chat-item-delete {{ color: #fff; background: rgba(255,255,255,0.2); opacity: 0.8; }}
+        .chat-item-delete:hover {{ color: #fff; background: #e53e3e; transform: scale(1.1); opacity: 1 !important; }}
+        .chat-group-title {{ padding: 12px 16px 6px; font-size: 10px; color: #a0aec0; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }}
         .backup-list {{ padding: 0; }}
         .backup-item {{ padding: 10px 12px; border-bottom: 1px solid #f0f0f0; display: flex; flex-direction: column; gap: 4px; }}
         .backup-item:hover {{ background: #f8f9fa; }}
@@ -1130,31 +1136,45 @@ def get_chat_ui():
         }}
 
         body.dark-mode .chat-item {{
-            border-bottom-color: #2a2a2a;
-            color: #e0e0e0;
+            background: linear-gradient(135deg, #1e2030 0%, #252840 100%);
+            border-color: rgba(138, 180, 248, 0.08);
         }}
 
         body.dark-mode .chat-item:hover {{
-            background: #2f2f2f;
+            background: linear-gradient(135deg, #262a45 0%, #2d3258 100%);
+            box-shadow: 0 2px 12px rgba(138, 180, 248, 0.1);
         }}
 
         body.dark-mode .chat-item.active {{
-            background: #1e3a8a;
-            border-left-color: #8ab4f8;
+            background: linear-gradient(135deg, #3b5bdb 0%, #5f3dc4 100%);
+            border-color: transparent;
+            box-shadow: 0 4px 16px rgba(138, 180, 248, 0.2);
         }}
 
         body.dark-mode .chat-item-title {{
-            color: #e0e0e0;
+            color: #e2e8f0;
+        }}
+        body.dark-mode .chat-item.active .chat-item-title {{
+            color: #ffffff;
         }}
 
         body.dark-mode .chat-item-info {{
-            color: #808080;
+            color: #718096;
+        }}
+        body.dark-mode .chat-item.active .chat-item-info {{
+            color: rgba(255,255,255,0.7);
+        }}
+
+        body.dark-mode .chat-item-delete {{
+            background: rgba(254, 178, 178, 0.1);
+        }}
+        body.dark-mode .chat-item.active .chat-item-delete {{
+            color: #fed7d7;
+            background: rgba(255,255,255,0.15);
         }}
 
         body.dark-mode .chat-group-title {{
-            background: #1a1a1a;
-            border-top-color: #2a2a2a;
-            color: #707070;
+            color: #5a6580;
         }}
 
         body.dark-mode .backup-item,
@@ -2835,9 +2855,18 @@ def get_chat_ui():
             t = t.replace(/\\[FILE:[^\\]]*\\][\\s\\S]*?\\[\\/FILE\\]\\n?/g, '');
             // 1. Strip [CURRENT_DASHBOARD_HTML]...[/CURRENT_DASHBOARD_HTML] (may be very large)
             t = t.replace(/\\[CURRENT_DASHBOARD_HTML\\][\\s\\S]*?\\[\\/CURRENT_DASHBOARD_HTML\\]\\n?/g, '');
-            // 2. Strip [CONTEXT: ... ] blocks — content ends at first ] not inside nested brackets
-            //    These are always single-line context tags injected by the bubble
-            t = t.replace(/\\[CONTEXT:[^\\]]*\\]\\s*/g, '');
+            // 2. Strip [CONTEXT: ... ] blocks — handle nested brackets like [TOOL RESULT]
+            while (t.indexOf('[CONTEXT:') !== -1) {{
+                const idx = t.indexOf('[CONTEXT:');
+                let depth = 0, end = t.length - 1;
+                for (let i = idx; i < t.length; i++) {{
+                    if (t[i] === '[') depth++;
+                    else if (t[i] === ']') {{ depth--; if (depth === 0) {{ end = i; break; }} }}
+                }}
+                let after = end + 1;
+                while (after < t.length && (t[after] === ' ' || t[after] === '\\n')) after++;
+                t = t.substring(0, idx) + t.substring(after);
+            }}
             // 3. Strip --- CONTEXT: ... --- separator sections
             t = t.replace(/---\\s*CONTEXT:[\\s\\S]*?---\\s*/g, '');
             // 4. Clean up excess blank lines left behind
@@ -3439,7 +3468,20 @@ def get_chat_ui():
                 left.addEventListener('click', () => loadConversation(conv.id));
                 const title = document.createElement('div');
                 title.className = 'chat-item-title';
-                title.textContent = conv.title || '';
+                // Strip any residual [CONTEXT: ...] from the title
+                let cleanTitle = conv.title || '';
+                if (cleanTitle.indexOf('[CONTEXT:') !== -1) {{
+                    const ci = cleanTitle.indexOf('[CONTEXT:');
+                    let d = 0, e = cleanTitle.length - 1;
+                    for (let i = ci; i < cleanTitle.length; i++) {{
+                        if (cleanTitle[i] === '[') d++;
+                        else if (cleanTitle[i] === ']') {{ d--; if (d === 0) {{ e = i; break; }} }}
+                    }}
+                    let a = e + 1;
+                    while (a < cleanTitle.length && (cleanTitle[a] === ' ' || cleanTitle[a] === '\\n')) a++;
+                    cleanTitle = (cleanTitle.substring(0, ci) + cleanTitle.substring(a)).trim();
+                }}
+                title.textContent = cleanTitle || 'Chat...';
                 const info = document.createElement('div');
                 info.className = 'chat-item-info';
                 info.textContent = String(conv.message_count || 0) + ' ' + (T.messages_count || 'messages');

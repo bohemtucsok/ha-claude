@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.4.0 — Conversation list: modern card style + fix [CONTEXT] leak in titles/messages
+- **Fix [CONTEXT:] in titles**: conversation titles no longer show raw `[CONTEXT: User is on the Home Assistant Statistics...]` — the server-side `api_conversations_list()` now strips context blocks before generating titles
+- **Fix [CONTEXT:] with nested brackets**: `stripContextInjections()` regex was broken when context blocks contained nested brackets like `[TOOL RESULT]` — now uses bracket-depth counting to correctly strip the entire block
+- **Fix saved messages**: `saved_user_message` now strips standalone `[CONTEXT: ...]` blocks (previously only stripped combined CONTEXT+DASHBOARD_HTML patterns)
+- **Clean API responses**: both `/api/conversations/<id>` and `/api/mcp/conversations/<id>/messages` endpoints now strip `[CONTEXT: ...]` from user messages before returning
+- **Modern conversation cards**: redesigned sidebar conversation items with gradient backgrounds, rounded corners, hover animations, accent bar on hover, gradient active state with white text, and smooth transitions
+- **Dark mode cards**: matching dark theme with deep blue/purple gradients for cards and proper text contrast (white on active, light gray on normal)
+- **Text contrast fix**: active card now uses white titles/info text, delete button adapts to active/normal state with proper contrast
+
 ## 4.3.9 — Log: fix [CONTEXT] stripping (robust regex)
 - **Fix broken log stripping**: previous regex `[CONTEXT:.*?]` stopped at the first `]` in the text (e.g. inside the YAML or entity validation block), leaking partial instructions into the log
 - **New `_strip_context_for_log()` helper**: scans for the YAML block with ```` ```yaml...``` ```` and the user text after the last `]\n` — reliably extracts both regardless of `]` characters inside the context body
