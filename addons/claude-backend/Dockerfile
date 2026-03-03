@@ -17,9 +17,26 @@ RUN apk add --no-cache \
 
 WORKDIR /app
 
-# Copy requirements and install dependencies
+# ── Stage 1: Core dependencies (MUST succeed) ────────────────────────────────
+COPY requirements_core.txt .
+RUN pip3 install --no-cache-dir --break-system-packages -r requirements_core.txt
+
+# ── Stage 2: Optional / heavy dependencies (installed one-by-one) ─────────────
+# On ARM / low-memory devices some packages may fail to compile.
+# The Python code wraps every optional import in try/except, so the
+# server still starts even when a provider SDK is missing.
+COPY requirements_optional.txt .
+RUN while IFS= read -r pkg || [ -n "$pkg" ]; do \
+        pkg="$(echo "$pkg" | sed 's/#.*//' | xargs)"; \
+        [ -z "$pkg" ] && continue; \
+        echo "--- Installing: $pkg ---"; \
+        pip3 install --no-cache-dir --break-system-packages --prefer-binary "$pkg" || \
+            echo "⚠ OPTIONAL: $pkg was NOT installed (OK on ARM)"; \
+    done < requirements_optional.txt && \
+    echo "=== Installed packages ===" && pip3 list 2>/dev/null
+
+# Keep legacy file for local development (pip install -r requirements.txt)
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
 # Copy API application
 COPY api.py .

@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.4.1 — ARM / Raspberry Pi compatibility + crash-resilient startup
+- **Fix ARM (aarch64/armv7) install failure**: split `pip install` into two stages in the Dockerfile — core dependencies (flask, waitress, etc.) MUST install, while heavy optional SDKs (anthropic, openai, google-genai, mcp, twilio, telegram) are installed individually with `--prefer-binary` and can fail without breaking the build
+- **Crash-resilient server startup**: if `import api` fails at runtime (missing module, memory issue, etc.), a lightweight diagnostic Flask server starts on the same port, showing the exact error in the browser and in logs — eliminates the "Cannot connect to host" ingress loop
+- **Startup diagnostics**: `server.py` now logs platform arch, Python version, and availability of all optional packages before loading the main app
+- **New files**: `requirements_core.txt` (7 mandatory packages) and `requirements_optional.txt` (9 provider SDKs / features) — original `requirements.txt` kept for local development
+
 ## 4.4.0 — Conversation list: modern card style + fix [CONTEXT] leak in titles/messages
 - **Fix [CONTEXT:] in titles**: conversation titles no longer show raw `[CONTEXT: User is on the Home Assistant Statistics...]` — the server-side `api_conversations_list()` now strips context blocks before generating titles
 - **Fix [CONTEXT:] with nested brackets**: `stripContextInjections()` regex was broken when context blocks contained nested brackets like `[TOOL RESULT]` — now uses bracket-depth counting to correctly strip the entire block
