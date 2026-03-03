@@ -398,8 +398,21 @@ class GitHubCopilotProvider(EnhancedProvider):
 
             yield from self._do_stream(copilot_token, messages)
         except Exception as e:
+            err_msg = str(e)
             logger.error(f"GitHub Copilot: Error during streaming: {e}")
-            yield {"type": "error", "message": self.normalize_error_message(e)}
+            # If model_not_supported, give a clearer message
+            if "model_not_supported" in err_msg:
+                model_name = self._resolve_model()
+                yield {
+                    "type": "error",
+                    "message": (
+                        f"⚠️ Il modello '{model_name}' non è supportato da GitHub Copilot "
+                        f"ed è stato rimosso automaticamente dalla lista. "
+                        f"Seleziona un altro modello."
+                    ),
+                }
+            else:
+                yield {"type": "error", "message": self.normalize_error_message(e)}
 
     def _do_stream(
         self, copilot_token: str, messages: List[Dict[str, Any]]
@@ -444,6 +457,14 @@ class GitHubCopilotProvider(EnhancedProvider):
                 )
             if response.status_code != 200:
                 error_text = response.read().decode("utf-8", errors="ignore")
+                # Auto-blocklist models that return "model_not_supported"
+                if response.status_code == 400 and "model_not_supported" in error_text:
+                    try:
+                        from api import blocklist_model
+                        blocklist_model("github_copilot", resolved_model)
+                        logger.warning(f"GitHub Copilot: model '{resolved_model}' auto-blocklisted (not supported)")
+                    except Exception as _bl:
+                        logger.debug(f"Could not auto-blocklist: {_bl}")
                 raise RuntimeError(f"HTTP {response.status_code}: {error_text[:400]}")
 
             for line in response.iter_lines():

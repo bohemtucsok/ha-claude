@@ -1043,6 +1043,9 @@ GITHUB_MODEL_BLOCKLIST: set[str] = set()
 NVIDIA_MODEL_BLOCKLIST: set[str] = set()
 GITHUB_MODEL_BLOCKLIST: set[str] = set()  # may be used by providers
 
+# GitHub Copilot models that returned model_not_supported at runtime
+GITHUB_COPILOT_MODEL_BLOCKLIST: set[str] = set()
+
 # NVIDIA models that have been successfully chat-tested (per current key)
 NVIDIA_MODEL_TESTED_OK: set[str] = set()
 
@@ -1051,13 +1054,14 @@ MODEL_BLOCKLIST_FILE = "/config/amira/model_blocklist.json"
 
 def load_model_blocklists() -> None:
     """Load persistent model blocklists from disk."""
-    global NVIDIA_MODEL_BLOCKLIST, GITHUB_MODEL_BLOCKLIST, NVIDIA_MODEL_TESTED_OK
+    global NVIDIA_MODEL_BLOCKLIST, GITHUB_MODEL_BLOCKLIST, GITHUB_COPILOT_MODEL_BLOCKLIST, NVIDIA_MODEL_TESTED_OK
     try:
         if os.path.isfile(MODEL_BLOCKLIST_FILE):
             with open(MODEL_BLOCKLIST_FILE, "r") as f:
                 data = json.load(f) or {}
             nvidia = data.get("nvidia") or []
             github = data.get("github") or []
+            github_copilot = data.get("github_copilot") or []
 
             # Backward compatible formats:
             # - {"nvidia": [..]} (legacy blocked-only)
@@ -1073,9 +1077,12 @@ def load_model_blocklists() -> None:
                 NVIDIA_MODEL_BLOCKLIST.update([m for m in nvidia if isinstance(m, str) and m.strip()])
             if isinstance(github, list):
                 GITHUB_MODEL_BLOCKLIST.update([m for m in github if isinstance(m, str) and m.strip()])
-            if NVIDIA_MODEL_BLOCKLIST or GITHUB_MODEL_BLOCKLIST or NVIDIA_MODEL_TESTED_OK:
+            if isinstance(github_copilot, list):
+                GITHUB_COPILOT_MODEL_BLOCKLIST.update([m for m in github_copilot if isinstance(m, str) and m.strip()])
+            if NVIDIA_MODEL_BLOCKLIST or GITHUB_MODEL_BLOCKLIST or GITHUB_COPILOT_MODEL_BLOCKLIST or NVIDIA_MODEL_TESTED_OK:
                 logger.info(
-                    f"Loaded model lists: nvidia_blocked={len(NVIDIA_MODEL_BLOCKLIST)}, nvidia_tested_ok={len(NVIDIA_MODEL_TESTED_OK)}, github_blocked={len(GITHUB_MODEL_BLOCKLIST)}"
+                    f"Loaded model lists: nvidia_blocked={len(NVIDIA_MODEL_BLOCKLIST)}, nvidia_tested_ok={len(NVIDIA_MODEL_TESTED_OK)}, "
+                    f"github_blocked={len(GITHUB_MODEL_BLOCKLIST)}, github_copilot_blocked={len(GITHUB_COPILOT_MODEL_BLOCKLIST)}"
                 )
     except Exception as e:
         logger.warning(f"Could not load model blocklists: {e}")
@@ -1091,6 +1098,7 @@ def save_model_blocklists() -> None:
                 "tested_ok": sorted(NVIDIA_MODEL_TESTED_OK),
             },
             "github": sorted(GITHUB_MODEL_BLOCKLIST),
+            "github_copilot": sorted(GITHUB_COPILOT_MODEL_BLOCKLIST),
         }
         with open(MODEL_BLOCKLIST_FILE, "w") as f:
             json.dump(payload, f, ensure_ascii=False)
@@ -1124,6 +1132,26 @@ def blocklist_nvidia_model(model_id: str) -> None:
     except Exception:
         pass
     save_model_blocklists()
+
+
+def blocklist_model(provider: str, model_id: str) -> None:
+    """Add a model to the blocklist for any provider. Persists to disk."""
+    if not isinstance(model_id, str) or not model_id.strip():
+        return
+    model_id = model_id.strip()
+    if provider == "nvidia":
+        blocklist_nvidia_model(model_id)
+    elif provider == "github":
+        GITHUB_MODEL_BLOCKLIST.add(model_id)
+        save_model_blocklists()
+    elif provider == "github_copilot":
+        if model_id not in GITHUB_COPILOT_MODEL_BLOCKLIST:
+            GITHUB_COPILOT_MODEL_BLOCKLIST.add(model_id)
+            logger.warning(f"Auto-blocklisted github_copilot model '{model_id}' (model_not_supported)")
+            save_model_blocklists()
+    else:
+        logger.debug(f"blocklist_model: no blocklist for provider '{provider}'")
+
 
 # Cache for NVIDIA /v1/models discovery (to keep UI in sync with what's available for the current key)
 _NVIDIA_MODELS_CACHE: dict[str, object] = {"ts": 0.0, "models": []}
@@ -6225,6 +6253,8 @@ def api_get_models():
                         filtered_models = live
                 except Exception as _e:
                     logger.debug(f"Copilot model discovery skipped: {_e}")
+                if GITHUB_COPILOT_MODEL_BLOCKLIST:
+                    filtered_models = [m for m in filtered_models if m not in GITHUB_COPILOT_MODEL_BLOCKLIST]
 
             # Live discovery for NVIDIA (per-key availability)
             if provider == "nvidia":

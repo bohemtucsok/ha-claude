@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.4.3 — Auto-blocklist modelli non supportati (GitHub Copilot)
+- **Auto-blocklist su `model_not_supported`**: quando GitHub Copilot restituisce HTTP 400 con `model_not_supported` (es. `claude-opus-4.6-fast`), il modello viene automaticamente aggiunto alla blocklist e non appare più nella lista modelli
+- **Blocklist persistente**: i modelli bloccati vengono salvati in `/config/amira/model_blocklist.json` con chiave `github_copilot` e sopravvivono ai riavvii
+- **Messaggio utente chiaro**: quando un modello non è supportato, la chat mostra un avviso esplicito invitando a selezionarne un altro
+- **Infrastruttura generica `blocklist_model()`**: helper centralizzato in `api.py` che supporta qualsiasi provider (nvidia, github, github_copilot) — estendibile in futuro
+
 ## 4.4.2 — Fix chat UI crash (SyntaxError + ReferenceError)
 - **Fix `await` SyntaxError**: `bootUI()` was a sync function but used `await fetch(...)` for the SDK check added in v4.4.1 — browsers threw `Uncaught SyntaxError: await is only valid in async functions`. Now `async function bootUI()`
 - **Fix `switchSidebarTab is not defined`**: sidebar tab buttons used `onclick="switchSidebarTab(...)"` but the function was defined in local script scope, not on `window` — caused `Uncaught ReferenceError` on every tab click
