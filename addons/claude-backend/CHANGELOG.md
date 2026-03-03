@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.4.4 — Fix risposte AI mancanti nello storico + cestino visibile
+- **Fix risposte AI sparite nelle chat vecchie**: quando l'IA usava tool calls (es. automazioni, statistiche), la risposta finale veniva mostrata in streaming ma MAI salvata su disco — al ricaricamento della pagina spariva. Causa: `elif _streamed_text_parts` veniva saltato quando `new_msgs_from_provider` era non-vuoto (messaggi intermedi con tool_calls). Fix: cambiato `elif` → `if` così entrambi i blocchi vengono eseguiti
+- **Cestino conversazioni più visibile**: il pulsante elimina era `opacity: 0` e visibile solo al hover (invisibile su mobile/touch). Ora sempre semi-visibile (`opacity: 0.45`), più grande (32px), con bordo colorato, sfondo rosso tenue, glow rosso al hover e migliore contrasto in dark mode
+
 ## 4.4.3 — Auto-blocklist modelli non supportati (GitHub Copilot)
 - **Auto-blocklist su `model_not_supported`**: quando GitHub Copilot restituisce HTTP 400 con `model_not_supported` (es. `claude-opus-4.6-fast`), il modello viene automaticamente aggiunto alla blocklist e non appare più nella lista modelli
 - **Blocklist persistente**: i modelli bloccati vengono salvati in `/config/amira/model_blocklist.json` con chiave `github_copilot` e sopravvivono ai riavvii

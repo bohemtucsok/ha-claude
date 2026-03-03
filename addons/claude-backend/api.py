@@ -3937,8 +3937,12 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
         # Sync new assistant messages to conversation history.
         # New-path providers (Mistral, Groq, openai_compatible, etc.) stream text as
         # events but do NOT append to `messages`, so we use _streamed_text_parts.
-        # Old-path providers (legacy Anthropic/OpenAI agentic loop) append directly
-        # to `messages` — handle both cases without duplicating.
+        # During tool-calling, the tool loop appends intermediate assistant messages
+        # (with tool_calls) to `messages`.  These are saved below for history but are
+        # hidden from the UI by _is_tool_call_artifact.  The FINAL text response lives
+        # in _streamed_text_parts and MUST also be saved — hence the two separate `if`
+        # blocks (was `elif` before, which caused the final answer to be lost when tool
+        # calls occurred).
         is_anthropic_or_google = AI_PROVIDER in ("anthropic", "google")
         new_msgs_from_provider = [
             msg for msg in messages[conv_length_before:]
@@ -3946,15 +3950,16 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
             and not (is_anthropic_or_google and isinstance(msg.get("content", ""), list))
         ]
         if new_msgs_from_provider:
-            # Old-path: provider appended messages directly, use those
             for msg in new_msgs_from_provider:
                 msg["model"] = get_active_model()
                 msg["provider"] = AI_PROVIDER
                 if last_usage:
                     msg["usage"] = last_usage
                 conversations[session_id].append(msg)
-        elif _streamed_text_parts:
-            # New-path: assemble streamed tokens and save as assistant message
+        if _streamed_text_parts:
+            # Assemble streamed tokens into the final assistant message.
+            # This is the main user-facing response — for tool-calling conversations
+            # it's the text from the LAST streaming round (after all tools executed).
             assembled = "".join(_streamed_text_parts).strip()
             # Clean any raw <tool_call> XML or [TOOL RESULT] blocks from history
             if _is_no_tool_provider and assembled:

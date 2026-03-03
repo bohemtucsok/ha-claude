@@ -611,10 +611,11 @@ def get_chat_ui():
         .chat-item.active .chat-item-title {{ color: #ffffff; }}
         .chat-item-info {{ font-size: 11px; color: #8b95a5; font-weight: 400; }}
         .chat-item.active .chat-item-info {{ color: rgba(255,255,255,0.75); }}
-        .chat-item-delete {{ color: #e53e3e; font-size: 14px; padding: 6px; opacity: 0; transition: all 0.2s; cursor: pointer; flex-shrink: 0; background: rgba(254, 226, 226, 0.6); border: none; border-radius: 8px; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; }}
-        .chat-item:hover .chat-item-delete {{ opacity: 1; }}
-        .chat-item.active .chat-item-delete {{ color: #fff; background: rgba(255,255,255,0.2); opacity: 0.8; }}
-        .chat-item-delete:hover {{ color: #fff; background: #e53e3e; transform: scale(1.1); opacity: 1 !important; }}
+        .chat-item-delete {{ color: #c53030; font-size: 16px; padding: 6px; opacity: 0.45; transition: all 0.25s ease; cursor: pointer; flex-shrink: 0; background: rgba(254, 226, 226, 0.5); border: 1.5px solid rgba(229, 62, 62, 0.15); border-radius: 8px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; }}
+        .chat-item:hover .chat-item-delete {{ opacity: 1; background: rgba(254, 226, 226, 0.85); border-color: rgba(229, 62, 62, 0.3); }}
+        .chat-item.active .chat-item-delete {{ color: #fff; background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.25); opacity: 0.7; }}
+        .chat-item.active:hover .chat-item-delete {{ opacity: 1; }}
+        .chat-item-delete:hover {{ color: #fff; background: #e53e3e; border-color: #e53e3e; transform: scale(1.12); opacity: 1 !important; box-shadow: 0 2px 8px rgba(229, 62, 62, 0.35); }}
         .chat-group-title {{ padding: 12px 16px 6px; font-size: 10px; color: #a0aec0; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }}
         .backup-list {{ padding: 0; }}
         .backup-item {{ padding: 10px 12px; border-bottom: 1px solid #f0f0f0; display: flex; flex-direction: column; gap: 4px; }}
@@ -1166,11 +1167,26 @@ def get_chat_ui():
         }}
 
         body.dark-mode .chat-item-delete {{
-            background: rgba(254, 178, 178, 0.1);
+            color: #fc8181;
+            background: rgba(254, 178, 178, 0.12);
+            border-color: rgba(252, 129, 129, 0.2);
+            opacity: 0.5;
+        }}
+        body.dark-mode .chat-item:hover .chat-item-delete {{
+            opacity: 1;
+            background: rgba(254, 178, 178, 0.22);
+            border-color: rgba(252, 129, 129, 0.35);
         }}
         body.dark-mode .chat-item.active .chat-item-delete {{
             color: #fed7d7;
             background: rgba(255,255,255,0.15);
+            border-color: rgba(255,255,255,0.2);
+        }}
+        body.dark-mode .chat-item-delete:hover {{
+            color: #fff;
+            background: #e53e3e;
+            border-color: #e53e3e;
+            box-shadow: 0 2px 10px rgba(229, 62, 62, 0.4);
         }}
 
         body.dark-mode .chat-group-title {{
