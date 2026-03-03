@@ -4807,8 +4807,24 @@ def get_chat_ui():
                 if (currentProviderId === 'chatgpt_web') checkChatGPTWebSession();
                 if (input) input.focus();
 
+                // ── Immediate SDK check on page load ──
+                try {{
+                    const _initStatus = await fetch(apiUrl('api/system/features'), {{credentials:'same-origin'}});
+                    if (_initStatus.ok) {{
+                        const _sf = await _initStatus.json();
+                        if (_sf.provider_sdk_available === false) {{
+                            const _m = _sf.provider_sdk_message || 'SDK mancante per il provider corrente';
+                            const _mp = (_sf.missing_packages || []).join(', ');
+                            let _w = '⚠️ ' + _m;
+                            if (_mp) _w += '<br><small>Pacchetti mancanti: ' + _mp + '</small>';
+                            _appendSystemRaw(_w);
+                        }}
+                    }}
+                }} catch(_e) {{ /* ignore on boot */ }}
+
                 // Poll every 10s for model/provider changes made from other UIs (e.g. bubble)
                 let _statusFailures = 0;
+                let _sdkWarningShown = false;
                 const _statusInterval = setInterval(async () => {{
                     try {{
                         const r = await fetch(apiUrl('api/status'), {{credentials:'same-origin'}});
@@ -4820,6 +4836,17 @@ def get_chat_ui():
                         }}
                         if (!r.ok) return;
                         const d = await r.json();
+                        // ── SDK missing warning ──
+                        if (d.provider_sdk_available === false && !_sdkWarningShown) {{
+                            _sdkWarningShown = true;
+                            const msg = d.provider_sdk_message || ('SDK mancante per il provider ' + d.provider);
+                            const missing = (d.missing_packages || []).join(', ');
+                            let warn = '⚠️ ' + msg;
+                            if (missing) warn += '<br><small>Pacchetti mancanti: ' + missing + '</small>';
+                            warn += '<br><small>Piattaforma: ' + (d.platform || '?') + '</small>';
+                            _appendSystemRaw(warn);
+                        }}
+                        if (d.provider_sdk_available !== false) {{ _sdkWarningShown = false; }}
                         const sp = d.provider || '';
                         const sm = d.model || '';
                         if (sp && sm && (sp !== currentProviderId || sm !== currentModelDisplay)) {{

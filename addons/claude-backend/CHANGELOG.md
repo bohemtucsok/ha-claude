@@ -4,7 +4,11 @@
 - **Fix ARM (aarch64/armv7) install failure**: split `pip install` into two stages in the Dockerfile — core dependencies (flask, waitress, etc.) MUST install, while heavy optional SDKs (anthropic, openai, google-genai, mcp, twilio, telegram) are installed individually with `--prefer-binary` and can fail without breaking the build
 - **Crash-resilient server startup**: if `import api` fails at runtime (missing module, memory issue, etc.), a lightweight diagnostic Flask server starts on the same port, showing the exact error in the browser and in logs — eliminates the "Cannot connect to host" ingress loop
 - **Startup diagnostics**: `server.py` now logs platform arch, Python version, and availability of all optional packages before loading the main app
-- **New files**: `requirements_core.txt` (7 mandatory packages) and `requirements_optional.txt` (9 provider SDKs / features) — original `requirements.txt` kept for local development
+- **SDK missing warning in chat UI**: if the selected AI provider requires an SDK that didn't install (e.g. `anthropic` on RPi), the user sees a clear warning banner in the chat with the exact package name and platform info — both on page load and on the 10s status poll
+- **Clear error on chat**: `stream_chat_with_ai()` now checks SDK availability before trying to call the provider — returns a translated human-readable error instead of a cryptic traceback
+- **API endpoints updated**: `/api/status` and `/api/system/features` now include `provider_sdk_available`, `provider_sdk_message`, `missing_packages`, and `platform` fields
+- **httpx moved to core**: `httpx` is required by all providers (via `enhanced.py`), now in `requirements_core.txt` instead of optional
+- **New files**: `requirements_core.txt` (8 mandatory packages) and `requirements_optional.txt` (8 provider SDKs / features) — original `requirements.txt` kept for local development
 
 ## 4.4.0 — Conversation list: modern card style + fix [CONTEXT] leak in titles/messages
 - **Fix [CONTEXT:] in titles**: conversation titles no longer show raw `[CONTEXT: User is on the Home Assistant Statistics...]` — the server-side `api_conversations_list()` now strips context blocks before generating titles

@@ -3155,7 +3155,13 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
     # Also strip standalone [CONTEXT: ...] blocks (handling nested brackets like [TOOL RESULT])
     saved_user_message = _strip_context_blocks(saved_user_message)
     saved_user_message = saved_user_message.strip()
-    
+
+    # ── Early check: is the SDK for the chosen provider actually installed? ────
+    _sdk_ok, _sdk_msg = _check_provider_sdk(AI_PROVIDER)
+    if not _sdk_ok:
+        yield {"type": "error", "message": f"⚠️ {_sdk_msg}"}
+        return
+
     if not ai_client:
         # Per i provider gestiti da providers/manager.py, ai_client è sempre None (è normale).
         # Il controllo effettivo sulla chiave lo fa il manager stesso.
@@ -4234,6 +4240,76 @@ def ui_main_js():
     }
 
 
+# ── SDK availability helpers (used by /api/status, /api/system/features, chat) ──
+
+# Maps provider name → Python package needed to chat.
+# Providers not listed here use httpx (already in core).
+_PROVIDER_SDK_MAP = {
+    "anthropic": "anthropic",
+    "openai": "openai",
+    "google": None,   # uses httpx directly (no google-genai SDK needed at runtime)
+    "nvidia": None,    # OpenAI-compat via httpx
+    "github": None,    # OpenAI-compat via httpx
+    "groq": None,
+    "mistral": None,
+    "deepseek": None,
+    "openrouter": None,
+    "ollama": None,
+    "custom": None,
+    "minimax": None,
+    "aihubmix": None,
+    "siliconflow": None,
+    "volcengine": None,
+    "dashscope": None,
+    "moonshot": None,
+    "zhipu": None,
+    "perplexity": None,
+    "github_copilot": None,
+    "openai_codex": None,
+    "claude_web": None,
+    "chatgpt_web": None,
+}
+
+def _check_optional_sdks() -> dict:
+    """Quick import-check for every optional dependency. Returns {name: bool}."""
+    pkgs = ["anthropic", "openai", "google.genai", "mcp", "telegram", "twilio", "PyPDF2", "docx"]
+    out = {}
+    for name in pkgs:
+        try:
+            __import__(name)
+            out[name] = True
+        except ImportError:
+            out[name] = False
+    return out
+
+
+def _check_provider_sdk(provider: str) -> tuple:
+    """Check if the SDK needed by the given provider is installed.
+
+    Returns:
+        (True, "")           – SDK available or not needed.
+        (False, human_msg)   – SDK missing, human_msg explains what to do.
+    """
+    sdk = _PROVIDER_SDK_MAP.get(provider)
+    if sdk is None:
+        return (True, "")
+    try:
+        __import__(sdk)
+        return (True, "")
+    except ImportError:
+        _msgs = {
+            "en": f"The '{sdk}' package is not installed. Provider '{provider}' cannot work. "
+                  f"This can happen on ARM/Raspberry Pi devices where some packages fail to compile.",
+            "it": f"Il pacchetto '{sdk}' non è installato. Il provider '{provider}' non può funzionare. "
+                  f"Questo può succedere su dispositivi ARM/Raspberry Pi dove alcuni pacchetti non si compilano.",
+            "es": f"El paquete '{sdk}' no está instalado. El proveedor '{provider}' no puede funcionar. "
+                  f"Esto puede ocurrir en dispositivos ARM/Raspberry Pi.",
+            "fr": f"Le package '{sdk}' n'est pas installé. Le fournisseur '{provider}' ne peut pas fonctionner. "
+                  f"Cela peut se produire sur les appareils ARM/Raspberry Pi.",
+        }
+        return (False, _msgs.get(LANGUAGE, _msgs["en"]))
+
+
 @app.route('/api/ui_ping', methods=['GET'])
 def api_ui_ping():
     """No-op endpoint used only to confirm that the browser executed JS."""
@@ -4254,6 +4330,11 @@ def api_status():
     except Exception as e:
         ha_msg = str(e)
 
+    # Check optional SDK availability
+    pkg_status = _check_optional_sdks()
+    missing = [k for k, v in pkg_status.items() if not v]
+    provider_sdk_ok, provider_sdk_msg = _check_provider_sdk(AI_PROVIDER)
+
     return jsonify({
         "version": VERSION,
         "provider": AI_PROVIDER,
@@ -4264,6 +4345,11 @@ def api_status():
         "supervisor_token_length": len(token),
         "ha_connection_ok": ha_ok,
         "ha_response": ha_msg,
+        "provider_sdk_available": provider_sdk_ok,
+        "provider_sdk_message": provider_sdk_msg,
+        "optional_packages": pkg_status,
+        "missing_packages": missing,
+        "platform": __import__('platform').machine(),
     })
 
 
@@ -5824,11 +5910,19 @@ def api_system_features():
         "voice_transcription": VOICE_TRANSCRIPTION_AVAILABLE,
         "scheduler_agent": SCHEDULER_AGENT_AVAILABLE,
     }
-    
+
+    # SDK availability for the current provider
+    provider_sdk_ok, provider_sdk_msg = _check_provider_sdk(AI_PROVIDER)
+    pkg_status = _check_optional_sdks()
+    missing = [k for k, v in pkg_status.items() if not v]
+
     return jsonify({
         "status": "success",
         "features": features,
         "enabled_count": sum(1 for v in features.values() if v),
+        "provider_sdk_available": provider_sdk_ok,
+        "provider_sdk_message": provider_sdk_msg,
+        "missing_packages": missing,
     }), 200
 
 
