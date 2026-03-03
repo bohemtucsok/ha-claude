@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.4.2 — Fix chat UI crash (SyntaxError + ReferenceError)
+- **Fix `await` SyntaxError**: `bootUI()` was a sync function but used `await fetch(...)` for the SDK check added in v4.4.1 — browsers threw `Uncaught SyntaxError: await is only valid in async functions`. Now `async function bootUI()`
+- **Fix `switchSidebarTab is not defined`**: sidebar tab buttons used `onclick="switchSidebarTab(...)"` but the function was defined in local script scope, not on `window` — caused `Uncaught ReferenceError` on every tab click
+- **Export all onclick handlers to `window`**: added `window.` exports for `switchSidebarTab`, `newChat`, `toggleSidebar`, `sendSuggestion`, `testNvidiaModel`, `revokeCodexOAuth`, `toggleDarkMode`, `toggleReadOnly` — all inline `onclick` handlers now work correctly
+
 ## 4.4.1 — ARM / Raspberry Pi compatibility + crash-resilient startup
 - **Fix ARM (aarch64/armv7) install failure**: split `pip install` into two stages in the Dockerfile — core dependencies (flask, waitress, etc.) MUST install, while heavy optional SDKs (anthropic, openai, google-genai, mcp, twilio, telegram) are installed individually with `--prefer-binary` and can fail without breaking the build
 - **Crash-resilient server startup**: if `import api` fails at runtime (missing module, memory issue, etc.), a lightweight diagnostic Flask server starts on the same port, showing the exact error in the browser and in logs — eliminates the "Cannot connect to host" ingress loop
