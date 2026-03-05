@@ -72,6 +72,44 @@ class OllamaProvider(EnhancedProvider):
         # Use enhanced caching and retry
         yield from self.stream_chat_with_caching(messages, intent_info, max_retries=2)
 
+    # -- Ollama-specific lightweight system prompt -------------------------
+    _OLLAMA_SYSTEM_PROMPT = (
+        "Sei Amira, un'assistente domestica intelligente e amichevole.\n"
+        "Rispondi in modo conciso e naturale nella lingua dell'utente.\n"
+        "Se l'utente chiede di controllare dispositivi o sensori, descrivi "
+        "l'azione richiesta; non hai accesso diretto ai dispositivi.\n"
+        "Sii gentile, utile e vai dritto al punto."
+    )
+
+    def _prepare_messages(
+        self,
+        messages: List[Dict[str, Any]],
+        intent_info: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Override: use a lightweight system prompt for Ollama.
+
+        Local models running on weak CPUs (e.g. Celeron J4025) can't handle
+        the full system prompt with 40+ tool descriptions (~7000 tokens).
+        We replace it with a concise Italian persona prompt to stay well
+        within the model's context window and speed up prefill.
+        """
+        # Build message list: lightweight system + conversation (no tool blocks)
+        out: List[Dict[str, Any]] = [{"role": "system", "content": self._OLLAMA_SYSTEM_PROMPT}]
+        for msg in messages:
+            role = msg.get("role", "")
+            # Skip tool-call / tool-result messages (Ollama can't use HA tools)
+            if role == "tool":
+                continue
+            if role == "assistant" and msg.get("tool_calls"):
+                continue
+            content = msg.get("content", "")
+            if content:
+                out.append({"role": role, "content": content})
+        # Keep last 6 turns to avoid overflowing small context windows
+        if len(out) > 7:  # 1 system + 6 turns
+            out = [out[0]] + out[-6:]
+        return out
+
     def _do_stream(
         self,
         messages: List[Dict[str, Any]],
@@ -89,37 +127,56 @@ class OllamaProvider(EnhancedProvider):
         import httpx
         model = self.model or "llama2"
         base_url = getattr(self, "base_url", "http://localhost:11434")
-        _timeout = httpx.Timeout(connect=10.0, read=180.0, write=10.0, pool=5.0)
+        # Generous timeout for CPU-only inference on low-end hardware
+        _timeout = httpx.Timeout(connect=15.0, read=300.0, write=10.0, pool=5.0)
 
-        # Prepare messages (inject system prompt, same as base class)
-        msgs = self._prepare_messages(messages, intent_info)
+        # ── Build lightweight message list directly (bypass _prepare_messages) ──
+        # Local models on weak CPUs can't handle the full HA system prompt
+        # (~7000 tokens with 48 tool descriptions). We replace it entirely.
+        msgs: List[Dict[str, Any]] = [
+            {"role": "system", "content": self._OLLAMA_SYSTEM_PROMPT}
+        ]
+        for msg in messages:
+            role = msg.get("role", "")
+            # Skip system messages (the big HA prompt), tool calls and tool results
+            if role in ("system", "tool"):
+                continue
+            if role == "assistant" and msg.get("tool_calls"):
+                continue
+            content = msg.get("content", "")
+            if content:
+                # Truncate very long user messages (smart-context can be huge)
+                if len(content) > 1000:
+                    content = content[:1000] + "\n[...troncato per Ollama]"
+                msgs.append({"role": role, "content": content})
+        # Keep last 6 turns max to stay within small context window
+        if len(msgs) > 7:  # 1 system + 6 turns
+            msgs = [msgs[0]] + msgs[-6:]
 
         # ---- Sanitise messages for Ollama's template engine ----
         msgs = self._sanitize_messages(msgs)
 
-        # Include tool schemas if provided by intent (models that support tool calling)
-        tool_schemas = (intent_info or {}).get("tool_schemas") or []
+        # Log what we're sending for debugging
+        total_chars = sum(len(m.get("content", "")) for m in msgs)
+        logger.info("Ollama request: model=%s, messages=%d, ~%d chars, url=%s",
+                    model, len(msgs), total_chars, base_url)
+
+        # No tool schemas for Ollama on weak hardware — tools cause template errors
+        # and bloat the prompt. Ollama acts as a conversational-only assistant.
         body: Dict[str, Any] = {
             "model": model,
             "messages": msgs,
             "stream": True,
+            # Reduce context window for faster prefill on weak CPUs
+            "options": {"num_ctx": 2048},
         }
-        if tool_schemas:
-            body["tools"] = self._sanitize_tool_schemas(tool_schemas)
 
         accumulated_tool_calls: Dict[int, Dict] = {}
 
         try:
             yield from self._ollama_stream(base_url, body, _timeout, accumulated_tool_calls)
         except RuntimeError as exc:
-            # If Ollama chokes on tool schemas, retry without them
-            if "can't find closing" in str(exc) and tool_schemas:
-                logger.warning("Ollama: template error with tools — retrying without tool schemas")
-                body.pop("tools", None)
-                accumulated_tool_calls.clear()
-                yield from self._ollama_stream(base_url, body, _timeout, accumulated_tool_calls)
-            else:
-                raise
+            raise
 
     # ---- Ollama-specific helpers ------------------------------------------------
 
@@ -248,15 +305,8 @@ class OllamaProvider(EnhancedProvider):
         except Exception:
             pass
 
-        # Fallback: return common locally-available models
-        return [
-            "mistral",
-            "llama2",
-            "neural-chat",
-            "orca-mini",
-            "dolphin-mixtral",
-            "openchat",
-        ]
+        # No fake fallback — return empty so the UI only shows installed models
+        return []
 
     def get_error_translations(self) -> Dict[str, Dict[str, str]]:
         """Get Ollama-specific error translations."""

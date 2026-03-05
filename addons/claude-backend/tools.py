@@ -936,6 +936,9 @@ TOOL_DESCRIPTIONS = {
     "get_repairs": "Carico riparazioni",
     "dismiss_repair": "Ignoro riparazione",
     "get_ha_logs": "Leggo log di sistema",
+    "fire_event": "Lancio evento",
+    "get_logged_users": "Utenti connessi",
+    "get_error_log": "Log errori (interattivo)",
 }
 
 
@@ -1554,6 +1557,44 @@ HA_TOOLS_DESCRIPTION = [
         }
     },
     {
+        "name": "fire_event",
+        "description": "Fire a custom event on the Home Assistant event bus. Use this to trigger automations that listen for custom events. CANNOT fire core events (homeassistant_start, homeassistant_stop, etc.).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "event_type": {"type": "string", "description": "Event type to fire (e.g., 'custom_alarm', 'my_event')"},
+                "event_data": {"type": "object", "description": "Optional data payload for the event"}
+            },
+            "required": ["event_type"]
+        }
+    },
+    {
+        "name": "get_logged_users",
+        "description": "List all Home Assistant users with their roles and status. Shows name, is_owner, is_active, system_generated, group_ids, local_only.",
+        "parameters": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "get_error_log",
+        "description": (
+            "Interactive error log viewer with two modes:\n"
+            "1) SUMMARY mode (default): Returns a numbered list of recent log entries with severity. "
+            "Present this list to the user and ask which entry to analyze.\n"
+            "2) DETAIL mode (entry_index=N): Returns the full text + stack trace of entry N. "
+            "Analyze it and suggest using get_dashboard_config or read_config_file to trace the source.\n"
+            "Supports source='browser' to show browser console errors captured from the UI."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "entry_index": {"type": "integer", "description": "Index of a specific entry to get full detail (from summary list)"},
+                "filter": {"type": "string", "description": "Keyword to filter log entries"},
+                "max_entries": {"type": "integer", "description": "Max entries to return in summary (default 30, max 100)"},
+                "source": {"type": "string", "enum": ["ha", "browser"], "description": "Log source: 'ha' (default) for HA error log, 'browser' for captured browser console errors"}
+            },
+            "required": []
+        }
+    },
+    {
         "name": "get_ha_logs",
         "description": (
             "Get Home Assistant system logs and error messages. "
@@ -1755,6 +1796,7 @@ WRITE_TOOLS = {
     "call_service", "write_config_file", "send_notification",
     "manage_entity", "create_backup", "manage_helpers",
     "dismiss_repair",
+    "fire_event",
 }
 # Tools that are write-only when action is NOT "list"
 WRITE_WHEN_NOT_LIST = {"manage_areas", "shopping_list"}
@@ -4082,6 +4124,125 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
                 error_msg = error_msg.get("message", str(error_msg))
             return json.dumps({"error": f"Failed to dismiss: {error_msg}"}, default=str)
 
+        elif tool_name == "fire_event":
+            event_type = tool_input.get("event_type", "")
+            event_data = tool_input.get("event_data", {})
+            if not event_type:
+                return json.dumps({"error": "event_type is required."})
+            BLOCKED_EVENTS = {
+                "homeassistant_start", "homeassistant_stop", "homeassistant_close",
+                "homeassistant_final_write", "core_config_updated",
+                "component_loaded", "service_registered", "service_removed",
+            }
+            if event_type.lower() in BLOCKED_EVENTS:
+                return json.dumps({"error": f"Cannot fire core event '{event_type}'. Only custom events are allowed."})
+            result = api.call_ha_api("POST", f"events/{event_type}", event_data or {})
+            return json.dumps({"status": "success", "event_type": event_type, "result": result}, ensure_ascii=False, default=str)
+
+        elif tool_name == "get_logged_users":
+            result = api.call_ha_websocket("config/auth/list")
+            if result.get("success") and result.get("result"):
+                users = []
+                for u in result["result"]:
+                    users.append({
+                        "name": u.get("name"),
+                        "is_owner": u.get("is_owner", False),
+                        "is_active": u.get("is_active", True),
+                        "system_generated": u.get("system_generated", False),
+                        "group_ids": u.get("group_ids", []),
+                        "local_only": u.get("local_only", False),
+                    })
+                return json.dumps({"users": users, "count": len(users)}, ensure_ascii=False, default=str)
+            return json.dumps({"error": f"Could not get users: {result}"}, default=str)
+
+        elif tool_name == "get_error_log":
+            import re as _re_log
+            source = tool_input.get("source", "ha")
+            entry_index = tool_input.get("entry_index")
+            keyword_filter = (tool_input.get("filter") or "").strip().lower()
+            max_entries = min(int(tool_input.get("max_entries", 30)), 100)
+
+            if source == "browser":
+                try:
+                    browser_errors = getattr(api, '_browser_console_errors', [])
+                    if entry_index is not None:
+                        idx = int(entry_index)
+                        if 0 <= idx < len(browser_errors):
+                            entry = browser_errors[idx]
+                            return json.dumps({
+                                "mode": "detail", "source": "browser",
+                                "entry": entry,
+                                "INSTRUCTION": "Analyze this browser error. Check if it relates to a dashboard card or integration. Suggest using get_dashboard_config or read_config_file to trace the source."
+                            }, ensure_ascii=False, default=str)
+                        return json.dumps({"error": f"Index {idx} out of range (0-{len(browser_errors)-1})"})
+                    filtered = browser_errors
+                    if keyword_filter:
+                        filtered = [e for e in filtered if keyword_filter in json.dumps(e, default=str).lower()]
+                    summary = []
+                    for i, err in enumerate(filtered[-max_entries:]):
+                        summary.append({"index": i, "message": str(err.get("message", ""))[:120], "source": err.get("source", ""), "timestamp": err.get("timestamp", "")})
+                    return json.dumps({
+                        "mode": "summary", "source": "browser",
+                        "total": len(browser_errors), "shown": len(summary),
+                        "entries": summary,
+                        "INSTRUCTION": "Present this numbered list to the user. Ask which entry they want to analyze in detail."
+                    }, ensure_ascii=False, default=str)
+                except Exception as e:
+                    return json.dumps({"error": f"Browser errors: {e}"})
+
+            # HA error log
+            try:
+                resp = requests.get(f"{api.HA_URL}/api/error_log", headers=api.get_ha_headers(), timeout=15)
+                if not resp.ok:
+                    return json.dumps({"error": f"HA error_log returned HTTP {resp.status_code}"})
+                raw_log = resp.text or ""
+                # Parse into entries by timestamp pattern
+                _TS_PATTERN = _re_log.compile(r'^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}')
+                entries = []
+                current_entry = []
+                for line in raw_log.splitlines():
+                    if _TS_PATTERN.match(line) and current_entry:
+                        entries.append("\n".join(current_entry))
+                        current_entry = [line]
+                    else:
+                        current_entry.append(line)
+                if current_entry:
+                    entries.append("\n".join(current_entry))
+
+                if keyword_filter:
+                    entries = [e for e in entries if keyword_filter in e.lower()]
+
+                if entry_index is not None:
+                    idx = int(entry_index)
+                    if 0 <= idx < len(entries):
+                        full_text = entries[idx]
+                        component = ""
+                        comp_match = _re_log.search(r'\[([a-z_]+(?:\.[a-z_]+)*)\]', full_text)
+                        if comp_match:
+                            component = comp_match.group(1)
+                        return json.dumps({
+                            "mode": "detail", "source": "ha",
+                            "entry_index": idx, "component": component,
+                            "full_text": full_text,
+                            "INSTRUCTION": "Analyze this error in depth. If it mentions a component/integration, suggest using read_config_file to check its config. If it mentions a dashboard/card, suggest get_dashboard_config."
+                        }, ensure_ascii=False, default=str)
+                    return json.dumps({"error": f"Index {idx} out of range (0-{len(entries)-1})"})
+
+                # Summary mode
+                summary = []
+                for i, entry in enumerate(entries[-max_entries:]):
+                    first_line = entry.split("\n")[0][:150]
+                    severity = "ERROR" if "ERROR" in entry[:80] else "WARNING" if "WARNING" in entry[:80] else "INFO"
+                    summary.append({"index": i, "severity": severity, "summary": first_line})
+                return json.dumps({
+                    "mode": "summary", "source": "ha",
+                    "total_entries": len(entries), "shown": len(summary),
+                    "entries": summary,
+                    "INSTRUCTION": "Present this numbered list to the user with severity icons (🔴 ERROR, 🟡 WARNING, 🔵 INFO). Ask which entry they want to analyze in detail."
+                }, ensure_ascii=False, default=str)
+            except Exception as e:
+                return json.dumps({"error": f"Could not fetch HA logs: {e}"})
+
         elif tool_name == "get_ha_logs":
             level_filter = tool_input.get("level", "warning")
             limit = min(int(tool_input.get("limit", 50)), 200)
@@ -4254,6 +4415,9 @@ You can:
 19. **Read/write config files** - Read and edit configuration.yaml, automations.yaml, YAML dashboards, packages, etc.
 20. **Validate config** - Check HA configuration for errors after editing
 21. **Snapshots** - Automatic backups before every file change, with restore capability
+22. **Fire events** - Fire custom events on the HA event bus to trigger automations
+23. **List users** - See all HA users with roles, active status, owner flag
+24. **Interactive error log** - Browse HA logs interactively: summary list → pick entry → deep analysis with source tracing
 
 ## Configuration File Management
 - Use **list_config_files** to explore the HA config directory
@@ -4631,6 +4795,9 @@ You can:
 19. **Read/write config files** - Read and edit configuration.yaml, automations.yaml, YAML dashboards, packages, etc.
 20. **Validate config** - Check HA configuration for errors after editing
 21. **Snapshots** - Automatic backups before every file change, with restore capability
+22. **Fire events** - Fire custom events on the HA event bus to trigger automations
+23. **List users** - See all HA users with roles, active status, owner flag
+24. **Interactive error log** - Browse HA logs interactively: summary list → pick entry → deep analysis with source tracing
 
 ## Configuration File Management
 - Use **list_config_files** to explore the HA config directory

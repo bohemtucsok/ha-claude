@@ -4,11 +4,464 @@ import os
 import json
 import re
 import logging
-from typing import Dict, List
+import time
+from typing import Dict, List, Optional
+
+import httpx
 
 import api
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Compact tool descriptions for AI-based intent classification
+# Each tool ➜ 1-line description (~500 tokens total for the full map)
+# ---------------------------------------------------------------------------
+TOOL_DESCRIPTIONS: Dict[str, str] = {
+    "get_entities": "Get all entities or filter by domain (light, sensor, switch …)",
+    "get_entity_state": "Get current state and attributes of one entity",
+    "call_service": "Call a HA service: turn on/off lights, switches, climate, covers, media, notify …",
+    "create_automation": "Create a new automation (triggers, conditions, actions)",
+    "get_automations": "Search/list existing automations by keyword",
+    "update_automation": "Modify an existing automation by ID",
+    "trigger_automation": "Manually trigger an automation",
+    "get_available_services": "List all available HA service domains and services",
+    "search_entities": "Search entities by keyword in entity_id or friendly_name",
+    "get_integration_entities": "Find entities belonging to an integration/platform",
+    "get_events": "List all available HA event types",
+    "get_history": "Get state history of an entity over a time period",
+    "get_scenes": "Get all available scenes",
+    "activate_scene": "Activate a scene",
+    "get_scripts": "List all available scripts",
+    "run_script": "Run a script with optional variables",
+    "update_script": "Modify an existing script",
+    "get_areas": "Get all areas/rooms and their entities",
+    "send_notification": "Send a notification (persistent or mobile)",
+    "get_dashboards": "List all Lovelace dashboards",
+    "create_dashboard": "Create a new Lovelace YAML dashboard",
+    "create_script": "Create a new script with a sequence of actions",
+    "delete_dashboard": "Delete a dashboard",
+    "delete_automation": "Delete an automation",
+    "delete_script": "Delete a script",
+    "manage_areas": "Create, rename, or delete areas/rooms",
+    "manage_entity": "Rename, assign to area, enable/disable an entity",
+    "get_devices": "Get all registered devices with manufacturer, model, area",
+    "manage_statistics": "Validate and fix recorder statistics",
+    "get_statistics": "Get advanced statistics (min/max/mean/sum) for a sensor",
+    "shopping_list": "View, add, or complete items in the shopping list",
+    "create_backup": "Create a full HA backup",
+    "browse_media": "Browse media content from media players",
+    "get_dashboard_config": "Get the full config of a Lovelace dashboard",
+    "update_dashboard": "Modify an existing Lovelace dashboard",
+    "get_frontend_resources": "List registered frontend resources (custom cards, HACS)",
+    "read_config_file": "Read a HA YAML config file (configuration.yaml, etc.)",
+    "write_config_file": "Write/update a HA config file (auto-backup)",
+    "check_config": "Validate HA configuration",
+    "list_config_files": "List files in the HA config directory",
+    "list_snapshots": "List available config snapshots",
+    "restore_snapshot": "Restore a file from a snapshot",
+    "manage_helpers": "Create/update/delete helpers (input_boolean, input_number, etc.)",
+    "read_html_dashboard": "Read the HTML source of a custom dashboard",
+    "create_html_dashboard": "Create a custom HTML dashboard with real-time monitoring",
+    "get_repairs": "Get active issues/repairs and system health",
+    "dismiss_repair": "Dismiss a specific repair issue",
+    "fire_event": "Fire a custom event on the HA event bus",
+    "get_logged_users": "List all HA users: who is connected/logged in, roles, status",
+    "get_error_log": "Interactive error log viewer (summary + detail modes)",
+    "get_ha_logs": "Get HA system logs and error messages",
+}
+
+# All valid tool names (used to validate AI classifier output)
+_VALID_TOOL_NAMES = set(TOOL_DESCRIPTIONS.keys())
+
+
+# ---------------------------------------------------------------------------
+# AI-based tool classification
+# ---------------------------------------------------------------------------
+
+# Provider base-URLs for OpenAI-compatible classification call
+_PROVIDER_BASE_URLS: Dict[str, str] = {
+    "openai": "https://api.openai.com/v1",
+    "anthropic": "https://api.anthropic.com/v1",
+    "github": "https://models.inference.ai.azure.com",
+    "nvidia": "https://integrate.api.nvidia.com/v1",
+    "groq": "https://api.groq.com/openai/v1",
+    "mistral": "https://api.mistral.ai/v1",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "deepseek": "https://api.deepseek.com/v1",
+    "minimax": "https://api.minimax.chat/v1",
+    "aihubmix": "https://aihubmix.com/v1",
+    "siliconflow": "https://api.siliconflow.cn/v1",
+    "perplexity": "https://api.perplexity.ai",
+    "moonshot": "https://api.moonshot.cn/v1",
+    "zhipu": "https://open.bigmodel.cn/api/paas/v4",
+}
+
+# Classification system prompt — compact, ~500 tokens
+_CLASSIFY_SYSTEM_PROMPT = """You are a tool selector for a Home Assistant AI assistant.
+Given the user's request, decide which tools are needed to fulfill it.
+
+Available tools:
+{tool_list}
+
+Rules:
+- Return ONLY a JSON array of tool name strings, nothing else.
+- Pick only the tools strictly necessary (typically 1-6).
+- The user may write in ANY language (Italian, English, Spanish, French, etc.). Understand the intent regardless of language.
+- If the request is a greeting, chitchat, or general knowledge question with NO Home Assistant action, return [].
+- For device control: include call_service + search_entities.
+- For queries about state: include get_entity_state and/or search_entities.
+- For history/trends/summaries ("what happened", "history", "last N hours"): ALWAYS include get_history + search_entities. Include get_statistics if they ask for min/max/average.
+- For automations: include the relevant automation tools (get_automations, create_automation, update_automation).
+- For scripts: include the relevant script tools.
+- For dashboard work: include the relevant dashboard tools.
+- For config file editing: include read_config_file, write_config_file, check_config.
+- For system diagnostics/logs: include get_error_log, get_ha_logs, get_repairs.
+- For shopping list: include shopping_list.
+- For areas/rooms: include get_areas.
+- When unsure, include search_entities — it helps find the right entity.
+Example output: ["call_service", "search_entities"]"""
+
+
+def _build_tool_list_text() -> str:
+    """Build compact tool list for classification prompt."""
+    lines = []
+    for name, desc in TOOL_DESCRIPTIONS.items():
+        lines.append(f"- {name}: {desc}")
+    return "\n".join(lines)
+
+
+def _get_provider_api_key(provider: str) -> str:
+    """Get API key for the given provider from env."""
+    _key_map = {
+        "openai": "OPENAI_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+        "github": "GITHUB_TOKEN",
+        "nvidia": "NVIDIA_API_KEY",
+        "groq": "GROQ_API_KEY",
+        "mistral": "MISTRAL_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
+        "minimax": "MINIMAX_API_KEY",
+        "aihubmix": "AIHUBMIX_API_KEY",
+        "siliconflow": "SILICONFLOW_API_KEY",
+        "perplexity": "PERPLEXITY_API_KEY",
+        "moonshot": "MOONSHOT_API_KEY",
+        "zhipu": "ZHIPU_API_KEY",
+        "ollama": "",
+    }
+    env_var = _key_map.get(provider)
+    if env_var is None:
+        # Generic fallback
+        env_var = f"{provider.upper()}_API_KEY"
+    if not env_var:
+        return ""
+    # Anthropic special case: fallback to CLAUDE_API_KEY
+    if provider == "anthropic":
+        return os.getenv("ANTHROPIC_API_KEY", "") or os.getenv("CLAUDE_API_KEY", "")
+    if provider == "github":
+        return os.getenv("GITHUB_TOKEN", "") or os.getenv("GITHUB_API_KEY", "")
+    return os.getenv(env_var, "")
+
+
+def _get_provider_base_url(provider: str) -> str:
+    """Get base URL for the given provider."""
+    if provider == "ollama":
+        return os.getenv("OLLAMA_BASE_URL", "http://localhost:11434") + "/v1"
+    if provider == "custom":
+        return os.getenv("CUSTOM_API_BASE", "")
+    return _PROVIDER_BASE_URLS.get(provider, "")
+
+
+# Providers that don't expose a standard REST API for classification
+# but CAN classify via their streaming interface (providers.stream_chat)
+_WEB_PROVIDERS = {"openai_codex", "claude_web", "chatgpt_web", "github_copilot"}
+
+# Fallback REST providers to try if primary has no base URL AND streaming fails
+_CLASSIFY_FALLBACK_ORDER = [
+    ("groq", "llama-3.3-70b-versatile"),
+    ("github", "gpt-4o-mini"),
+    ("openai", "gpt-4o-mini"),
+    ("deepseek", "deepseek-chat"),
+    ("mistral", "mistral-small-latest"),
+    ("openrouter", "meta-llama/llama-3.3-70b-instruct"),
+    ("anthropic", "claude-sonnet-4-20250514"),
+    ("google", "gemini-2.0-flash"),
+    ("nvidia", "meta/llama-3.1-8b-instruct"),
+    ("perplexity", "sonar"),
+    ("ollama", ""),  # uses whatever model is loaded
+]
+
+
+def _find_rest_classify_provider(primary_provider: str, primary_model: str):
+    """Find a REST-compatible provider+model for the direct httpx classification call.
+
+    Returns (provider, model, base_url, api_key) or (None, ...) if nothing works.
+    """
+    # Try primary first (if it has a REST base URL)
+    if primary_provider not in _WEB_PROVIDERS:
+        base_url = _get_provider_base_url(primary_provider)
+        api_key = _get_provider_api_key(primary_provider)
+        if base_url and (api_key or primary_provider == "ollama"):
+            return primary_provider, primary_model, base_url, api_key
+
+    # Primary can't do REST → try fallbacks
+    for fb_provider, fb_model in _CLASSIFY_FALLBACK_ORDER:
+        if fb_provider == primary_provider:
+            continue
+        api_key = _get_provider_api_key(fb_provider)
+        if not api_key and fb_provider != "ollama":
+            continue
+        base_url = _get_provider_base_url(fb_provider)
+        if not base_url:
+            continue
+        if fb_provider == "ollama" and not api_key:
+            api_key = ""
+        logger.info(f"AI classify: REST fallback → '{fb_provider}' (model={fb_model})")
+        return fb_provider, fb_model, base_url, api_key
+
+    return None, None, None, None
+
+
+def _classify_via_streaming(
+    user_message: str,
+    provider: str,
+    model: str,
+) -> Optional[str]:
+    """Classify using the provider's streaming interface (works with ALL providers).
+
+    Uses providers.stream_chat() — the same mechanism as the main chat.
+    Returns the raw text response, or None on error.
+    """
+    from providers import stream_chat as _stream_chat
+
+    tool_list_text = _build_tool_list_text()
+    system_prompt = _CLASSIFY_SYSTEM_PROMPT.format(tool_list=tool_list_text)
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_message},
+    ]
+    # No tools in the classification call — we just want a text answer
+    classify_intent = {"intent": "chat", "tools": [], "tool_schemas": [], "prompt": None}
+
+    t0 = time.time()
+    text_parts: list = []
+    try:
+        for event in _stream_chat(provider, messages, intent_info=classify_intent, model=model):
+            etype = event.get("type", "")
+            if etype in ("text", "content", "delta"):
+                text_parts.append(event.get("text", "") or event.get("content", ""))
+            elif etype == "error":
+                elapsed_ms = int((time.time() - t0) * 1000)
+                logger.warning(
+                    f"AI classify (stream): error in {elapsed_ms}ms — {event.get('message', '')}"
+                )
+                return None
+            elif etype == "done":
+                break
+
+        raw_text = "".join(text_parts).strip()
+        elapsed_ms = int((time.time() - t0) * 1000)
+        if raw_text:
+            logger.info(f"AI classify (stream): got {len(raw_text)} chars in {elapsed_ms}ms via {provider}")
+            return raw_text
+        else:
+            logger.warning(f"AI classify (stream): empty response in {elapsed_ms}ms")
+            return None
+
+    except Exception as e:
+        elapsed_ms = int((time.time() - t0) * 1000)
+        logger.warning(f"AI classify (stream): error in {elapsed_ms}ms — {e}")
+        return None
+
+
+def _parse_classify_response(raw_text: str) -> Optional[List[str]]:
+    """Parse a classify response into a validated list of tool names."""
+    raw_text = raw_text.strip()
+    # Strip markdown code fences if present
+    if raw_text.startswith("```"):
+        raw_text = re.sub(r"^```\w*\n?", "", raw_text)
+        raw_text = re.sub(r"\n?```$", "", raw_text)
+        raw_text = raw_text.strip()
+
+    try:
+        tool_names = json.loads(raw_text)
+    except json.JSONDecodeError:
+        # Try to extract a JSON array from the text (model might add extra text)
+        m = re.search(r'\[.*?\]', raw_text, re.DOTALL)
+        if m:
+            try:
+                tool_names = json.loads(m.group(0))
+            except json.JSONDecodeError:
+                logger.warning(f"AI classify: cannot parse JSON: {raw_text[:120]}")
+                return None
+        else:
+            logger.warning(f"AI classify: no JSON array found: {raw_text[:120]}")
+            return None
+
+    if not isinstance(tool_names, list):
+        logger.warning(f"AI classify: response is not a list: {raw_text[:100]}")
+        return None
+
+    # Validate tool names — keep only valid ones
+    valid_tools = [t for t in tool_names if isinstance(t, str) and t in _VALID_TOOL_NAMES]
+
+    if len(valid_tools) != len(tool_names):
+        invalid = [t for t in tool_names if t not in _VALID_TOOL_NAMES]
+        logger.warning(f"AI classify: removed invalid tool names: {invalid}")
+
+    return valid_tools
+
+
+def ai_classify_tools(
+    user_message: str,
+    provider: str,
+    model: str,
+) -> Optional[List[str]]:
+    """Use a quick AI call to classify which tools are needed for a user message.
+
+    Strategy:
+    1. Try direct REST call (httpx POST) — fastest, works with OpenAI-compatible APIs.
+    2. If primary is a web provider (openai_codex, claude_web, etc.), use the
+       streaming interface (providers.stream_chat) — same mechanism as the main chat.
+    3. If both fail, try REST fallback providers.
+
+    Returns:
+        - list of tool name strings (may be empty for chat)
+        - None on error (caller should fall back to generic tool set)
+    """
+    t0 = time.time()
+
+    # --- Strategy 1: Direct REST call (preferred, fastest) ---
+    if provider not in _WEB_PROVIDERS:
+        result = _classify_via_rest(user_message, provider, model)
+        if result is not None:
+            return result
+        # REST failed for primary, will try fallbacks below
+
+    # --- Strategy 2: REST fallback providers (fast, ~300-500ms) ---
+    # For web providers this is the FIRST attempt (skip slow streaming).
+    # For REST providers this is a retry with a different provider.
+    cls_provider, cls_model, base_url, api_key = _find_rest_classify_provider(provider, model)
+    if base_url:
+        result = _classify_via_rest_direct(user_message, cls_provider, cls_model, base_url, api_key, provider)
+        if result is not None:
+            return result
+
+    # --- Strategy 3: Stream through the web provider as last resort ---
+    # Only if no REST fallback is available (e.g. no API keys configured)
+    if provider in _WEB_PROVIDERS:
+        logger.info(f"AI classify: no REST fallback available, trying streaming via '{provider}'")
+        raw_text = _classify_via_streaming(user_message, provider, model)
+        if raw_text is not None:
+            valid_tools = _parse_classify_response(raw_text)
+            if valid_tools is not None:
+                elapsed_ms = int((time.time() - t0) * 1000)
+                logger.info(
+                    f"AI classify: {len(valid_tools)} tools in {elapsed_ms}ms via {provider} (stream) → {valid_tools}"
+                )
+                return valid_tools
+
+    logger.warning(f"AI classify: all strategies failed for provider='{provider}'")
+    return None
+
+
+def _classify_via_rest(
+    user_message: str,
+    provider: str,
+    model: str,
+) -> Optional[List[str]]:
+    """Try direct REST classification with the primary provider."""
+    base_url = _get_provider_base_url(provider)
+    api_key = _get_provider_api_key(provider)
+    if not base_url or (not api_key and provider != "ollama"):
+        return None
+    return _classify_via_rest_direct(user_message, provider, model, base_url, api_key, provider)
+
+
+def _classify_via_rest_direct(
+    user_message: str,
+    cls_provider: str,
+    cls_model: str,
+    base_url: str,
+    api_key: str,
+    original_provider: str,
+) -> Optional[List[str]]:
+    """Execute the REST classification call."""
+    is_anthropic = (cls_provider == "anthropic")
+
+    tool_list_text = _build_tool_list_text()
+    system_prompt = _CLASSIFY_SYSTEM_PROMPT.format(tool_list=tool_list_text)
+
+    headers: Dict[str, str] = {"Content-Type": "application/json"}
+
+    if is_anthropic:
+        headers["x-api-key"] = api_key
+        headers["anthropic-version"] = "2023-06-01"
+        url = base_url.rstrip("/") + "/messages"
+        body = {
+            "model": cls_model,
+            "max_tokens": 150,
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": user_message}],
+        }
+    else:
+        headers["Authorization"] = f"Bearer {api_key}"
+        url = base_url.rstrip("/") + "/chat/completions"
+        body = {
+            "model": cls_model,
+            "max_tokens": 150,
+            "temperature": 0,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+        }
+
+    t0 = time.time()
+    try:
+        _timeout = httpx.Timeout(connect=5.0, read=15.0, write=5.0, pool=5.0)
+        resp = httpx.post(url, headers=headers, json=body, timeout=_timeout)
+        elapsed_ms = int((time.time() - t0) * 1000)
+
+        if resp.status_code != 200:
+            logger.warning(f"AI classify (REST): HTTP {resp.status_code} in {elapsed_ms}ms — {resp.text[:200]}")
+            return None
+
+        data = resp.json()
+
+        # Extract text from response
+        if is_anthropic:
+            content_blocks = data.get("content", [])
+            raw_text = ""
+            for block in content_blocks:
+                if block.get("type") == "text":
+                    raw_text = block.get("text", "")
+                    break
+        else:
+            choices = data.get("choices", [])
+            raw_text = choices[0]["message"]["content"] if choices else ""
+
+        valid_tools = _parse_classify_response(raw_text)
+        if valid_tools is None:
+            return None
+
+        _via = f" via {cls_provider}/{cls_model}" if cls_provider != original_provider else ""
+        logger.info(
+            f"AI classify: {len(valid_tools)} tools in {elapsed_ms}ms{_via} → {valid_tools}"
+        )
+        return valid_tools
+
+    except httpx.TimeoutException:
+        elapsed_ms = int((time.time() - t0) * 1000)
+        logger.warning(f"AI classify (REST): timeout after {elapsed_ms}ms (provider={cls_provider})")
+        return None
+    except Exception as e:
+        elapsed_ms = int((time.time() - t0) * 1000)
+        logger.warning(f"AI classify (REST): error in {elapsed_ms}ms (provider={cls_provider}) — {e}")
+        return None
 
 
 # ---- Intent tool sets and prompts ----
@@ -36,6 +489,16 @@ INTENT_TOOL_SETS = {
     "helpers": ["manage_helpers", "search_entities"],
     "query_repairs": ["get_repairs", "dismiss_repair"],
     "manage_statistics": ["manage_statistics"],
+    "system_debug": ["get_error_log", "get_logged_users", "get_repairs", "fire_event",
+                      "read_config_file", "get_dashboard_config", "search_entities"],
+    # Generic fallback — a sensible default set that covers most common needs
+    # without blowing up the token count (12 tools instead of 48)
+    "generic": [
+        "search_entities", "get_entity_state", "get_entities",
+        "call_service", "get_history", "get_statistics",
+        "get_automations", "get_scripts", "get_dashboards",
+        "send_notification", "get_areas", "get_scenes",
+    ],
 }
 
 # Compact focused prompts by intent
@@ -406,6 +869,35 @@ WORKFLOW:
 5. If the user wants to dismiss an issue, call dismiss_repair with the issue_id and domain.
 6. NEVER dismiss issues automatically - always ask for user confirmation first.
 Respond in the user's language. Be concise.""",
+
+    "system_debug": """You are a Home Assistant debug and diagnostics assistant.
+
+WORKFLOW FOR ERROR LOG:
+1. FIRST call get_error_log() WITHOUT entry_index to get the SUMMARY list of errors.
+2. Present the numbered list to the user clearly: [index] severity - message summary.
+3. WAIT for the user to choose which error to investigate. Do NOT analyze errors from the summary.
+4. When the user picks an error, call get_error_log(entry_index=N) to get FULL details.
+5. Analyze the full error: explain cause, identify the component/integration involved.
+6. Trace the error to its source:
+   - If it's a dashboard/card error → call get_dashboard_config to inspect the dashboard
+   - If it's a config error → call read_config_file to read the relevant YAML file
+   - If it's an integration error → suggest reloading, reconfiguring, or checking the integration settings
+7. Propose a concrete fix and ask for confirmation before applying changes.
+
+FOR BROWSER CONSOLE ERRORS:
+- Use get_error_log(source="browser") to see frontend/JavaScript errors captured from the UI.
+- These help diagnose card rendering issues, custom component problems, and frontend bugs.
+
+FOR USERS:
+- Use get_logged_users to list all HA user accounts.
+
+FOR EVENTS:
+- Use fire_event to fire custom events on the HA event bus.
+
+IMPORTANT:
+- NEVER dump raw log text to the user. Always present structured, readable summaries.
+- ALWAYS let the user choose which entry to investigate.
+- Respond in the user's language. Be concise but thorough when analyzing errors.""",
 }
 
 
@@ -548,8 +1040,22 @@ def detect_intent(user_message: str, smart_context: str, previous_intent: str | 
     # (e.g. "modificala", "usa le stesse entità", "aggiungi un grafico"),
     # carry forward the intent. This handles multi-turn conversations.
     FOLLOW_UP_INTENTS = {"create_html_dashboard", "create_dashboard", "config_edit",
-                         "modify_automation", "modify_script", "modify_dashboard"}
+                         "modify_automation", "modify_script", "modify_dashboard",
+                         "system_debug"}
     if previous_intent and previous_intent in FOLLOW_UP_INTENTS:
+        # system_debug: carry forward for short selection messages ("il 3", "5", "analizza il primo")
+        if previous_intent == "system_debug":
+            import re as _re_intent
+            # Match messages that are just a number, or contain selection patterns
+            if _re_intent.match(r'^\\s*\\d+\\s*$', msg) or any(s in msg for s in [
+                "analizza", "vedi", "mostra", "dettaglio", "investig", "il primo", "il secondo",
+                "numero", "entry", "errore", "analyze", "show", "detail", "investigate",
+                "analyse", "montre", "détail", "analiza", "muestra", "detalle"
+            ]):
+                logger.info(f"Debug selection detected — carrying forward system_debug intent")
+                return {"intent": "system_debug", "tools": INTENT_TOOL_SETS["system_debug"],
+                        "prompt": INTENT_PROMPTS.get("system_debug"), "specific_target": False}
+
         # Check if message looks like a follow-up (modify, use same, add, etc.)
         follow_up_signals = ["modifica", "modificala", "modificalo", "cambia", "aggiungi",
                              "inserisci", "togli", "rimuovi", "usa le stess", "stesse entit",
@@ -760,8 +1266,14 @@ def detect_intent(user_message: str, smart_context: str, previous_intent: str | 
         return {"intent": "query_repairs", "tools": INTENT_TOOL_SETS["query_repairs"],
                 "prompt": INTENT_PROMPTS["query_repairs"], "specific_target": False}
 
+    # --- SYSTEM DEBUG / ERROR LOG / USERS ---
+    debug_kw = lang_keywords.get("debug", [])
+    if any(k in msg for k in debug_kw):
+        return {"intent": "system_debug", "tools": INTENT_TOOL_SETS["system_debug"],
+                "prompt": INTENT_PROMPTS["system_debug"], "specific_target": False}
+
     # --- GENERIC (full mode) ---
-    return {"intent": "generic", "tools": None, "prompt": None, "specific_target": False}
+    return {"intent": "generic", "tools": INTENT_TOOL_SETS["generic"], "prompt": None, "specific_target": False}
 
 
 def get_tools_for_intent(intent_info: dict, provider: str = "anthropic") -> list:
@@ -769,8 +1281,8 @@ def get_tools_for_intent(intent_info: dict, provider: str = "anthropic") -> list
     import tools as _tools
 
     tool_names = intent_info.get("tools")
-    if tool_names is None:
-        # Generic: return all tools
+    if tool_names is None or len(tool_names) == 0:
+        # Generic or chat: return all tools (legacy path for providers that need the full set)
         if provider == "anthropic":
             return _tools.get_anthropic_tools()
         elif provider in ("openai", "github", "nvidia"):

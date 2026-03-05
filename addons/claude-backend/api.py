@@ -167,6 +167,8 @@ LANGUAGE = os.getenv("LANGUAGE", "en").lower()  # Supported: en, it, es, fr
 LOG_LEVEL = os.getenv("LOG_LEVEL", "normal").lower()  # Supported: normal, verbose, debug
 ENABLE_MEMORY = os.getenv("ENABLE_MEMORY", "False").lower() == "true"
 ENABLE_FILE_UPLOAD = os.getenv("ENABLE_FILE_UPLOAD", "False").lower() == "true"
+ENABLE_VOICE_INPUT = os.getenv("ENABLE_VOICE_INPUT", "True").lower() == "true"
+TTS_VOICE = os.getenv("TTS_VOICE", "female").lower().strip()
 ENABLE_RAG = os.getenv("ENABLE_RAG", "False").lower() == "true"
 ENABLE_CHAT_BUBBLE = os.getenv("ENABLE_CHAT_BUBBLE", "False").lower() == "true"
 COST_CURRENCY = os.getenv("COST_CURRENCY", "USD").upper()
@@ -355,6 +357,10 @@ def _log_request_start() -> None:
 @app.after_request
 def _log_request_end(response: Response) -> Response:
     try:
+        # Allow microphone/camera in HA ingress iframe (Firefox requires this)
+        response.headers["Permissions-Policy"] = "microphone=*, camera=*"
+        response.headers["Feature-Policy"] = "microphone *; camera *"
+        
         if request.method == "OPTIONS" and not DEBUG_MODE:
             return response
 
@@ -419,6 +425,13 @@ def _extract_http_error_code(error_text: str) -> Optional[int]:
             return int(m.group(1))
         except Exception:
             pass
+    # "HTTP 429: ..." (httpx / _openai_compat_stream style)
+    m = re.search(r"HTTP (\d{3})\b", error_text)
+    if m:
+        try:
+            return int(m.group(1))
+        except Exception:
+            pass
     # "429 RESOURCE_EXHAUSTED" (google-genai style) or "'code': 429"
     m = re.search(r"^(\d{3})\s", error_text)
     if m:
@@ -456,7 +469,9 @@ def humanize_provider_error(err: Exception, provider: str) -> str:
     raw = str(err) if err is not None else ""
     code = _extract_http_error_code(raw)
     remote_msg = _extract_remote_message(raw)
-    low = (remote_msg or raw).lower()
+    # Search the FULL error text for classification keywords (the remote_msg
+    # alone may strip away important fields like "code": "insufficient_quota").
+    low = raw.lower()
 
     if provider == "github" and code == 403 and ("budget limit" in low or "reached its budget" in low):
         return get_lang_text("err_github_budget_limit") or (
@@ -513,6 +528,12 @@ def humanize_provider_error(err: Exception, provider: str) -> str:
 
     if code == 413:
         return get_lang_text("err_http_413") or "Request too large (413)."
+
+    # Quota keywords without recognised HTTP code (e.g. code extraction failed)
+    if "insufficient_quota" in low or "exceeded your current quota" in low or "run out of credits" in low:
+        base = get_lang_text("err_openai_quota") or "❌ Quota exceeded. Your account has run out of credits. Check your billing details."
+        url = _CREDITS_URLS.get(provider)
+        return f"{base}\n⚠️ {url}" if url else base
 
     # Fallback: keep the remote message if present, otherwise the raw error
     return remote_msg or raw
@@ -1290,14 +1311,7 @@ _PROVIDER_MODELS_STATIC = {
         "open-mixtral-8x7b",
         "open-mixtral-8x22b",
     ],
-    "ollama": [
-        "mistral",
-        "llama2",
-        "neural-chat",
-        "orca-mini",
-        "dolphin-mixtral",
-        "openchat",
-    ],
+    "ollama": [],  # populated live from Ollama /api/tags — no fake fallback
     "openrouter": [
         "anthropic/claude-opus-4.6", "anthropic/claude-sonnet-4.6",
         "openai/gpt-4o", "openai/gpt-4o-mini",
@@ -1408,7 +1422,12 @@ try:
     for _pid in list(_PROVIDER_CLASSES):
         try:
             _cls = _get_provider_class(_pid)
-            _live = _cls().get_available_models()
+            # Ollama needs the user-configured base_url to reach the server
+            if _pid == "ollama":
+                _inst = _cls(base_url=OLLAMA_BASE_URL)
+            else:
+                _inst = _cls()
+            _live = _inst.get_available_models()
             if _live:  # only replace if the provider returned something
                 PROVIDER_MODELS[_pid] = _live
         except Exception:
@@ -1423,6 +1442,9 @@ try:
     _model_cache = _load_model_cache()
     for _p, _ml in _model_cache.items():
         if _ml:
+            # Skip Ollama cache — always use live /api/tags results
+            if _p == "ollama" and PROVIDER_MODELS.get("ollama"):
+                continue
             PROVIDER_MODELS[_p] = _ml
     if _model_cache:
         import logging as _log
@@ -1622,9 +1644,6 @@ MODEL_NAME_MAPPING = {
     "OpenAI Codex: gpt-5.1-codex": "gpt-5.1-codex",
     "OpenAI Codex: gpt-5-codex": "gpt-5-codex",
     "OpenAI Codex: gpt-5-codex-mini": "gpt-5-codex-mini",
-    "Claude Web: claude-opus-4-5-20251101": "claude-opus-4-5-20251101",
-    "Claude Web: claude-sonnet-4-5-20250929": "claude-sonnet-4-5-20250929",
-    "Claude Web: claude-haiku-4-5-20251001": "claude-haiku-4-5-20251001",
     "ChatGPT Web: gpt-4o": "gpt-4o",
     "ChatGPT Web: gpt-4o-mini": "gpt-4o-mini",
     "ChatGPT Web: gpt-4.5": "gpt-4.5",
@@ -1660,7 +1679,6 @@ _PREFIX_TO_PROVIDER = {
     "Zhipu:": "zhipu",
     "GitHub Copilot:": "github_copilot",
     "OpenAI Codex:": "openai_codex",
-    "Claude Web:": "claude_web",
     "ChatGPT Web:": "chatgpt_web",
 }
 for _display_name, _tech_name in MODEL_NAME_MAPPING.items():
@@ -2120,6 +2138,9 @@ abort_streams: Dict[str, bool] = {}
 
 # Read-only mode per session
 read_only_sessions: Dict[str, bool] = {}
+
+# Browser console errors captured from frontend (max 200 entries)
+_browser_console_errors: list = []
 
 # Last intent per session (for confirmation continuity)
 session_last_intent: Dict[str, str] = {}
@@ -2950,6 +2971,17 @@ def _collect_from_stream(user_message: str, session_id: str) -> str:
     return result
 
 
+def _log_response_preview(response_text: str, session_id: str) -> None:
+    """Log a preview of the AI response, stripping code blocks."""
+    import re as _re
+    preview = _re.sub(r'```[\s\S]*?```', '[code]', response_text)
+    preview = _re.sub(r'`[^`]+`', '[code]', preview)
+    preview = _re.sub(r'\s+', ' ', preview).strip()
+    if len(preview) > 300:
+        preview = preview[:300] + '...'
+    logger.info(f"[AI Response] ({session_id}) ({len(response_text)} chars): {preview}")
+
+
 def chat_with_ai(user_message: str, session_id: str = "default") -> str:
     """Send a message to the configured AI provider with HA tools."""
     # Legacy providers use ai_client directly; manager.py providers have ai_client=None (normal).
@@ -2961,7 +2993,9 @@ def chat_with_ai(user_message: str, session_id: str = "default") -> str:
 
     # Provider managed by providers/manager.py (groq, mistral, claude_web, chatgpt_web, etc.)
     if AI_PROVIDER not in _LEGACY_PROVIDERS:
-        return _collect_from_stream(user_message, session_id)
+        result = _collect_from_stream(user_message, session_id)
+        _log_response_preview(result, session_id)
+        return result
 
     if session_id not in conversations:
         conversations[session_id] = []
@@ -2988,6 +3022,7 @@ def chat_with_ai(user_message: str, session_id: str = "default") -> str:
         save_conversations()
         # Clean unnecessary comments from response before returning
         final_text = _clean_unnecessary_comments(final_text)
+        _log_response_preview(final_text, session_id)
         return final_text
 
     except Exception as e:
@@ -3170,7 +3205,7 @@ def _strip_context_blocks(text: str) -> str:
     return result.strip()
 
 
-def stream_chat_with_ai(user_message: str, session_id: str = "default", image_data: str = None, read_only: bool = False):
+def stream_chat_with_ai(user_message: str, session_id: str = "default", image_data: str = None, read_only: bool = False, voice_mode: bool = False):
     """Stream chat events for all providers with optional image support. Yields SSE event dicts.
     Uses LOCAL intent detection + smart context to minimize tokens sent to AI API."""
     global current_session_id
@@ -3256,11 +3291,34 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
     intent_info = intent.detect_intent(user_message, smart_context, previous_intent=prev_intent)
     intent_name = intent_info["intent"]
 
+    # Step 3b: AI-based tool classification for "generic" intent
+    # Instead of using a fixed 12-tool fallback, ask the AI which tools are needed.
+    # This handles any phrasing without requiring keyword lists.
+    if intent_name == "generic":
+        yield {"type": "status", "message": f"{tr('intent_generic')}... 🔍"}
+        _ai_tools = intent.ai_classify_tools(user_message, AI_PROVIDER, get_active_model())
+        if _ai_tools is not None:
+            # AI classification succeeded
+            if len(_ai_tools) == 0:
+                # AI says no tools needed → treat as chat
+                intent_name = "chat"
+                intent_info["intent"] = "chat"
+                intent_info["tools"] = []
+                intent_info["prompt"] = intent.INTENT_PROMPTS.get("chat", "")
+                logger.info("AI classify: reclassified generic → chat (no tools needed)")
+            else:
+                intent_info["tools"] = _ai_tools
+                logger.info(f"AI classify: generic → {len(_ai_tools)} tools: {_ai_tools}")
+        else:
+            # AI classification failed — keep the static 12-tool generic fallback
+            logger.info("AI classify: failed, using static generic fallback")
+
     # Store this intent for next message's confirmation continuity
     session_last_intent[session_id] = intent_name
-    tool_count = len(intent_info.get("tools") or [])
-    all_tools_count = len(tools.HA_TOOLS_DESCRIPTION)
-    logger.info(f"Intent detected: {intent_name} (specific_target={intent_info['specific_target']}, tools={tool_count if tool_count else all_tools_count})")
+    _intent_tools = intent_info.get("tools")
+    # tools=None means "all tools" (legacy), tools=[] means "no tools" (chat)
+    tool_count = len(_intent_tools) if _intent_tools is not None else len(tools.HA_TOOLS_DESCRIPTION)
+    logger.info(f"Intent detected: {intent_name} (specific_target={intent_info['specific_target']}, tools={tool_count})")
     
     # Show intent to user (translated)
     INTENT_KEYS = {
@@ -3283,7 +3341,8 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
     }
     intent_key = INTENT_KEYS.get(intent_name, "intent_default")
     intent_label = tr(intent_key)
-    yield {"type": "status", "message": f"{intent_label}... ({tool_count if tool_count else all_tools_count} tools)"}
+    _tools_label = f" ({tool_count} tools)" if tool_count > 0 else ""
+    yield {"type": "status", "message": f"{intent_label}...{_tools_label}"}
 
     # Inject read-only instruction into intent prompt if read-only mode is active
     if read_only and intent_info.get("prompt"):
@@ -3302,6 +3361,29 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
             "get_automations, get_scripts, get_dashboards, etc.) to gather information."
         )
         intent_info["prompt"] = intent_info["prompt"] + read_only_instruction
+
+    # Inject voice-mode instruction: force short, spoken-friendly responses
+    if voice_mode and intent_info.get("prompt"):
+        voice_instruction = (
+            "\n\nIMPORTANT - VOICE MODE ACTIVE:\n"
+            "The user is interacting via voice. Your response will be read aloud by a TTS engine.\n"
+            "You MUST follow these rules strictly:\n"
+            "- Be EXTREMELY concise: 1-2 sentences max.\n"
+            "- Give only the essential information requested.\n"
+            "- NEVER include entity_id, technical identifiers, or HA internal names (e.g. switch.xxx, light.xxx, sensor.xxx).\n"
+            "- NEVER put technical info in parentheses like '(switch.luce_cucina: off)' or '(sensor.temp: 22)'.\n"
+            "- NEVER list all entities/devices/switches — just summarize (e.g. 'Hai 5 luci accese' instead of listing them).\n"
+            "- Do NOT use markdown, bullet points, numbered lists, code blocks, or special formatting.\n"
+            "- ABSOLUTELY NO EMOJI — never use 😊🎉👍 or any emoji/emoticon. The TTS will try to read them.\n"
+            "- Do NOT use slashes '/' in the response.\n"
+            "- Use natural spoken Italian (or the user's language), as if talking to a person.\n"
+            "- For temperatures: 'In soggiorno ci sono 22 gradi' (no entity IDs).\n"
+            "- For states: 'La luce della cameretta è accesa' (no technical names).\n"
+            "- For actions: confirm briefly: 'Fatto, ho spento la luce della cameretta'.\n"
+            "- For queries about multiple items: give a summary count and mention only the most relevant ones by their friendly name.\n"
+            "- Never say 'ecco i risultati' or similar preambles — go straight to the answer.\n"
+        )
+        intent_info["prompt"] = intent_info["prompt"] + voice_instruction
 
     # Step 3: Save original message and build enriched version for API
     if image_data:
@@ -3481,8 +3563,19 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
         # Inject tool schemas into intent_info so providers can pass them to the API.
         # This enables tool calling for all OpenAI-compatible providers (Mistral, Groq, etc.)
         # and for the Anthropic SDK provider.
+        # IMPORTANT: filter to only the intent's tools to minimize token usage.
         if intent_info is not None:
-            intent_info["tool_schemas"] = tools.get_openai_tools()
+            _intent_tool_names = intent_info.get("tools")
+            if _intent_tool_names:
+                # Focused intent (or generic default): only include the needed tools
+                _allowed = set(_intent_tool_names)
+                intent_info["tool_schemas"] = [
+                    t for t in tools.get_openai_tools()
+                    if t.get("function", {}).get("name") in _allowed
+                ]
+            else:
+                # Chat intent (empty list): no tools needed
+                intent_info["tool_schemas"] = []
 
         # Tool execution loop: providers surface tool_calls in the done event;
         # we execute them here and loop until the model produces a final answer.
@@ -3727,6 +3820,12 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                         event = dict(event)
                         event["message"] = friendly
                     yield event
+                    # Save error as assistant response so it persists when
+                    # the conversation is reloaded (otherwise only the user
+                    # message is kept and the answer disappears).
+                    error_text = event.get("message", raw_msg) or raw_msg
+                    if error_text and not _streamed_text_parts:
+                        _streamed_text_parts.append("\u274c " + error_text)
                     break  # stop on error
                 elif event.get("type") == "text":
                     # Normalize "text" → "token" so the UI receives the expected event format.
@@ -3869,6 +3968,10 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                 try:
                     tc_args = json.loads(tc.get("arguments", "{}") or "{}")
                 except Exception:
+                    tc_args = {}
+                # Guard: json.loads may return None/list/int from malformed
+                # arguments (e.g. "null").  Ensure tc_args is always a dict.
+                if not isinstance(tc_args, dict):
                     tc_args = {}
 
                 # Show status to user
@@ -4926,6 +5029,7 @@ def api_chat_stream():
     session_id = data.get("session_id", "default")
     image_data = data.get("image", None)  # Base64 image data
     read_only = data.get("read_only", False)  # Read-only mode flag
+    voice_mode = data.get("voice_mode", False)  # Voice mode: short spoken responses
     if not message:
         return jsonify({"error": "Empty message"}), 400
     if image_data:
@@ -4945,7 +5049,7 @@ def api_chat_stream():
 
         def _producer():
             try:
-                for event in stream_chat_with_ai(message, session_id, image_data, read_only=read_only):
+                for event in stream_chat_with_ai(message, session_id, image_data, read_only=read_only, voice_mode=voice_mode):
                     q.put(("event", event))
             except Exception as exc:
                 logger.error(
@@ -5634,6 +5738,45 @@ def api_scheduler_agent_clear_session(session_id):
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+# ============ Browser Console Errors Endpoint ============
+
+@app.route('/api/browser-errors', methods=['POST'])
+def api_browser_errors_post():
+    """Receive browser console errors from frontend JS."""
+    try:
+        # sendBeacon sends text/plain, so try get_json first, then fall back to raw data
+        data = request.get_json(silent=True)
+        if data is None:
+            try:
+                raw = request.get_data(as_text=True)
+                if raw:
+                    data = json.loads(raw)
+            except Exception:
+                data = {}
+        if not isinstance(data, dict):
+            data = {}
+        errors = data.get("errors", [])
+        if not isinstance(errors, list):
+            errors = [errors]
+        for err in errors:
+            if isinstance(err, dict):
+                err.setdefault("timestamp", datetime.now().isoformat())
+                _browser_console_errors.append(err)
+        # Keep only last 200
+        while len(_browser_console_errors) > 200:
+            _browser_console_errors.pop(0)
+        return jsonify({"status": "ok", "stored": len(errors)}), 200
+    except Exception as e:
+        logger.error(f"Browser errors endpoint: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/browser-errors', methods=['GET'])
+def api_browser_errors_get():
+    """Get stored browser console errors."""
+    return jsonify({"errors": _browser_console_errors, "count": len(_browser_console_errors)}), 200
+
+
 # ============ Voice Transcription Endpoints ============
 
 @app.route('/api/voice/stats', methods=['GET'])
@@ -5683,10 +5826,10 @@ def api_voice_transcribe():
 
 @app.route('/api/voice/tts', methods=['POST'])
 def api_voice_tts():
-    """Convert text to speech (OpenAI → Google fallback).
+    """Convert text to speech (Edge → Groq → OpenAI → Google fallback).
     
-    JSON body: { "text": "..." }
-    Returns: audio/mpeg binary or JSON error
+    JSON body: { "text": "...", "voice": "..." }
+    Returns: audio binary or JSON error
     """
     try:
         if not VOICE_TRANSCRIPTION_AVAILABLE:
@@ -5696,14 +5839,38 @@ def api_voice_tts():
         if not text:
             return jsonify({"status": "error", "message": "text is required"}), 400
         tts = voice_transcription.get_text_to_speech()
-        success, audio_bytes = tts.speak_with_fallback(text)
+        voice = data.get("voice", TTS_VOICE) or TTS_VOICE
+        success, audio_bytes = tts.speak_with_fallback(text, voice=voice)
         if success and audio_bytes:
             from flask import Response as FlaskResponse
-            return FlaskResponse(audio_bytes, mimetype="audio/mpeg")
+            # Edge TTS produces mp3, Groq produces wav, OpenAI produces mp3
+            # Detect format from first bytes
+            if audio_bytes[:4] == b'RIFF':
+                mimetype = "audio/wav"
+            else:
+                mimetype = "audio/mpeg"
+            return FlaskResponse(audio_bytes, mimetype=mimetype)
         else:
-            return jsonify({"status": "error", "message": "TTS failed — no provider available"}), 502
+            available = tts.get_available_providers()
+            msg = f"TTS failed — no provider available. Available: {', '.join(available) if available else 'none'}"
+            return jsonify({"status": "error", "message": msg}), 502
     except Exception as e:
         logger.error(f"Voice TTS error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/voice/tts/providers', methods=['GET'])
+def api_voice_tts_providers():
+    """Get available TTS providers."""
+    try:
+        if not VOICE_TRANSCRIPTION_AVAILABLE:
+            return jsonify({"status": "error", "message": "Voice module not available"}), 501
+        tts = voice_transcription.get_text_to_speech()
+        return jsonify({
+            "status": "success",
+            "providers": tts.get_available_providers(),
+        }), 200
+    except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
@@ -5925,6 +6092,191 @@ def api_whatsapp_webhook():
     except Exception as e:
         logger.error(f"WhatsApp webhook error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# --------------------------------------------------------------------------- #
+#  HA Conversation Agent endpoint                                              #
+#  Compatible with Home Assistant's conversation/process protocol.             #
+#  This allows Alexa (via Nabu Casa) or Google Home to route voice requests    #
+#  to Amira as a conversation agent.                                           #
+# --------------------------------------------------------------------------- #
+
+@app.route('/api/conversation/process', methods=['POST'])
+def api_conversation_process():
+    """HA Conversation Agent compatible endpoint.
+
+    Expects:
+        {"text": "...", "language": "it", "conversation_id": "..."}
+    Returns:
+        {"response": {"speech": {"plain": {"speech": "...", "extra_data": null}},
+                       "card": {}, "language": "it"}, "conversation_id": "..."}
+    """
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or "").strip()
+    lang = data.get("language", LANGUAGE)
+    conv_id = data.get("conversation_id") or "conversation_agent"
+
+    if not text:
+        return jsonify({"error": "Empty text"}), 400
+
+    logger.info(f"[ConversationAgent] ({lang}) {text[:80]}")
+
+    try:
+        response_text = chat_with_ai(text, conv_id)
+    except Exception as e:
+        logger.error(f"[ConversationAgent] Error: {e}")
+        response_text = f"Mi dispiace, si è verificato un errore: {str(e)[:100]}"
+
+    # Return in HA conversation agent response format
+    return jsonify({
+        "response": {
+            "speech": {
+                "plain": {
+                    "speech": response_text,
+                    "extra_data": None,
+                }
+            },
+            "card": {},
+            "language": lang,
+        },
+        "conversation_id": conv_id,
+    }), 200
+
+
+# --------------------------------------------------------------------------- #
+#  Alexa Custom Skill webhook endpoint                                         #
+#  Receives Alexa Skill requests (LaunchRequest, IntentRequest, etc.)          #
+#  and responds with Alexa-compatible JSON.                                    #
+# --------------------------------------------------------------------------- #
+
+@app.route('/api/alexa/webhook', methods=['POST'])
+def api_alexa_webhook():
+    """Handle incoming Alexa Custom Skill requests.
+
+    Supports:
+    - LaunchRequest: greeting
+    - IntentRequest with AskAmiraIntent: pass user speech to Amira
+    - AMAZON.HelpIntent, AMAZON.StopIntent, AMAZON.CancelIntent
+    - SessionEndedRequest: cleanup
+    """
+    data = request.get_json(silent=True) or {}
+    req = data.get("request", {})
+    req_type = req.get("type", "")
+    session = data.get("session", {})
+    session_id = f"alexa_{session.get('sessionId', 'default')}"
+
+    logger.info(f"[Alexa] {req_type} session={session_id[:30]}")
+
+    def _alexa_response(speech: str, end_session: bool = False, reprompt: str = None) -> dict:
+        """Build an Alexa-compatible response envelope."""
+        resp = {
+            "version": "1.0",
+            "sessionAttributes": session.get("attributes", {}),
+            "response": {
+                "outputSpeech": {
+                    "type": "PlainText",
+                    "text": speech,
+                },
+                "shouldEndSession": end_session,
+            }
+        }
+        if reprompt:
+            resp["response"]["reprompt"] = {
+                "outputSpeech": {"type": "PlainText", "text": reprompt}
+            }
+        return resp
+
+    try:
+        if req_type == "LaunchRequest":
+            greeting = {
+                "it": "Ciao! Sono Amira, la tua assistente di casa. Chiedimi qualsiasi cosa!",
+                "en": "Hi! I'm Amira, your home assistant. Ask me anything!",
+                "es": "¡Hola! Soy Amira, tu asistente del hogar. ¡Pregúntame lo que quieras!",
+                "fr": "Salut ! Je suis Amira, ton assistante maison. Demande-moi ce que tu veux !",
+            }.get(LANGUAGE, "Hi! I'm Amira. Ask me anything!")
+            return jsonify(_alexa_response(greeting, end_session=False, reprompt=greeting)), 200
+
+        elif req_type == "IntentRequest":
+            intent_name = req.get("intent", {}).get("name", "")
+
+            if intent_name in ("AMAZON.StopIntent", "AMAZON.CancelIntent"):
+                bye = {
+                    "it": "Ciao ciao! A presto!",
+                    "en": "Bye bye! See you soon!",
+                    "es": "¡Adiós! ¡Hasta pronto!",
+                    "fr": "Au revoir ! À bientôt !",
+                }.get(LANGUAGE, "Bye!")
+                return jsonify(_alexa_response(bye, end_session=True)), 200
+
+            elif intent_name == "AMAZON.HelpIntent":
+                help_text = {
+                    "it": "Puoi chiedermi di controllare luci, temperatura, elettrodomestici o qualsiasi cosa sulla tua casa. Ad esempio: accendi la luce del salotto, che temperatura c'è in camera?",
+                    "en": "You can ask me to control lights, temperature, appliances, or anything about your home. For example: turn on the living room light, what's the bedroom temperature?",
+                    "es": "Puedes pedirme que controle luces, temperatura, electrodomésticos o cualquier cosa sobre tu casa.",
+                    "fr": "Tu peux me demander de contrôler les lumières, la température, les appareils ou tout ce qui concerne ta maison.",
+                }.get(LANGUAGE, "Ask me anything about your home!")
+                return jsonify(_alexa_response(help_text, end_session=False)), 200
+
+            elif intent_name == "AMAZON.FallbackIntent":
+                # Fallback — try to process as free text if available
+                fallback = {
+                    "it": "Non ho capito. Puoi ripetere?",
+                    "en": "I didn't understand. Can you repeat?",
+                    "es": "No entendí. ¿Puedes repetir?",
+                    "fr": "Je n'ai pas compris. Peux-tu répéter ?",
+                }.get(LANGUAGE, "I didn't understand. Can you repeat?")
+                return jsonify(_alexa_response(fallback, end_session=False, reprompt=fallback)), 200
+
+            elif intent_name == "AskAmiraIntent":
+                # Get the user's spoken query from the slot
+                slots = req.get("intent", {}).get("slots", {})
+                user_query = slots.get("query", {}).get("value", "")
+                if not user_query:
+                    prompt = {
+                        "it": "Dimmi pure, cosa vuoi sapere?",
+                        "en": "Go ahead, what would you like to know?",
+                        "es": "Dime, ¿qué quieres saber?",
+                        "fr": "Dis-moi, que veux-tu savoir ?",
+                    }.get(LANGUAGE, "What would you like to know?")
+                    return jsonify(_alexa_response(prompt, end_session=False, reprompt=prompt)), 200
+
+                logger.info(f"[Alexa] AskAmiraIntent: {user_query[:80]}")
+
+                # Get AI response (voice_mode for concise answers)
+                try:
+                    response_text = chat_with_ai(user_query, session_id)
+                    # Clean for speech: strip markdown, emoji, etc.
+                    import re as _re
+                    response_text = _re.sub(r'```[\s\S]*?```', '', response_text)
+                    response_text = _re.sub(r'`[^`]+`', '', response_text)
+                    response_text = _re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', response_text)
+                    response_text = _re.sub(r'[#*_~>|]', '', response_text)
+                    response_text = _re.sub(r'\s+', ' ', response_text).strip()
+                    # Alexa has a 8000 char speech limit
+                    if len(response_text) > 6000:
+                        response_text = response_text[:6000] + "... Per il resto, puoi chiedermi di continuare."
+                    logger.info(f"[Alexa] Response ({len(response_text)} chars): {response_text[:200]}")
+                except Exception as e:
+                    logger.error(f"[Alexa] AI error: {e}")
+                    response_text = "Mi dispiace, non sono riuscita a elaborare la risposta."
+
+                return jsonify(_alexa_response(response_text, end_session=False, reprompt="Vuoi chiedermi altro?")), 200
+
+            else:
+                # Unknown intent — try to handle as free-form
+                logger.warning(f"[Alexa] Unknown intent: {intent_name}")
+                return jsonify(_alexa_response("Non ho capito la richiesta.", end_session=False)), 200
+
+        elif req_type == "SessionEndedRequest":
+            logger.info(f"[Alexa] Session ended: {req.get('reason', 'unknown')}")
+            return jsonify(_alexa_response("", end_session=True)), 200
+
+        else:
+            return jsonify(_alexa_response("", end_session=True)), 200
+
+    except Exception as e:
+        logger.error(f"[Alexa] Webhook error: {e}")
+        return jsonify(_alexa_response("Si è verificato un errore. Riprova tra poco.", end_session=False)), 200
 
 
 @app.route('/api/system/features', methods=['GET'])
@@ -6603,10 +6955,10 @@ def api_nvidia_test_models():
 
     # Safety defaults: keep the request reasonably fast.
     if max_models <= 0:
-        max_models = 20
-    max_models = max(1, min(50, max_models))
+        max_models = 50
+    max_models = max(1, min(200, max_models))
 
-    max_seconds = 25.0
+    max_seconds = 55.0
     per_model_timeout = 10
 
     # Use a fresh live list when possible.

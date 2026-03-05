@@ -95,6 +95,9 @@ configuration:
   enable_voice_input:
     name: Activer la Saisie Vocale
     description: "Activer le bouton microphone pour les messages vocaux (Groq Whisper, avec fallback OpenAI/Google) - nécessite HTTPS"
+  tts_voice:
+    name: Type de Voix
+    description: "Choisissez la voix pour les réponses parlées : female = voix féminine (Denise), male = voix masculine (Henri). La voix est sélectionnée automatiquement selon votre langue (Edge TTS - gratuit, sans clé API)."
   enable_rag:
     name: Activer RAG
     description: "[EXPÉRIMENTAL] Activer RAG (Génération Augmentée par Récupération) pour la recherche de documents et l'injection de contexte"

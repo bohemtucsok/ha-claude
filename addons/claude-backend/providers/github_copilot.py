@@ -96,6 +96,9 @@ def _fetch_models_from_api(copilot_token: str) -> Optional[List[str]]:
     global _cached_models
     if not HTTPX_AVAILABLE:
         return None
+    # Models that use a different API (e.g. /responses) and are NOT compatible
+    # with the /chat/completions endpoint used by Amira.
+    _INCOMPATIBLE_KEYWORDS = ("codex",)
     headers = {
         "Authorization": f"Bearer {copilot_token}",
         "Accept": "application/json",
@@ -114,6 +117,7 @@ def _fetch_models_from_api(copilot_token: str) -> Optional[List[str]]:
                 m["id"]
                 for m in data.get("data", [])
                 if isinstance(m, dict) and m.get("id")
+                and not any(kw in m["id"].lower() for kw in _INCOMPATIBLE_KEYWORDS)
             ]
             if models:
                 logger.info(f"GitHub Copilot: discovered {len(models)} models from API")
@@ -430,6 +434,13 @@ class GitHubCopilotProvider(EnhancedProvider):
             "X-GitHub-Api-Version": "2025-04-01",
         }
         resolved_model = self._resolve_model()
+        # Guard: Codex models use the /responses API, not /chat/completions
+        if "codex" in resolved_model.lower():
+            raise RuntimeError(
+                f"Il modello '{resolved_model}' usa l'API /responses di OpenAI "
+                f"e non è compatibile con la chat. "
+                f"Seleziona un altro modello (es. gpt-4o, claude-sonnet-4)."
+            )
         body: Dict[str, Any] = {
             "model": resolved_model,
             "messages": messages,
@@ -521,9 +532,8 @@ class GitHubCopilotProvider(EnhancedProvider):
         "claude-opus-4.6-fast", "claude-opus-4.6",
         "claude-sonnet-4.6", "claude-sonnet-4.5", "claude-sonnet-4",
         "claude-haiku-4.5", "claude-opus-4.5",
-        # GPT-5 family
-        "gpt-5.3-codex", "gpt-5.2-codex", "gpt-5.1-codex-max", "gpt-5.1-codex",
-        "gpt-5.1-codex-mini", "gpt-5.1", "gpt-5.2", "gpt-5-mini",
+        # GPT-5 family (chat-compatible only — codex models use /responses API)
+        "gpt-5.1", "gpt-5.2", "gpt-5-mini",
         # GPT-4o family
         "gpt-4o", "gpt-4o-mini",
         # GPT-4.1

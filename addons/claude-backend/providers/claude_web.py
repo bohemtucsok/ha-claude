@@ -348,8 +348,8 @@ class ClaudeWebProvider(EnhancedProvider):
             if resp.status_code == 403:
                 raise RuntimeError("Access forbidden — session may be expired or invalid.")
             if resp.status_code != 200:
-                err = resp.read().decode("utf-8", errors="ignore")
-                raise RuntimeError(f"HTTP {resp.status_code}: {err[:300]}")
+                err_raw = resp.read().decode("utf-8", errors="ignore")
+                raise RuntimeError(self._parse_http_error(resp.status_code, err_raw))
 
             for line in resp.iter_lines():
                 if not line.startswith("data:"):
@@ -385,6 +385,76 @@ class ClaudeWebProvider(EnhancedProvider):
                     continue
 
         yield {"type": "done", "finish_reason": "stop"}
+
+    @staticmethod
+    def _parse_http_error(status_code: int, raw_body: str) -> str:
+        """Parse HTTP error response into a human-readable message."""
+        # Try to extract structured info from JSON error bodies
+        if status_code == 429:
+            try:
+                outer = json.loads(raw_body)
+                inner_msg = (outer.get("error") or {}).get("message", "")
+                # inner_msg is often a JSON string itself
+                try:
+                    detail = json.loads(inner_msg)
+                except (json.JSONDecodeError, TypeError):
+                    detail = {}
+
+                resets_at = detail.get("resetsAt")
+                claim = detail.get("representativeClaim", "")
+
+                # Build human-readable time until reset
+                reset_info = ""
+                if resets_at:
+                    try:
+                        from datetime import datetime
+                        reset_dt = datetime.fromtimestamp(int(resets_at))
+                        now = datetime.now()
+                        delta = reset_dt - now
+                        if delta.total_seconds() > 0:
+                            hours = int(delta.total_seconds() // 3600)
+                            mins = int((delta.total_seconds() % 3600) // 60)
+                            if hours > 24:
+                                days = hours // 24
+                                reset_info = f" Il limite si resetta tra {days} giorni ({reset_dt.strftime('%d/%m alle %H:%M')})."
+                            elif hours > 0:
+                                reset_info = f" Il limite si resetta tra {hours}h {mins}min."
+                            else:
+                                reset_info = f" Il limite si resetta tra {mins} minuti."
+                    except (ValueError, OSError):
+                        pass
+
+                limit_type = ""
+                if "seven_day" in claim:
+                    limit_type = " (limite settimanale)"
+                elif "daily" in claim:
+                    limit_type = " (limite giornaliero)"
+
+                return (
+                    f"Limite di utilizzo Claude.ai superato{limit_type}.{reset_info}\n"
+                    f"Usa un altro provider o attendi il reset."
+                )
+            except (json.JSONDecodeError, KeyError, TypeError):
+                pass
+            return "Limite di utilizzo Claude.ai superato. Riprova più tardi."
+
+        if status_code == 500:
+            return "Errore interno di Claude.ai. Riprova tra qualche minuto."
+        if status_code == 502:
+            return "Claude.ai non raggiungibile (502). Riprova tra qualche minuto."
+        if status_code == 503:
+            return "Claude.ai al momento sovraccarico (503). Riprova tra qualche minuto."
+
+        # Generic: truncate but don't show raw JSON
+        # Try to extract a readable 'message' from JSON
+        try:
+            parsed = json.loads(raw_body)
+            msg = (parsed.get("error") or {}).get("message", "") if isinstance(parsed.get("error"), dict) else str(parsed.get("error", ""))
+            if msg and len(msg) < 300:
+                return f"Claude.ai errore HTTP {status_code}: {msg}"
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return f"Claude.ai errore HTTP {status_code}"
 
     def _resolve_model(self) -> str:
         m = self.model or self._FALLBACK_MODELS[0]

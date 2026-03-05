@@ -39,6 +39,13 @@ _EXCLUDE = {
     "instruct-beta", "text-", "code-search",
 }
 
+# Model name prefixes that must NEVER appear in the UI (any provider).
+# These models use special APIs incompatible with normal chat.
+_BLACKLISTED_PREFIXES = (
+    "deep-research",   # Google Interactions API only
+    "codex-",          # GitHub Copilot Codex (async agent, not chat)
+)
+
 # Providers that have no public /models endpoint — skip without error
 _NO_ENDPOINT = {
     "github", "openai_codex",
@@ -112,6 +119,8 @@ def _fetch_google(api_key: str) -> List[str]:
         name = m.get("name", "")
         if name.startswith("models/"):
             name = name[7:]
+        if any(name.startswith(p) for p in _BLACKLISTED_PREFIXES):
+            continue
         if "generateContent" in m.get("supportedGenerationMethods", []):
             models.append(name)
     return sorted(models)
@@ -214,11 +223,18 @@ def refresh_all_providers(
     return {"updated": updated, "errors": errors, "skipped": skipped}
 
 
+def _apply_blacklist(models: List[str]) -> List[str]:
+    """Remove blacklisted models from a list."""
+    return [m for m in models if not any(m.startswith(p) for p in _BLACKLISTED_PREFIXES)]
+
+
 def load_cache() -> Dict[str, List[str]]:
-    """Load persisted model lists from disk."""
+    """Load persisted model lists from disk (blacklisted models are stripped)."""
     try:
         with open(CACHE_FILE) as f:
-            return json.load(f)
+            raw = json.load(f)
+        # Strip blacklisted models that may have been cached before the filter existed
+        return {prov: _apply_blacklist(mlist) for prov, mlist in raw.items()}
     except Exception:
         return {}
 

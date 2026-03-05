@@ -95,6 +95,9 @@ configuration:
   enable_voice_input:
     name: Habilitar Entrada de Voz
     description: "Habilitar botón de micrófono para mensajes de voz (Groq Whisper, con fallback OpenAI/Google) - requiere HTTPS"
+  tts_voice:
+    name: Tipo de Voz
+    description: "Elige la voz para las respuestas habladas: female = voz femenina (Elvira), male = voz masculina (Álvaro). La voz se selecciona automáticamente según tu idioma (Edge TTS - gratis, sin API key)."
   enable_rag:
     name: Habilitar RAG
     description: "[EXPERIMENTAL] Habilitar RAG (Generación Aumentada por Recuperación) para búsqueda de documentos e inyección de contexto"

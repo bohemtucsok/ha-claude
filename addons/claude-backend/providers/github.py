@@ -123,6 +123,9 @@ class GitHubProvider(EnhancedProvider):
             return "GitHub: 403 budget limit"  # let humanize_provider_error handle it with the right key
         if self._is_auth_error(error_msg):
             return "GitHub: Token invalid or expired. Check your GitHub personal access token in the add-on settings."
+        # Quota / billing errors — must come BEFORE _is_rate_limit_error
+        if self._is_quota_error(error_msg) and ("insufficient_quota" in error_msg or "exceeded your current quota" in error_msg or "run out of credits" in error_msg):
+            return f"Error code: 429 - insufficient_quota: {error}"  # preserve keywords for humanize_provider_error
         if self._is_rate_limit_error(error_msg):
             return "GitHub: Rate limit exceeded. Please retry in a moment."
         if "model" in error_msg and "not found" in error_msg:

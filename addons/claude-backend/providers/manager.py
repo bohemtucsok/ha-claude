@@ -181,14 +181,102 @@ class ProviderManager:
         self.last_error = error_msg
         self.last_error_time = time.time()
 
+        # Sanitize: if the error message still contains raw JSON, clean it up
+        display_msg = self._sanitize_error_for_user(error_msg)
+
         # Forward the last provider error event if available, else craft one
         if last_error_event:
+            # Sanitize the event message too
+            last_error_event["message"] = self._sanitize_error_for_user(
+                last_error_event.get("message", display_msg)
+            )
             yield last_error_event
         else:
             yield {
                 "type": "error",
-                "message": f"All providers failed: {error_msg}",
+                "message": display_msg,
             }
+
+    @staticmethod
+    def _sanitize_error_for_user(msg: str) -> str:
+        """Strip raw JSON, HTTP bodies, and technical noise from error messages.
+        Returns a clean, user-friendly message."""
+        if not msg:
+            return "Si è verificato un errore. Riprova."
+
+        import re
+        import json as _json
+
+        # Early detection of quota/billing exhaustion keywords in the RAW
+        # message.  Must run BEFORE stripping JSON blobs (which removes the
+        # keywords — especially when the blob uses Python single-quotes and
+        # json.loads() fails).
+        _low = msg.lower()
+        if (
+            "insufficient_quota" in _low
+            or "exceeded your current quota" in _low
+            or "run out of credits" in _low
+        ):
+            return "❌ Quota esaurita. Il tuo account ha esaurito i crediti. Controlla il piano e la fatturazione del provider."
+
+        # If the message is already clean (no JSON blobs), return as-is
+        if '{' not in msg and 'HTTP' not in msg:
+            return msg
+
+        # Try to detect and parse a JSON blob embedded in the message
+        json_match = re.search(r'\{.*\}', msg, re.DOTALL)
+        if json_match:
+            try:
+                parsed = _json.loads(json_match.group())
+                # Common patterns: {"error": {"message": "..."}} or {"error": {"type": "..."}}
+                error_obj = parsed.get("error", parsed)
+                if isinstance(error_obj, dict):
+                    inner_msg = error_obj.get("message", "")
+                    error_type = error_obj.get("type", "")
+                    # inner_msg might itself be JSON
+                    try:
+                        inner_parsed = _json.loads(inner_msg)
+                        if isinstance(inner_parsed, dict) and "type" in inner_parsed:
+                            error_type = inner_parsed.get("type", error_type)
+                    except (ValueError, TypeError):
+                        pass
+
+                    # Map known error types to readable messages
+                    # Quota / billing errors  (must come BEFORE rate_limit check)
+                    if "insufficient_quota" in error_type or "quota" in error_type.lower():
+                        return "Quota esaurita. Il tuo account ha esaurito i crediti. Controlla il piano/fatturazione del provider."
+                    if "rate_limit" in error_type or "exceeded_limit" in error_type:
+                        return "Limite di utilizzo superato. Riprova più tardi o usa un altro provider."
+                    if "auth" in error_type.lower():
+                        return "Errore di autenticazione. Controlla le credenziali."
+                    if "overloaded" in error_type.lower():
+                        return "Il provider è sovraccarico. Riprova tra qualche minuto."
+            except (ValueError, TypeError):
+                pass
+
+        # If it still has raw JSON, strip it
+        cleaned = re.sub(r'\{[^{}]*(\{[^{}]*\}[^{}]*)*\}', '', msg).strip()
+        # Remove "HTTP XXX:" prefixes from the cleaned message
+        cleaned = re.sub(r'HTTP \d{3}:\s*', '', cleaned).strip()
+        # Remove trailing/leading punctuation artifacts
+        cleaned = cleaned.strip(' :;,-')
+
+        if cleaned and len(cleaned) > 10:
+            return cleaned
+
+        # Fallback: return a generic clean message
+        low_msg = msg.lower()
+        # Quota/billing errors (check BEFORE generic 429)
+        if "insufficient_quota" in low_msg or "exceeded your current quota" in low_msg or "run out of credits" in low_msg:
+            return "Quota esaurita. Il tuo account ha esaurito i crediti. Controlla il piano/fatturazione del provider."
+        if "429" in msg or "rate_limit" in low_msg:
+            return "Limite di utilizzo superato. Riprova più tardi o usa un altro provider."
+        if "401" in msg or "auth" in msg.lower():
+            return "Errore di autenticazione. Controlla le credenziali."
+        if "500" in msg or "502" in msg or "503" in msg:
+            return "Errore del server del provider. Riprova tra qualche minuto."
+
+        return "Si è verificato un errore. Riprova."
 
     def _stream_with_provider(
         self,

@@ -50,6 +50,12 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "drag_hint": "Hold to drag",
             "voice_start": "Speak now...",
             "voice_unsupported": "Voice not supported in this browser",
+            "voice_processing": "Processing audio...",
+            "voice_mode": "Voice mode",
+            "voice_speaking": "Speaking...",
+            "voice_stop_speaking": "Stop speaking",
+            "wake_word_active": "Listening for 'Ok Amira'...",
+            "wake_word_detected": "Amira activated! Speak now...",
             "stop": "Stop",
             "qa_analyze": "Analyze this",
             "qa_optimize": "Optimize",
@@ -87,6 +93,13 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "qa_stats_clean_text": "Find and remove all orphaned statistics for entities that no longer exist",
             "qa_stats_fix_units": "Fix units",
             "qa_stats_fix_units_text": "Find and fix all unit of measurement mismatches in my statistics",
+            "history": "History",
+            "no_conversations": "No conversations yet",
+            "chat_source": "Chat UI",
+            "bubble_source": "Bubble",
+            "messages_count": "messages",
+            "load_error": "Error loading conversations",
+            "back_to_chat": "Back to chat",
         },
         "it": {
             "placeholder": "Chiedi qualcosa su questa pagina...",
@@ -105,6 +118,12 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "drag_hint": "Tieni premuto per spostare",
             "voice_start": "Parla ora...",
             "voice_unsupported": "Voce non supportata in questo browser",
+            "voice_processing": "Elaborazione audio...",
+            "voice_mode": "Modalità voce",
+            "voice_speaking": "Sto parlando...",
+            "voice_stop_speaking": "Ferma riproduzione",
+            "wake_word_active": "In ascolto per 'Ok Amira'...",
+            "wake_word_detected": "Amira attivata! Parla ora...",
             "stop": "Stop",
             "qa_analyze": "Analizza",
             "qa_optimize": "Ottimizza",
@@ -142,6 +161,13 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "qa_stats_clean_text": "Trova e rimuovi tutte le statistiche di entit\u00e0 che non esistono pi\u00f9",
             "qa_stats_fix_units": "Correggi unit\u00e0",
             "qa_stats_fix_units_text": "Trova e correggi tutti i problemi di unit\u00e0 di misura nelle statistiche",
+            "history": "Cronologia",
+            "no_conversations": "Nessuna conversazione",
+            "chat_source": "Chat UI",
+            "bubble_source": "Bubble",
+            "messages_count": "messaggi",
+            "load_error": "Errore nel caricamento conversazioni",
+            "back_to_chat": "Torna alla chat",
         },
         "es": {
             "placeholder": "Pregunta sobre esta página...",
@@ -160,6 +186,12 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "drag_hint": "Mantén presionado para mover",
             "voice_start": "Habla ahora...",
             "voice_unsupported": "Voz no soportada en este navegador",
+            "voice_processing": "Procesando audio...",
+            "voice_mode": "Modo voz",
+            "voice_speaking": "Hablando...",
+            "voice_stop_speaking": "Detener reproducción",
+            "wake_word_active": "Escuchando 'Ok Amira'...",
+            "wake_word_detected": "¡Amira activada! Habla ahora...",
             "stop": "Parar",
             "qa_analyze": "Analizar",
             "qa_optimize": "Optimizar",
@@ -197,6 +229,13 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "qa_stats_clean_text": "Encuentra y elimina todas las estad\u00edsticas de entidades que ya no existen",
             "qa_stats_fix_units": "Corregir unidades",
             "qa_stats_fix_units_text": "Encuentra y corrige todos los problemas de unidades de medida en las estad\u00edsticas",
+            "history": "Historial",
+            "no_conversations": "Sin conversaciones",
+            "chat_source": "Chat UI",
+            "bubble_source": "Bubble",
+            "messages_count": "mensajes",
+            "load_error": "Error al cargar conversaciones",
+            "back_to_chat": "Volver al chat",
         },
         "fr": {
             "placeholder": "Posez une question sur cette page...",
@@ -215,6 +254,12 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "drag_hint": "Maintenez pour déplacer",
             "voice_start": "Parlez maintenant...",
             "voice_unsupported": "Voix non supportée dans ce navigateur",
+            "voice_processing": "Traitement audio...",
+            "voice_mode": "Mode vocal",
+            "voice_speaking": "En train de parler...",
+            "voice_stop_speaking": "Arrêter la lecture",
+            "wake_word_active": "Écoute de 'Ok Amira'...",
+            "wake_word_detected": "Amira activée ! Parlez maintenant...",
             "stop": "Arrêter",
             "qa_analyze": "Analyser",
             "qa_optimize": "Optimiser",
@@ -252,6 +297,13 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
             "qa_stats_clean_text": "Trouve et supprime toutes les statistiques des entit\u00e9s qui n'existent plus",
             "qa_stats_fix_units": "Corriger unit\u00e9s",
             "qa_stats_fix_units_text": "Trouve et corrige tous les probl\u00e8mes d'unit\u00e9s de mesure dans les statistiques",
+            "history": "Historique",
+            "no_conversations": "Aucune conversation",
+            "chat_source": "Chat UI",
+            "bubble_source": "Bubble",
+            "messages_count": "messages",
+            "load_error": "Erreur de chargement des conversations",
+            "back_to_chat": "Retour au chat",
         },
     }
 
@@ -265,6 +317,31 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
  */
 (function() {{
   'use strict';
+
+  // Global error handler — shows JS errors as visible banner + sends to backend
+  if (!window.__AMIRA_BUBBLE_ERROR_HANDLER) {{
+    window.__AMIRA_BUBBLE_ERROR_HANDLER = true;
+    window.__AMIRA_BROWSER_ERRORS = window.__AMIRA_BROWSER_ERRORS || [];
+    function _amiraBubbleSendError(entry) {{
+      window.__AMIRA_BROWSER_ERRORS.push(entry);
+      if (window.__AMIRA_BROWSER_ERRORS.length > 100) window.__AMIRA_BROWSER_ERRORS.shift();
+      try {{
+        var bp = (window.location.pathname || '/').endsWith('/') ? window.location.pathname : (window.location.pathname + '/');
+        var url = window.location.origin.replace(/\\/$/, '') + bp + 'api/browser-errors';
+        navigator.sendBeacon(url, JSON.stringify({{ errors: [entry] }}));
+      }} catch(e) {{}}
+    }}
+    window.addEventListener('error', function(ev) {{
+      console.error('[Amira Bubble JS Error]', ev.message, 'at', ev.filename, ev.lineno + ':' + ev.colno);
+      _amiraBubbleSendError({{ level: 'error', message: String(ev.message), source: ev.filename || '', line: ev.lineno, col: ev.colno, stack: ev.error && ev.error.stack || '', timestamp: new Date().toISOString(), ui: 'bubble' }});
+      var d = document.createElement('div');
+      d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#b00020;color:#fff;padding:12px 16px;font:13px/1.4 monospace;max-height:30vh;overflow:auto;cursor:pointer;';
+      d.textContent = '[Bubble JS Error] ' + ev.message + ' (line ' + ev.lineno + ':' + ev.colno + ')';
+      d.title = 'Click per chiudere';
+      d.onclick = function() {{ d.remove(); }};
+      if (document.body) document.body.prepend(d);
+    }});
+  }}
 
   const INGRESS_URL = '{ingress_url}';
   const API_BASE = INGRESS_URL;
@@ -806,15 +883,28 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
   }}
 
   // ---- Session Management (bubble-specific, separate from main UI) ----
+  // Use localStorage (not sessionStorage) so the session survives tab close/reopen
   const SESSION_KEY = 'ha-claude-bubble-session';
   function getSessionId() {{
-    let sid = sessionStorage.getItem(SESSION_KEY);
-    if (!sid) {{ sid = 'bubble_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7); sessionStorage.setItem(SESSION_KEY, sid); }}
+    let sid = null;
+    try {{ sid = localStorage.getItem(SESSION_KEY); }} catch(e) {{}}
+    if (!sid) {{
+      // Migrate from sessionStorage if present (old behavior)
+      try {{ sid = sessionStorage.getItem(SESSION_KEY); }} catch(e) {{}}
+    }}
+    if (!sid) {{ sid = 'bubble_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7); }}
+    try {{ localStorage.setItem(SESSION_KEY, sid); }} catch(e) {{}}
+    try {{ sessionStorage.setItem(SESSION_KEY, sid); }} catch(e) {{}}
     return sid;
+  }}
+  function setSessionId(sid) {{
+    try {{ localStorage.setItem(SESSION_KEY, sid); }} catch(e) {{}}
+    try {{ sessionStorage.setItem(SESSION_KEY, sid); }} catch(e) {{}}
   }}
   function resetSession() {{
     // Remove current session so getSessionId() generates a fresh one on next call
-    sessionStorage.removeItem(SESSION_KEY);
+    try {{ localStorage.removeItem(SESSION_KEY); }} catch(e) {{}}
+    try {{ sessionStorage.removeItem(SESSION_KEY); }} catch(e) {{}}
   }}
   
   // ---- Fallback in-memory storage (for private browsing or disabled localStorage) ----
@@ -1080,12 +1170,114 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
       background: var(--error-color, #db4437); color: white;
       animation: voice-pulse 1s infinite;
     }}
+    #ha-claude-bubble .voice-btn.processing {{
+      background: var(--warning-color, #ff9800); color: white;
+      animation: voice-pulse 0.6s infinite;
+    }}
     @keyframes voice-pulse {{
       0%, 100% {{ opacity: 1; }}
       50% {{ opacity: 0.6; }}
     }}
+    #ha-claude-bubble .voice-bar {{
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 4px 12px; border-top: 1px solid var(--divider-color, #e0e0e0);
+      background: var(--secondary-background-color, #f5f5f5); font-size: 11px;
+      color: var(--secondary-text-color, #888); flex-shrink: 0;
+    }}
+    #ha-claude-bubble .voice-toggle-label {{
+      display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;
+    }}
+    #ha-claude-bubble .voice-toggle-label input {{ display: none; }}
+    #ha-claude-bubble .voice-toggle-track {{
+      width: 30px; height: 16px; background: var(--disabled-text-color, #ccc);
+      border-radius: 8px; position: relative; transition: background 0.2s;
+    }}
+    #ha-claude-bubble .voice-toggle-label input:checked + .voice-toggle-track {{
+      background: #8b5cf6;
+    }}
+    #ha-claude-bubble .voice-toggle-thumb {{
+      width: 12px; height: 12px; background: white; border-radius: 50%;
+      position: absolute; top: 2px; left: 2px; transition: left 0.2s;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+    }}
+    #ha-claude-bubble .voice-toggle-label input:checked + .voice-toggle-track .voice-toggle-thumb {{
+      left: 16px;
+    }}
+    #ha-claude-bubble .voice-speaking {{
+      display: flex; align-items: center; gap: 4px; color: #8b5cf6; cursor: pointer;
+    }}
+    #ha-claude-bubble .wave-mini {{
+      display: flex; gap: 1px; align-items: center;
+    }}
+    #ha-claude-bubble .wave-mini span {{
+      display: inline-block; width: 2px; background: #8b5cf6; border-radius: 1px;
+      animation: bubble-wave 0.6s ease-in-out infinite;
+    }}
+    #ha-claude-bubble .wave-mini span:nth-child(1) {{ height: 6px; animation-delay: 0s; }}
+    #ha-claude-bubble .wave-mini span:nth-child(2) {{ height: 10px; animation-delay: 0.15s; }}
+    #ha-claude-bubble .wave-mini span:nth-child(3) {{ height: 6px; animation-delay: 0.3s; }}
+    @keyframes bubble-wave {{
+      0%, 100% {{ transform: scaleY(1); }} 50% {{ transform: scaleY(0.4); }}
+    }}
     #ha-claude-bubble .abort-btn {{
       background: var(--error-color, #db4437); color: white;
+    }}
+    /* ---- Conversation History Panel ---- */
+    #ha-claude-bubble .history-panel {{
+      display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      background: var(--card-background-color, #fff); z-index: 10;
+      flex-direction: column; overflow: hidden;
+    }}
+    #ha-claude-bubble .history-panel.open {{ display: flex; }}
+    #ha-claude-bubble .history-header {{
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 16px; background: var(--primary-color, #03a9f4);
+      color: white; font-weight: 600; font-size: 14px; flex-shrink: 0;
+    }}
+    #ha-claude-bubble .history-header button {{
+      background: none; border: none; color: white; cursor: pointer;
+      font-size: 16px; padding: 4px; opacity: 0.8; border-radius: 4px;
+    }}
+    #ha-claude-bubble .history-header button:hover {{ opacity: 1; background: rgba(255,255,255,0.15); }}
+    #ha-claude-bubble .history-list {{
+      flex: 1; overflow-y: auto; padding: 8px;
+    }}
+    #ha-claude-bubble .history-item {{
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 12px; margin-bottom: 4px; border-radius: 8px; cursor: pointer;
+      background: var(--secondary-background-color, #f5f5f5);
+      border: 1px solid transparent; transition: all 0.15s;
+    }}
+    #ha-claude-bubble .history-item:hover {{
+      border-color: var(--primary-color, #03a9f4);
+      background: var(--primary-color, #03a9f4); color: white;
+    }}
+    #ha-claude-bubble .history-item:hover .history-meta {{ color: rgba(255,255,255,0.8); }}
+    #ha-claude-bubble .history-item.active {{
+      border-color: var(--primary-color, #03a9f4);
+      background: color-mix(in srgb, var(--primary-color, #03a9f4) 15%, transparent);
+    }}
+    #ha-claude-bubble .history-item-info {{ flex: 1; min-width: 0; }}
+    #ha-claude-bubble .history-title {{
+      font-size: 12px; font-weight: 500; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis;
+    }}
+    #ha-claude-bubble .history-meta {{
+      font-size: 10px; color: var(--secondary-text-color, #999); margin-top: 2px;
+      display: flex; gap: 8px;
+    }}
+    #ha-claude-bubble .history-source {{
+      font-size: 9px; padding: 1px 6px; border-radius: 8px;
+      background: var(--primary-color, #03a9f4); color: white; opacity: 0.7;
+      flex-shrink: 0;
+    }}
+    #ha-claude-bubble .history-empty {{
+      text-align: center; padding: 24px 16px;
+      color: var(--secondary-text-color, #999); font-size: 13px;
+    }}
+    #ha-claude-bubble .history-error {{
+      text-align: center; padding: 16px;
+      color: var(--error-color, #db4437); font-size: 12px;
     }}
     #ha-claude-bubble .agent-bar {{
       display: flex; align-items: center; gap: 6px;
@@ -1146,9 +1338,17 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
       <div class="chat-header" id="haChatHeader">
         <span>Amira</span>
         <div class="chat-header-actions">
+          <button id="haChatHistory" title="${{T.history || 'History'}}">&#128240;</button>
           <button id="haChatNew" title="${{T.new_chat}}">&#10227;</button>
           <button id="haChatClose" title="${{T.close}}">&times;</button>
         </div>
+      </div>
+      <div class="history-panel" id="haHistoryPanel">
+        <div class="history-header">
+          <span>${{T.history || 'History'}}</span>
+          <button id="haHistoryClose" title="${{T.back_to_chat || 'Back'}}">&times;</button>
+        </div>
+        <div class="history-list" id="haHistoryList"></div>
       </div>
       <div class="agent-bar" id="haAgentBar">
         <label>Agent:</label>
@@ -1162,6 +1362,17 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
         <textarea id="haChatInput" rows="1" placeholder="${{T.placeholder}}"></textarea>
         <button class="input-btn voice-btn" id="haChatVoice" title="Voice">&#127908;</button>
         <button class="input-btn send-btn" id="haChatSend" title="${{T.send}}">&#9654;</button>
+      </div>
+      <div class="voice-bar" id="haChatVoiceBar">
+        <label class="voice-toggle-label">
+          <input type="checkbox" id="haChatVoiceToggle" />
+          <span class="voice-toggle-track"><span class="voice-toggle-thumb"></span></span>
+          <span>${{T.voice_mode}}</span>
+        </label>
+        <span class="voice-speaking" id="haChatSpeaking" style="display:none;" title="${{T.voice_stop_speaking}}">
+          <span class="wave-mini"><span></span><span></span><span></span></span>
+          ${{T.voice_speaking}}
+        </span>
       </div>
     </div>
     <button class="bubble-btn" id="haChatBubbleBtn" title="Amira">&#129302;</button>
@@ -1180,6 +1391,10 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
   const quickActionsEl = document.getElementById('haQuickActions');
   const closeBtn = document.getElementById('haChatClose');
   const newBtn = document.getElementById('haChatNew');
+  const historyBtn = document.getElementById('haChatHistory');
+  const historyPanel = document.getElementById('haHistoryPanel');
+  const historyList = document.getElementById('haHistoryList');
+  const historyCloseBtn = document.getElementById('haHistoryClose');
   const providerSelect = document.getElementById('haProviderSelect');
   const modelSelect = document.getElementById('haModelSelect');
 
@@ -1381,13 +1596,96 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
     }}
   }});
   btn.addEventListener('click', () => {{ if (!dragStarted) togglePanel(); }});
-  closeBtn.addEventListener('click', () => {{ isOpen = false; panel.classList.remove('open'); }});
+  closeBtn.addEventListener('click', () => {{ isOpen = false; panel.classList.remove('open'); historyPanel.classList.remove('open'); }});
   newBtn.addEventListener('click', () => {{
     resetSession(); clearHistory(); messagesEl.innerHTML = '';
     _cachedLogEntry = null; // clear stale log cache on new chat
     updateContextBar(); updateQuickActions();
+    historyPanel.classList.remove('open');
     broadcastEvent('clear', {{}});
   }});
+
+  // ---- Conversation History Panel ----
+  historyBtn.addEventListener('click', () => {{
+    const isHistoryOpen = historyPanel.classList.contains('open');
+    if (isHistoryOpen) {{
+      historyPanel.classList.remove('open');
+    }} else {{
+      historyPanel.classList.add('open');
+      loadConversationList();
+    }}
+  }});
+  historyCloseBtn.addEventListener('click', () => {{ historyPanel.classList.remove('open'); }});
+
+  async function loadConversationList() {{
+    historyList.innerHTML = '<div style="text-align:center;padding:20px;color:var(--secondary-text-color,#999);">&#8987;</div>';
+    try {{
+      const resp = await fetch(API_BASE + '/api/conversations', {{credentials:'same-origin'}});
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      const convs = data.conversations || [];
+      historyList.innerHTML = '';
+      if (convs.length === 0) {{
+        historyList.innerHTML = '<div class="history-empty">' + (T.no_conversations || 'No conversations') + '</div>';
+        return;
+      }}
+      const currentSid = getSessionId();
+      convs.forEach(conv => {{
+        const item = document.createElement('div');
+        item.className = 'history-item' + (conv.id === currentSid ? ' active' : '');
+        const info = document.createElement('div');
+        info.className = 'history-item-info';
+        const title = document.createElement('div');
+        title.className = 'history-title';
+        title.textContent = conv.title || 'Chat';
+        const meta = document.createElement('div');
+        meta.className = 'history-meta';
+        const count = document.createElement('span');
+        count.textContent = (conv.message_count || 0) + ' ' + (T.messages_count || 'messages');
+        const source = document.createElement('span');
+        source.className = 'history-source';
+        source.textContent = conv.source === 'bubble' ? (T.bubble_source || 'Bubble') : (T.chat_source || 'Chat UI');
+        meta.appendChild(count);
+        info.appendChild(title);
+        info.appendChild(meta);
+        item.appendChild(info);
+        item.appendChild(source);
+        item.addEventListener('click', () => switchToConversation(conv.id));
+        historyList.appendChild(item);
+      }});
+    }} catch(e) {{
+      console.error('[Bubble] Error loading conversations:', e);
+      historyList.innerHTML = '<div class="history-error">' + (T.load_error || 'Error loading conversations') + '</div>';
+    }}
+  }}
+
+  async function switchToConversation(sessionId) {{
+    try {{
+      const resp = await fetch(API_BASE + '/api/conversations/' + encodeURIComponent(sessionId), {{credentials:'same-origin'}});
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      // Update session ID
+      setSessionId(sessionId);
+      // Clear current display and localStorage history
+      messagesEl.innerHTML = '';
+      const newHistory = [];
+      if (data.messages && data.messages.length > 0) {{
+        // Show last 20 messages
+        const recent = data.messages.slice(-20);
+        recent.forEach(m => {{
+          if (m.role === 'user' || m.role === 'assistant') {{
+            addMessage(m.role, m.content, m.role === 'assistant');
+            newHistory.push({{ role: m.role, text: m.content, ts: Date.now() }});
+          }}
+        }});
+      }}
+      saveHistory(newHistory);
+      historyPanel.classList.remove('open');
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }} catch(e) {{
+      console.error('[Bubble] Error loading conversation:', e);
+    }}
+  }}
 
   // ---- Draggable Panel (header) ----
   let panelDragging = false, panelDragOffX = 0, panelDragOffY = 0;
@@ -1770,53 +2068,401 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
   // ---- Auto-resize textarea ----
   input.addEventListener('input', () => {{ input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 80) + 'px'; }});
 
-  // ---- Voice Input (Web Speech API) ----
-  let recognition = null;
+  // ---- Voice Input (MediaRecorder + server-side transcription) ----
   let isRecording = false;
+  let bubbleMediaRecorder = null;
+  let bubbleAudioChunks = [];
+  let _bubbleSilenceId = null;
+  let _bubbleVoiceCtx = null;
+  let _bubbleWakeTriggered = false;
 
-  if (typeof webkitSpeechRecognition !== 'undefined' || typeof SpeechRecognition !== 'undefined') {{
-    const SpeechRec = typeof SpeechRecognition !== 'undefined' ? SpeechRecognition : webkitSpeechRecognition;
-    recognition = new SpeechRec();
-    recognition.lang = VOICE_LANG;
-    recognition.interimResults = true;
-    recognition.continuous = false;
+  // Polyfill: navigator.mediaDevices for older browsers / insecure iframe contexts
+  (function() {{
+    if (navigator.mediaDevices === undefined) navigator.mediaDevices = {{}};
+    if (navigator.mediaDevices.getUserMedia === undefined) {{
+      navigator.mediaDevices.getUserMedia = function(constraints) {{
+        const legacy = navigator.getUserMedia || navigator.webkitGetUserMedia ||
+                       navigator.mozGetUserMedia || navigator.msGetUserMedia;
+        if (!legacy) return Promise.reject(new Error('getUserMedia not supported'));
+        return new Promise(function(resolve, reject) {{ legacy.call(navigator, constraints, resolve, reject); }});
+      }};
+    }}
+  }})();
 
-    recognition.onresult = (event) => {{
-      let transcript = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {{
-        transcript += event.results[i][0].transcript;
+  async function startBubbleVoiceRecording() {{
+    if (isRecording) {{ stopBubbleVoiceRecording(); return; }}
+    try {{
+      const stream = await navigator.mediaDevices.getUserMedia({{ audio: true }});
+      bubbleAudioChunks = [];
+      const mimeType = typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '');
+      const options = mimeType ? {{ mimeType }} : {{}};
+      bubbleMediaRecorder = new MediaRecorder(stream, options);
+      bubbleMediaRecorder.ondataavailable = function(e) {{
+        if (e.data.size > 0) bubbleAudioChunks.push(e.data);
+      }};
+      bubbleMediaRecorder.onstop = async function() {{
+        stream.getTracks().forEach(t => t.stop());
+        if (bubbleAudioChunks.length === 0) return;
+        const audioBlob = new Blob(bubbleAudioChunks, {{ type: bubbleMediaRecorder.mimeType || 'audio/webm' }});
+        await bubbleTranscribeAndSend(audioBlob);
+      }};
+      bubbleMediaRecorder.start();
+      isRecording = true;
+      voiceBtn.classList.add('recording');
+      input.value = '';
+      input.placeholder = T.voice_start;
+      if (_bubbleWakeTriggered) {{ _startBubbleSilenceDetector(stream); }}
+    }} catch(err) {{
+      console.error('[Bubble Voice] Mic error:', err);
+      isRecording = false;
+      voiceBtn.classList.remove('recording');
+      if (err.name === 'NotAllowedError') {{
+        alert(T.voice_unsupported);
+      }} else {{
+        alert(T.voice_unsupported);
       }}
-      input.value = transcript;
-    }};
-    recognition.onend = () => {{
-      isRecording = false;
-      voiceBtn.classList.remove('recording');
-      // Auto-send if we got text
-      if (input.value.trim()) sendMessage();
-    }};
-    recognition.onerror = () => {{
-      isRecording = false;
-      voiceBtn.classList.remove('recording');
-    }};
+    }}
+  }}
+
+  function _startBubbleSilenceDetector(stream) {{
+    const CALIBRATION_MS = 400;
+    const SPEECH_MARGIN  = 8;
+    const SILENCE_DURATION = 1200;
+    const MAX_RECORD_MS = 10000;
+    const CHECK_MS = 80;
+    try {{
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      _bubbleVoiceCtx = new AudioCtx();
+      const source = _bubbleVoiceCtx.createMediaStreamSource(stream);
+      const analyser = _bubbleVoiceCtx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      const buf = new Uint8Array(analyser.fftSize);
+      let calSamples = [];
+      let noiseFloor = 0;
+      let speechDetected = false;
+      let silenceStart = 0;
+      const t0 = Date.now();
+      _bubbleSilenceId = setInterval(() => {{
+        if (!isRecording) {{ _stopBubbleSilenceDetector(); return; }}
+        const elapsed = Date.now() - t0;
+        if (elapsed > MAX_RECORD_MS) {{
+          console.log('[Bubble Silence] max recording time reached');
+          stopBubbleVoiceRecording(); return;
+        }}
+        analyser.getByteTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) {{ const v = buf[i] - 128; sum += v * v; }}
+        const rms = Math.sqrt(sum / buf.length);
+        if (elapsed < CALIBRATION_MS) {{ calSamples.push(rms); return; }}
+        if (!noiseFloor && calSamples.length) {{
+          noiseFloor = calSamples.reduce((a,b) => a+b, 0) / calSamples.length;
+          console.log('[Bubble Silence] noise floor:', noiseFloor.toFixed(1));
+        }}
+        const threshold = noiseFloor + SPEECH_MARGIN;
+        if (rms > threshold) {{
+          speechDetected = true;
+          silenceStart = 0;
+        }} else if (speechDetected) {{
+          if (!silenceStart) silenceStart = Date.now();
+          else if (Date.now() - silenceStart >= SILENCE_DURATION) {{
+            console.log('[Bubble Silence] silence detected, auto-stopping');
+            stopBubbleVoiceRecording();
+          }}
+        }}
+      }}, CHECK_MS);
+    }} catch(e) {{ console.warn('[Bubble Silence] detector error:', e); }}
+  }}
+
+  function _stopBubbleSilenceDetector() {{
+    if (_bubbleSilenceId) {{ clearInterval(_bubbleSilenceId); _bubbleSilenceId = null; }}
+    if (_bubbleVoiceCtx) {{ try {{ _bubbleVoiceCtx.close(); }} catch(e) {{}} _bubbleVoiceCtx = null; }}
+  }}
+
+  function stopBubbleVoiceRecording() {{
+    _stopBubbleSilenceDetector();
+    _bubbleWakeTriggered = false;
+    if (bubbleMediaRecorder && bubbleMediaRecorder.state !== 'inactive') {{
+      bubbleMediaRecorder.stop();
+    }}
+    isRecording = false;
+    voiceBtn.classList.remove('recording');
+    voiceBtn.classList.add('processing');
+  }}
+
+  async function bubbleTranscribeAndSend(audioBlob) {{
+    try {{
+      input.placeholder = T.voice_processing || 'Processing...';
+      const formData = new FormData();
+      const ext = (audioBlob.type || '').includes('webm') ? 'webm' : 'wav';
+      formData.append('file', audioBlob, `voice.${{ext}}`);
+      const resp = await fetch(API_BASE + '/api/voice/transcribe', {{
+        method: 'POST',
+        body: formData,
+        credentials: 'same-origin'
+      }});
+      const data = await resp.json();
+      if (data.status === 'success' && data.text) {{
+        input.value = data.text;
+        sendMessage();
+      }} else {{
+        console.warn('[Bubble Voice] Transcription failed:', data.message || data);
+      }}
+    }} catch(err) {{
+      console.error('[Bubble Voice] Transcription error:', err);
+    }} finally {{
+      voiceBtn.classList.remove('recording', 'processing');
+      input.placeholder = T.placeholder;
+    }}
   }}
 
   voiceBtn.addEventListener('click', () => {{
-    if (!recognition) {{ alert(T.voice_unsupported); return; }}
-    if (isRecording) {{
-      recognition.stop();
-      return;
-    }}
-    isRecording = true;
-    voiceBtn.classList.add('recording');
-    input.value = '';
-    input.placeholder = T.voice_start;
-    recognition.start();
+    unlockBubbleAudioContext();  // Unlock audio on user gesture (mobile)
+    startBubbleVoiceRecording();
   }});
 
   // ---- Send / Abort ----
   input.addEventListener('keydown', (e) => {{
     if (e.key === 'Enter' && !e.shiftKey) {{ e.preventDefault(); sendMessage(); }}
   }});
+
+  // ---- Voice TTS (Text-to-Speech) ----
+  const voiceToggle = root.querySelector('#haChatVoiceToggle');
+  const speakingEl = root.querySelector('#haChatSpeaking');
+  let voiceModeActive = false;
+  let currentAudio = null;
+  let audioContextUnlocked = false;
+  let sharedAudioContext = null;
+
+  // Unlock AudioContext on user gesture (required for mobile browsers)
+  function unlockBubbleAudioContext() {{
+    if (audioContextUnlocked) return;
+    try {{
+      if (!sharedAudioContext) {{
+        sharedAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+      }}
+      if (sharedAudioContext.state === 'suspended') {{
+        sharedAudioContext.resume();
+      }}
+      // Play a silent buffer to unlock
+      const silentBuffer = sharedAudioContext.createBuffer(1, 1, 22050);
+      const src = sharedAudioContext.createBufferSource();
+      src.buffer = silentBuffer;
+      src.connect(sharedAudioContext.destination);
+      src.start(0);
+      audioContextUnlocked = true;
+      console.log('[Voice] AudioContext unlocked for bubble');
+    }} catch(e) {{
+      console.warn('[Voice] AudioContext unlock failed:', e);
+    }}
+  }}
+
+  try {{ voiceModeActive = localStorage.getItem('amira_bubble_voice') === 'true'; }} catch(e) {{}}
+  if (voiceToggle) {{
+    voiceToggle.checked = voiceModeActive;
+    voiceToggle.addEventListener('change', async () => {{
+      voiceModeActive = voiceToggle.checked;
+      try {{ localStorage.setItem('amira_bubble_voice', voiceModeActive ? 'true' : 'false'); }} catch(e) {{}}
+      unlockBubbleAudioContext();  // Unlock on user gesture
+      // Check TTS providers when enabling voice mode
+      if (voiceModeActive) {{
+        try {{
+          const provResp = await fetch(API_BASE + '/api/voice/tts/providers');
+          if (provResp.ok) {{
+            const provData = await provResp.json();
+            if (!provData.providers || provData.providers.length === 0) {{
+              console.warn('[TTS] No providers available for voice output');
+            }} else {{
+              console.log('[TTS] Available providers:', provData.providers);
+            }}
+          }}
+        }} catch(e) {{ console.warn('[TTS] Could not check providers:', e); }}
+      }}
+    }});
+  }}
+  if (speakingEl) {{
+    speakingEl.addEventListener('click', () => {{ stopBubbleTTS(); }});
+  }}
+
+  function stopBubbleTTS() {{
+    if (currentAudio) {{
+      if (currentAudio.stop) {{
+        try {{ currentAudio.stop(); }} catch(e) {{}}
+      }} else if (currentAudio.pause) {{
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+      }}
+      currentAudio = null;
+    }}
+    if (speakingEl) speakingEl.style.display = 'none';
+  }}
+
+  async function playBubbleTTS(text) {{
+    if (!text || !voiceModeActive) return;
+    let clean = text
+      .replace(/```[\\s\\S]*?```/g, '')
+      .replace(/`[^`]+`/g, '')
+      .replace(/\\[([^\\]]+)\\]\\([^)]+\\)/g, '$1')
+      .replace(/^[\\s]*[-\\u2022*]\\s*(?:switch|light|sensor|binary_sensor|automation|script|input_boolean|climate|cover|fan|media_player|vacuum|lock|alarm)\\.[^\\n]*/gim, '')  // full lines: - sensor.xxx = value
+      .replace(/\\([^)]*(?:switch|light|sensor|binary_sensor|automation|script|input_boolean|climate|cover|fan|media_player|vacuum|lock|alarm)[^)]*\\)/gi, '')
+      .replace(/\\b(?:switch|light|sensor|binary_sensor|automation|script|input_boolean|climate|cover|fan|media_player|vacuum|lock|alarm)\\.[a-z0-9_]+(?:\\s*[:=]\\s*[^\\n,)]*)?/gi, '')  // entity_id + optional = value
+      .replace(/\\p{{Emoji_Presentation}}|\\p{{Extended_Pictographic}}/gu, '')  // remove emoji
+      .replace(/[#*_~>|]/g, '')
+      .replace(/\\/{2,}/g, ' ')
+      .replace(/(?<=\\s)\\/(?=\\s)/g, ' ')
+      .replace(/\\n+/g, '. ')
+      .replace(/\\s*\\.\\s*\\.\\s*/g, '. ')
+      .replace(/\\s+/g, ' ')
+      .trim();
+    if (!clean || clean.length < 2) return;
+    if (clean.length > 1000) clean = clean.substring(0, 1000) + '...';
+    try {{
+      if (speakingEl) speakingEl.style.display = 'flex';
+      const resp = await fetch(API_BASE + '/api/voice/tts', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ text: clean }})
+      }});
+      if (!resp.ok) throw new Error('TTS ' + resp.status);
+      const blob = await resp.blob();
+      const arrayBuffer = await blob.arrayBuffer();
+
+      // Try Web Audio API first (mobile-compatible with unlocked AudioContext)
+      let played = false;
+      if (sharedAudioContext && audioContextUnlocked) {{
+        try {{
+          if (sharedAudioContext.state === 'suspended') {{
+            await sharedAudioContext.resume();
+          }}
+          const audioBuffer = await sharedAudioContext.decodeAudioData(arrayBuffer.slice(0));
+          const source = sharedAudioContext.createBufferSource();
+          source.buffer = audioBuffer;
+          source.connect(sharedAudioContext.destination);
+          stopBubbleTTS();
+          currentAudio = source;
+          source.onended = () => {{
+            currentAudio = null;
+            if (speakingEl) speakingEl.style.display = 'none';
+          }};
+          source.start(0);
+          played = true;
+          console.log('[Voice] Bubble TTS playing via Web Audio API');
+        }} catch(webAudioErr) {{
+          console.warn('[Voice] Web Audio API failed, falling back:', webAudioErr);
+        }}
+      }}
+
+      // Fallback to HTML5 Audio
+      if (!played) {{
+        const url = URL.createObjectURL(new Blob([arrayBuffer], {{ type: 'audio/mpeg' }}));
+        stopBubbleTTS();
+        const audio = new Audio(url);
+        currentAudio = audio;
+        audio.onended = () => {{
+          URL.revokeObjectURL(url);
+          currentAudio = null;
+          if (speakingEl) speakingEl.style.display = 'none';
+        }};
+        audio.onerror = () => {{
+          URL.revokeObjectURL(url);
+          currentAudio = null;
+          if (speakingEl) speakingEl.style.display = 'none';
+        }};
+        await audio.play();
+        console.log('[Voice] Bubble TTS playing via HTML5 Audio fallback');
+      }}
+    }} catch(e) {{
+      console.error('Bubble TTS error:', e);
+      if (speakingEl) speakingEl.style.display = 'none';
+    }}
+  }}
+
+  // ---- Wake Word Detection ("Ok Amira") ----
+  let wakeWordRec = null;
+  let wakeWordActive = false;
+  const WAKE_PHRASES = ['ok amira', 'okay amira', 'ehi amira', 'hey amira', 'amira'];
+
+  function startBubbleWakeWord() {{
+    if (wakeWordActive || !voiceModeActive) return;
+    const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRec) return;
+
+    wakeWordRec = new SpeechRec();
+    wakeWordRec.lang = VOICE_LANG;
+    wakeWordRec.continuous = true;
+    wakeWordRec.interimResults = true;
+
+    wakeWordRec.onresult = function(event) {{
+      for (let i = event.resultIndex; i < event.results.length; i++) {{
+        const transcript = event.results[i][0].transcript.toLowerCase().trim();
+        if (WAKE_PHRASES.some(p => transcript.includes(p))) {{
+          stopBubbleWakeWord();
+          // Trigger voice recording via MediaRecorder
+          if (!isRecording) {{
+            input.placeholder = T.wake_word_detected || 'Amira activated! Speak now...';
+            _bubbleWakeTriggered = true;
+            startBubbleVoiceRecording();
+          }}
+          return;
+        }}
+      }}
+    }};
+
+    wakeWordRec.onend = function() {{
+      wakeWordActive = false;
+      if (voiceModeActive && !isRecording && !isStreaming) {{
+        setTimeout(function() {{ startBubbleWakeWord(); }}, 500);
+      }}
+    }};
+
+    wakeWordRec.onerror = function(e) {{
+      if (e.error !== 'no-speech' && e.error !== 'aborted') {{
+        console.warn('Bubble wake word error:', e.error);
+      }}
+      wakeWordActive = false;
+    }};
+
+    try {{
+      wakeWordRec.start();
+      wakeWordActive = true;
+    }} catch(e) {{
+      wakeWordActive = false;
+    }}
+  }}
+
+  function stopBubbleWakeWord() {{
+    if (wakeWordRec) {{
+      try {{ wakeWordRec.abort(); }} catch(e) {{}}
+      wakeWordRec = null;
+    }}
+    wakeWordActive = false;
+  }}
+
+  // Toggle wake word with voice mode
+  if (voiceToggle) {{
+    voiceToggle.addEventListener('change', () => {{
+      if (voiceModeActive) {{ startBubbleWakeWord(); }}
+      else {{ stopBubbleWakeWord(); }}
+    }});
+    if (voiceModeActive) {{
+      setTimeout(function() {{ startBubbleWakeWord(); }}, 1000);
+    }}
+  }}
+
+  // Restart wake word after TTS finishes
+  const _origPlayBubbleTTS = playBubbleTTS;
+  playBubbleTTS = async function(text) {{
+    stopBubbleWakeWord();
+    await _origPlayBubbleTTS(text);
+    setTimeout(function() {{
+      if (voiceModeActive && !isRecording && !currentAudio) {{
+        startBubbleWakeWord();
+      }}
+    }}, 2000);
+  }};
+
   sendBtn.addEventListener('click', () => {{
     if (isStreaming) {{ abortStream(); }} else {{ sendMessage(); }}
   }});
@@ -2006,7 +2652,7 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
       const response = await fetch(API_BASE + '/api/chat/stream', {{
         method: 'POST',
         headers: {{ 'Content-Type': 'application/json' }},
-        body: JSON.stringify({{ message: fullMessage, session_id: getSessionId() }}),
+        body: JSON.stringify({{ message: fullMessage, session_id: getSessionId(), voice_mode: !!voiceModeActive }}),
         signal: currentAbortController.signal,
       }});
 
@@ -2096,6 +2742,10 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
                 uDiv.className = 'msg-usage';
                 uDiv.textContent = usageTxt;
                 assistantEl.appendChild(uDiv);
+              }}
+              // TTS: read response aloud if voice mode is active
+              if (voiceModeActive && assistantText) {{
+                playBubbleTTS(assistantText);
               }}
             }} else if (evt.type === 'error') {{
               _removeThinking();
@@ -2216,16 +2866,40 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en") -> str:
   }}
 
   // ---- Restore message history on load ----
-  function restoreHistory() {{
+  async function restoreHistory() {{
     const history = loadHistory();
     console.log('[Bubble] Restored history:', history.length, 'messages');
-    if (history.length === 0) return;
-    // Only show last 20 messages
-    const recent = history.slice(-20);
-    recent.forEach(m => {{
-      addMessage(m.role, m.text, m.role === 'assistant');
-    }});
-    console.log('[Bubble] Loaded', recent.length, 'recent messages to UI');
+    if (history.length > 0) {{
+      // Restore from localStorage
+      const recent = history.slice(-20);
+      recent.forEach(m => {{
+        addMessage(m.role, m.text, m.role === 'assistant');
+      }});
+      console.log('[Bubble] Loaded', recent.length, 'recent messages from localStorage');
+      return;
+    }}
+    // localStorage empty — try loading from server for current session
+    try {{
+      const sid = getSessionId();
+      const resp = await fetch(API_BASE + '/api/conversations/' + encodeURIComponent(sid), {{credentials:'same-origin'}});
+      if (resp.ok) {{
+        const data = await resp.json();
+        if (data.messages && data.messages.length > 0) {{
+          const newHistory = [];
+          const recent = data.messages.slice(-20);
+          recent.forEach(m => {{
+            if (m.role === 'user' || m.role === 'assistant') {{
+              addMessage(m.role, m.content, m.role === 'assistant');
+              newHistory.push({{ role: m.role, text: m.content, ts: Date.now() }});
+            }}
+          }});
+          saveHistory(newHistory);
+          console.log('[Bubble] Loaded', recent.length, 'messages from server');
+        }}
+      }}
+    }} catch(e) {{
+      console.warn('[Bubble] Could not restore from server:', e);
+    }}
   }}
   restoreHistory();
 

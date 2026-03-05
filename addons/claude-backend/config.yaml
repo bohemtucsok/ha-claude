@@ -1,6 +1,6 @@
 # Home Assistant Add-on configuration
 name: Amira
-version: "4.4.4"
+version: "4.4.5"
 slug: claude-backend
 description: >-
   Amira - AI-powered smart home assistant with Claude, ChatGPT, Gemini,
@@ -60,6 +60,7 @@ options:
   enable_memory: false
   enable_file_upload: false
   enable_voice_input: true
+  tts_voice: female
   enable_rag: false
   enable_chat_bubble: false
   enable_mcp: false
@@ -107,6 +108,7 @@ schema:
   enable_memory: bool?
   enable_file_upload: bool?
   enable_voice_input: bool?
+  tts_voice: list(female|male)?
   enable_rag: bool?
   enable_chat_bubble: bool?
   enable_mcp: bool?

@@ -73,6 +73,14 @@ class GoogleProvider(EnhancedProvider):
         import json
         import httpx
         model = (self.model or "gemini-2.0-flash").replace("google/", "")
+        # Guard: models that only support the Interactions API cannot use
+        # the standard streamGenerateContent endpoint.
+        if model.startswith("deep-research"):
+            raise RuntimeError(
+                f"Il modello '{model}' supporta solo la Interactions API di Google "
+                f"e non è compatibile con la chat. "
+                f"Seleziona un modello Gemini standard (es. gemini-2.0-flash)."
+            )
         system = ""
         contents = []
         for m in messages:

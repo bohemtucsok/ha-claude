@@ -1,5 +1,39 @@
 # Changelog
 
+> **⚠️ Dopo l'aggiornamento, ricostruire l'add-on** (Impostazioni → Add-on → Amira → Ricostruisci) per applicare le nuove dipendenze (`edge-tts`).
+
+## 4.4.5 — AI intent classification + TTS vocale + 3 nuovi tool + error UX
+
+### 🧠 Classificazione intent via AI
+- **Rilevamento tool intelligente**: quando i keyword non matchano, una chiamata rapida (~300-500 ms) a un modello leggero (Groq, GitHub, ecc.) analizza la frase dell'utente e seleziona solo i tool necessari (1-6) invece del set statico di 12
+- **3 strategie di classificazione**: REST diretto (provider standard), REST fallback (provider alternativo con API key), streaming (provider web come Codex/Copilot) — con fallback automatico a catena
+- **~900 token di prompt**: lista dei 51 tool con descrizione a 1 riga, regole multilingua, zero hallucination
+- **Fallback sicuro**: se tutte le strategie falliscono → set statico generico (come prima), zero regressione
+
+### 🔊 Text-to-Speech (TTS) con Edge-TTS
+- **Sintesi vocale**: le risposte di Amira possono essere ascoltate con un pulsante 🔊 accanto ai messaggi
+- **Voci maschili/femminili**: nuova opzione `tts_voice` nella configurazione dell'add-on (`female` default, `male` disponibile)
+- **4 lingue**: voci neurali per italiano, inglese, spagnolo e francese
+- **UI integrata**: pulsante play/stop nei messaggi, sia nella chat principale che nella chat bubble
+
+### 🔧 Nuovi tool
+- **`fire_event`**: lancia eventi custom sul bus HA per triggerare automazioni (con blocklist eventi core per sicurezza)
+- **`get_logged_users`**: lista utenti HA registrati con ruoli, stato attivo, owner, system-generated
+- **`get_error_log`**: viewer interattivo del log errori in 2 modalità — sommario numerato + dettaglio con stack trace; supporta anche errori browser catturati
+
+### 🛡️ Errori più chiari
+- **Sanitizzazione errori provider**: i messaggi di errore con JSON grezzo, blob HTTP e noise tecnico vengono puliti in messaggi user-friendly (quota esaurita, rate limit con countdown, errori di rete)
+- **429 quota vs rate limit**: distingue "crediti esauriti" da "troppe richieste al minuto" con messaggi diversi e tempo di reset quando disponibile
+- **Claude Web 429**: parsing dettagliato con `resetsAt`, tipo di claim e tempo rimanente
+
+### 🏠 Ollama lightweight mode
+- **System prompt leggero per Ollama**: i modelli locali su CPU deboli (Celeron, RPi) ricevono un prompt conciso (~100 token) invece del prompt completo con 40+ tool (~7000 token) — riduce il prefill e rispetta la context window
+
+### 🐛 Fix & miglioramenti
+- **Fix conteggio tool per intent chat**: `tools=0` corretto (prima mostrava `tools=51` perché `None` veniva confuso con lista vuota)
+- **Keyword "registri"** aggiunto alla categoria debug in tutte le 4 lingue
+- **Provider model_fetcher**: fix minori per fetch modelli
+
 ## 4.4.4 — Fix risposte AI mancanti nello storico + cestino visibile
 - **Fix risposte AI sparite nelle chat vecchie**: quando l'IA usava tool calls (es. automazioni, statistiche), la risposta finale veniva mostrata in streaming ma MAI salvata su disco — al ricaricamento della pagina spariva. Causa: `elif _streamed_text_parts` veniva saltato quando `new_msgs_from_provider` era non-vuoto (messaggi intermedi con tool_calls). Fix: cambiato `elif` → `if` così entrambi i blocchi vengono eseguiti
 - **Cestino conversazioni più visibile**: il pulsante elimina era `opacity: 0` e visibile solo al hover (invisibile su mobile/touch). Ora sempre semi-visibile (`opacity: 0.45`), più grande (32px), con bordo colorato, sfondo rosso tenue, glow rosso al hover e migliore contrasto in dark mode

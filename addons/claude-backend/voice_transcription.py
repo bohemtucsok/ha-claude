@@ -16,6 +16,7 @@ import os
 import io
 import json
 import base64
+import asyncio
 import requests
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Tuple, Any, List
@@ -23,7 +24,28 @@ from pathlib import Path
 from enum import Enum
 import logging
 
+try:
+    import edge_tts
+    EDGE_TTS_AVAILABLE = True
+except ImportError:
+    EDGE_TTS_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
+
+# Edge TTS voice mapping per language
+EDGE_TTS_VOICES = {
+    "it": "it-IT-IsabellaNeural",
+    "en": "en-US-JennyNeural",
+    "es": "es-ES-ElviraNeural",
+    "fr": "fr-FR-DeniseNeural",
+}
+
+EDGE_TTS_VOICES_MALE = {
+    "it": "it-IT-DiegoNeural",
+    "en": "en-US-GuyNeural",
+    "es": "es-ES-AlvaroNeural",
+    "fr": "fr-FR-HenriNeural",
+}
 
 
 class AudioFormat(Enum):
@@ -272,12 +294,173 @@ class VoiceTranscriber:
 
 
 class TextToSpeech:
-    """Convert text to speech."""
+    """Convert text to speech with Edge TTS, Groq, OpenAI, Google fallback."""
     
     def __init__(self):
         self.groq_api_key = os.getenv("GROQ_API_KEY")
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
         self.google_api_key = os.getenv("GOOGLE_API_KEY")
+        self.language = os.getenv("LANGUAGE", "en").lower()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+    
+    def _get_event_loop(self) -> asyncio.AbstractEventLoop:
+        """Get or create an event loop for async edge-tts calls."""
+        if self._loop is None or self._loop.is_closed():
+            try:
+                self._loop = asyncio.get_event_loop()
+                if self._loop.is_closed():
+                    raise RuntimeError
+            except RuntimeError:
+                self._loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(self._loop)
+        return self._loop
+    
+    def speak_with_edge(self, text: str, voice: str = "") -> Tuple[bool, bytes]:
+        """Generate speech using Edge TTS (free, no API key, supports Italian)."""
+        if not EDGE_TTS_AVAILABLE:
+            logger.warning("Edge TTS not available — edge-tts package not installed")
+            return False, b""
+        
+        try:
+            # Select voice based on config value and language
+            voice_lower = (voice or "").lower().strip()
+            if not voice_lower or voice_lower == "female" or voice_lower in ("nova", "alloy", "echo", "fable", "onyx", "shimmer"):
+                # female (default) → auto-select female voice for current language
+                edge_voice = EDGE_TTS_VOICES.get(self.language, EDGE_TTS_VOICES["en"])
+            elif voice_lower == "male":
+                # male → auto-select male voice for current language
+                edge_voice = EDGE_TTS_VOICES_MALE.get(self.language, EDGE_TTS_VOICES_MALE["en"])
+            else:
+                # Direct Edge TTS voice name (e.g. it-IT-ElsaNeural) for power users
+                edge_voice = voice
+            
+            async def _generate():
+                communicate = edge_tts.Communicate(text, edge_voice)
+                audio_data = b""
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        audio_data += chunk["data"]
+                return audio_data
+            
+            loop = self._get_event_loop()
+            audio_bytes = loop.run_until_complete(_generate())
+            
+            if audio_bytes:
+                logger.info(f"Edge TTS ({edge_voice}): {len(text)} chars -> {len(audio_bytes)} bytes")
+                return True, audio_bytes
+            else:
+                logger.warning("Edge TTS returned empty audio")
+                return False, b""
+        except Exception as e:
+            logger.error(f"Edge TTS error: {e}")
+            return False, b""
+    
+    def speak_with_groq(self, text: str, voice: str = "autumn") -> Tuple[bool, bytes]:
+        """Generate speech using Groq TTS (Orpheus model).
+        
+        Note: Groq TTS has 200 char limit per request. This method
+        automatically chunks longer text.
+        Officially English + Arabic only, but may work with other languages.
+        """
+        if not self.groq_api_key:
+            return False, b""
+        
+        # Map OpenAI voice names to Groq Orpheus voices
+        groq_voice_map = {
+            "nova": "autumn", "alloy": "diana", "echo": "troy",
+            "fable": "hannah", "onyx": "daniel", "shimmer": "austin",
+        }
+        groq_valid_voices = ["autumn", "diana", "hannah", "austin", "daniel", "troy"]
+        resolved_voice = groq_voice_map.get(voice, voice)
+        if resolved_voice not in groq_valid_voices:
+            resolved_voice = "autumn"
+        
+        try:
+            url = "https://api.groq.com/openai/v1/audio/speech"
+            headers = {
+                "Authorization": f"Bearer {self.groq_api_key}",
+                "Content-Type": "application/json",
+            }
+            
+            # Chunk text if > 200 chars (Groq limit)
+            chunks = self._chunk_text(text, max_chars=200)
+            all_audio = b""
+            
+            for chunk in chunks:
+                payload = {
+                    "model": "playai/playht-tts-v3",
+                    "input": chunk,
+                    "voice": resolved_voice,
+                    "response_format": "wav",
+                }
+                
+                response = requests.post(
+                    url, json=payload, headers=headers, timeout=30
+                )
+                
+                if response.status_code == 200:
+                    all_audio += response.content
+                else:
+                    error_msg = ""
+                    try:
+                        error_msg = response.json().get("error", {}).get("message", "")
+                    except:
+                        error_msg = response.text[:200]
+                    logger.warning(f"Groq TTS error ({response.status_code}): {error_msg}")
+                    return False, b""
+            
+            if all_audio:
+                logger.info(f"Groq TTS ({resolved_voice}): {len(text)} chars -> {len(all_audio)} bytes")
+                return True, all_audio
+            return False, b""
+        except Exception as e:
+            logger.error(f"Groq TTS error: {e}")
+            return False, b""
+    
+    @staticmethod
+    def _chunk_text(text: str, max_chars: int = 200) -> List[str]:
+        """Split text into chunks respecting sentence boundaries."""
+        if len(text) <= max_chars:
+            return [text]
+        
+        chunks = []
+        sentences = []
+        # Split on sentence-ending punctuation
+        current = ""
+        for char in text:
+            current += char
+            if char in ".!?;" and len(current.strip()) > 0:
+                sentences.append(current.strip())
+                current = ""
+        if current.strip():
+            sentences.append(current.strip())
+        
+        current_chunk = ""
+        for sentence in sentences:
+            if len(current_chunk) + len(sentence) + 1 <= max_chars:
+                current_chunk = (current_chunk + " " + sentence).strip()
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk)
+                # If a single sentence exceeds max, split by words
+                if len(sentence) > max_chars:
+                    words = sentence.split()
+                    sub_chunk = ""
+                    for word in words:
+                        if len(sub_chunk) + len(word) + 1 <= max_chars:
+                            sub_chunk = (sub_chunk + " " + word).strip()
+                        else:
+                            if sub_chunk:
+                                chunks.append(sub_chunk)
+                            sub_chunk = word
+                    if sub_chunk:
+                        current_chunk = sub_chunk
+                else:
+                    current_chunk = sentence
+        if current_chunk:
+            chunks.append(current_chunk)
+        
+        return chunks if chunks else [text[:max_chars]]
     
     def speak_with_openai(self, text: str, voice: str = "nova") -> Tuple[bool, bytes]:
         """Generate speech using OpenAI TTS."""
@@ -342,17 +525,22 @@ class TextToSpeech:
             logger.error(f"Google TTS error: {e}")
             return False, b""
     
-    def speak_with_fallback(self, text: str, provider_order: Optional[List[str]] = None) -> Tuple[bool, bytes]:
+    def speak_with_fallback(self, text: str, provider_order: Optional[List[str]] = None, voice: str = "nova") -> Tuple[bool, bytes]:
         """
         Generate speech with automatic fallback.
+        Default order: edge → groq → openai → google
         Returns: (success, audio_bytes)
         """
         if not provider_order:
-            provider_order = ["openai", "google"]
+            provider_order = ["edge", "groq", "openai", "google"]
         
         for provider in provider_order:
-            if provider == "openai":
-                success, audio = self.speak_with_openai(text)
+            if provider == "edge":
+                success, audio = self.speak_with_edge(text, voice=voice)
+            elif provider == "groq":
+                success, audio = self.speak_with_groq(text, voice=voice)
+            elif provider == "openai":
+                success, audio = self.speak_with_openai(text, voice=voice)
             elif provider == "google":
                 success, audio = self.speak_with_google(text)
             else:
@@ -362,7 +550,21 @@ class TextToSpeech:
                 logger.info(f"TTS successful with {provider}")
                 return True, audio
         
+        logger.warning("All TTS providers failed")
         return False, b""
+    
+    def get_available_providers(self) -> List[str]:
+        """Return list of available TTS providers."""
+        providers = []
+        if EDGE_TTS_AVAILABLE:
+            providers.append("edge")
+        if self.groq_api_key:
+            providers.append("groq")
+        if self.openai_api_key:
+            providers.append("openai")
+        if self.google_api_key:
+            providers.append("google")
+        return providers
 
 
 # Global instances

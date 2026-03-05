@@ -27,6 +27,8 @@ ENABLE_MEMORY=$(bashio::config 'enable_memory')
 ENABLE_FILE_UPLOAD=$(bashio::config 'enable_file_upload')
 ENABLE_RAG=$(bashio::config 'enable_rag')
 ENABLE_CHAT_BUBBLE=$(bashio::config 'enable_chat_bubble')
+ENABLE_VOICE_INPUT=$(bashio::config 'enable_voice_input')
+TTS_VOICE=$(bashio::config 'tts_voice')
 
 MAX_SNAPSHOTS_PER_FILE=$(bashio::config 'max_snapshots_per_file')
 MAX_CONVERSATIONS=$(bashio::config 'max_conversations')
@@ -106,6 +108,8 @@ export ENABLE_MEMORY
 export ENABLE_FILE_UPLOAD
 export ENABLE_RAG
 export ENABLE_CHAT_BUBBLE
+export ENABLE_VOICE_INPUT
+export TTS_VOICE
 export SUPERVISOR_TOKEN
 
 export MAX_SNAPSHOTS_PER_FILE

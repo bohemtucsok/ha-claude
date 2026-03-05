@@ -144,11 +144,26 @@ def get_chat_ui():
             "unknown_error": "Unknown error",
             "document_uploaded": "Document uploaded",
             "mic_not_supported": "Browser does not support audio recording. Use HTTPS or a compatible browser.",
+            "mic_needs_https": "Microphone requires HTTPS. Quick fix for Chrome: open chrome://flags/#unsafely-treat-insecure-origin-as-secure, add your HA address (e.g. http://192.168.x.x:8123), set Enabled, restart Chrome. Otherwise configure SSL in HA or use localhost.",
+            "mic_needs_https_short": "Microphone blocked (HTTP). See message above for Chrome workaround.",
             "mic_denied_settings": "Microphone access denied. Go to browser settings to enable it.",
             "mic_denied_icon": "Microphone denied. Click the 🔒 icon in the browser bar to enable it.",
             "mic_not_found": "No microphone found. Connect a microphone and try again.",
             "mic_in_use": "Microphone in use by another app. Close other apps and try again.",
             "mic_error": "Microphone error",
+            # Voice mode
+            "voice_mode": "Voice mode",
+            "voice_mode_on": "Voice ON – responses will be read aloud",
+            "voice_mode_off": "Voice OFF",
+            "voice_listening": "Listening...",
+            "voice_processing": "Processing audio...",
+            "voice_tts_error": "Could not play voice response",
+            "voice_tts_no_provider": "Voice output unavailable. Edge TTS or a Groq/OpenAI API key is needed.",
+            "voice_transcription_error": "Transcription failed. Try again.",
+            "voice_speaking": "Speaking...",
+            "voice_stop_speaking": "Stop speaking",
+            "wake_word_active": "Listening for 'Ok Amira'...",
+            "wake_word_detected": "Amira activated! Speak now...",
             # Sidebar tabs
             "tab_chat": "Chat",
             "tab_bubble": "Bubble",
@@ -269,11 +284,26 @@ def get_chat_ui():
             "unknown_error": "Errore sconosciuto",
             "document_uploaded": "Documento caricato",
             "mic_not_supported": "Il browser non supporta la registrazione audio. Usa HTTPS o un browser compatibile.",
+            "mic_needs_https": "Il microfono richiede HTTPS. Soluzione rapida per Chrome: apri chrome://flags/#unsafely-treat-insecure-origin-as-secure, aggiungi il tuo indirizzo HA (es. http://192.168.x.x:8123), imposta Enabled, riavvia Chrome. Altrimenti configura SSL in HA o usa localhost.",
+            "mic_needs_https_short": "Microfono bloccato (HTTP). Vedi il messaggio sopra per la soluzione Chrome.",
             "mic_denied_settings": "Accesso al microfono negato. Vai nelle impostazioni del browser per abilitarlo.",
             "mic_denied_icon": "Permesso microfono negato. Clicca l'icona 🔒 nella barra del browser per abilitarlo.",
             "mic_not_found": "Nessun microfono trovato. Collega un microfono e riprova.",
             "mic_in_use": "Microfono in uso da un'altra app. Chiudi le altre app e riprova.",
             "mic_error": "Errore microfono",
+            # Voice mode
+            "voice_mode": "Modalità voce",
+            "voice_mode_on": "Voce ON – le risposte verranno lette ad alta voce",
+            "voice_mode_off": "Voce OFF",
+            "voice_listening": "In ascolto...",
+            "voice_processing": "Elaborazione audio...",
+            "voice_tts_error": "Impossibile riprodurre la risposta vocale",
+            "voice_tts_no_provider": "Voce in uscita non disponibile. Serve Edge TTS o una API key Groq/OpenAI.",
+            "voice_transcription_error": "Trascrizione fallita. Riprova.",
+            "voice_speaking": "Sto parlando...",
+            "voice_stop_speaking": "Ferma riproduzione",
+            "wake_word_active": "In ascolto per 'Ok Amira'...",
+            "wake_word_detected": "Amira attivata! Parla ora...",
             # Sidebar tabs
             "tab_chat": "Chat",
             "tab_bubble": "Bubble",
@@ -394,11 +424,26 @@ def get_chat_ui():
             "unknown_error": "Error desconocido",
             "document_uploaded": "Documento subido",
             "mic_not_supported": "El navegador no soporta grabación de audio. Usa HTTPS o un navegador compatible.",
+            "mic_needs_https": "El micrófono requiere HTTPS. Solución rápida para Chrome: abre chrome://flags/#unsafely-treat-insecure-origin-as-secure, añade tu dirección HA (ej. http://192.168.x.x:8123), pon Enabled, reinicia Chrome. Si no, configura SSL en HA o usa localhost.",
+            "mic_needs_https_short": "Micrófono bloqueado (HTTP). Ver el mensaje anterior para la solución Chrome.",
             "mic_denied_settings": "Acceso al micrófono denegado. Ve a los ajustes del navegador para habilitarlo.",
             "mic_denied_icon": "Permiso de micrófono denegado. Haz clic en el icono 🔒 en la barra del navegador.",
             "mic_not_found": "No se encontró micrófono. Conecta un micrófono e inténtalo de nuevo.",
             "mic_in_use": "Micrófono en uso por otra app. Cierra las otras apps e inténtalo de nuevo.",
             "mic_error": "Error de micrófono",
+            # Voice mode
+            "voice_mode": "Modo voz",
+            "voice_mode_on": "Voz ON – las respuestas se leerán en voz alta",
+            "voice_mode_off": "Voz OFF",
+            "voice_listening": "Escuchando...",
+            "voice_processing": "Procesando audio...",
+            "voice_tts_error": "No se pudo reproducir la respuesta de voz",
+            "voice_tts_no_provider": "Salida de voz no disponible. Se necesita Edge TTS o una API key de Groq/OpenAI.",
+            "voice_transcription_error": "Transcripción fallida. Inténtalo de nuevo.",
+            "voice_speaking": "Hablando...",
+            "voice_stop_speaking": "Detener reproducción",
+            "wake_word_active": "Escuchando 'Ok Amira'...",
+            "wake_word_detected": "¡Amira activada! Habla ahora...",
             # Sidebar tabs
             "tab_chat": "Chat",
             "tab_bubble": "Bubble",
@@ -519,11 +564,26 @@ def get_chat_ui():
             "unknown_error": "Erreur inconnue",
             "document_uploaded": "Document t\u00e9l\u00e9charg\u00e9",
             "mic_not_supported": "Le navigateur ne prend pas en charge l'enregistrement audio. Utilisez HTTPS ou un navigateur compatible.",
+            "mic_needs_https": "Le microphone nécessite HTTPS. Solution rapide pour Chrome : ouvrez chrome://flags/#unsafely-treat-insecure-origin-as-secure, ajoutez votre adresse HA (ex. http://192.168.x.x:8123), mettez Enabled, redémarrez Chrome. Sinon configurez SSL dans HA ou utilisez localhost.",
+            "mic_needs_https_short": "Microphone bloqué (HTTP). Voir le message ci-dessus pour la solution Chrome.",
             "mic_denied_settings": "Acc\u00e8s au microphone refus\u00e9. Allez dans les param\u00e8tres du navigateur pour l'activer.",
             "mic_denied_icon": "Microphone refus\u00e9. Cliquez sur l'ic\u00f4ne \ud83d\udd12 dans la barre du navigateur.",
             "mic_not_found": "Aucun microphone trouv\u00e9. Connectez un microphone et r\u00e9essayez.",
             "mic_in_use": "Microphone utilis\u00e9 par une autre app. Fermez les autres apps et r\u00e9essayez.",
             "mic_error": "Erreur de microphone",
+            # Voice mode
+            "voice_mode": "Mode vocal",
+            "voice_mode_on": "Voix ON – les réponses seront lues à haute voix",
+            "voice_mode_off": "Voix OFF",
+            "voice_listening": "Écoute en cours...",
+            "voice_processing": "Traitement audio...",
+            "voice_tts_error": "Impossible de lire la réponse vocale",
+            "voice_tts_no_provider": "Sortie vocale indisponible. Edge TTS ou une clé API Groq/OpenAI est nécessaire.",
+            "voice_transcription_error": "Échec de la transcription. Réessayez.",
+            "voice_speaking": "En train de parler...",
+            "voice_stop_speaking": "Arrêter la lecture",
+            "wake_word_active": "Écoute de 'Ok Amira'...",
+            "wake_word_detected": "Amira activée ! Parlez maintenant...",
             # Sidebar tabs
             "tab_chat": "Chat",
             "tab_bubble": "Bulle",
@@ -572,6 +632,8 @@ def get_chat_ui():
     # Feature flags for UI elements
     file_upload_enabled = api.ENABLE_FILE_UPLOAD
     file_upload_display = "block" if file_upload_enabled else "none"
+    voice_enabled = getattr(api, 'ENABLE_VOICE_INPUT', True)
+    voice_display = "flex" if voice_enabled else "none"
 
     return f"""<!DOCTYPE html>
 <html>
@@ -870,6 +932,29 @@ def get_chat_ui():
         .input-area button.image-btn:hover {{ background: #059669; }}
         .input-area button.file-btn {{ background: #f59e0b; }}
         .input-area button.file-btn:hover {{ background: #d97706; }}
+        .input-area button.mic-btn {{ background: #8b5cf6; }}
+        .input-area button.mic-btn:hover {{ background: #7c3aed; }}
+        .input-area button.mic-btn.recording {{ background: #ef4444; animation: mic-pulse 1s infinite; }}
+        .input-area button.mic-btn.processing {{ background: #f59e0b; animation: mic-pulse 1.5s infinite; }}
+        @keyframes mic-pulse {{ 0%, 100% {{ opacity: 1; transform: scale(1); }} 50% {{ opacity: 0.7; transform: scale(1.1); }} }}
+        .voice-toggle {{ display: flex; align-items: center; gap: 6px; padding: 0 16px 4px; font-size: 12px; color: #888; }}
+        .voice-toggle label {{ cursor: pointer; display: flex; align-items: center; gap: 6px; user-select: none; }}
+        .voice-toggle input[type="checkbox"] {{ display: none; }}
+        .voice-toggle .toggle-track {{ width: 36px; height: 20px; background: #ccc; border-radius: 10px; position: relative; transition: background 0.2s; flex-shrink: 0; }}
+        .voice-toggle input:checked + .toggle-track {{ background: #8b5cf6; }}
+        .voice-toggle .toggle-thumb {{ width: 16px; height: 16px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 2px; transition: left 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }}
+        .voice-toggle input:checked + .toggle-track .toggle-thumb {{ left: 18px; }}
+        .voice-toggle .toggle-label {{ font-size: 12px; }}
+        .voice-speaking-bar {{ display: none; align-items: center; gap: 8px; padding: 6px 16px; background: #f3e8ff; border-radius: 8px; margin: 0 16px 4px; font-size: 12px; color: #7c3aed; cursor: pointer; }}
+        .voice-speaking-bar.active {{ display: flex; }}
+        .voice-speaking-bar .wave {{ display: flex; gap: 2px; align-items: center; }}
+        .voice-speaking-bar .wave span {{ display: inline-block; width: 3px; background: #8b5cf6; border-radius: 2px; animation: wave-bar 0.6s ease-in-out infinite; }}
+        .voice-speaking-bar .wave span:nth-child(1) {{ height: 8px; animation-delay: 0s; }}
+        .voice-speaking-bar .wave span:nth-child(2) {{ height: 14px; animation-delay: 0.1s; }}
+        .voice-speaking-bar .wave span:nth-child(3) {{ height: 10px; animation-delay: 0.2s; }}
+        .voice-speaking-bar .wave span:nth-child(4) {{ height: 16px; animation-delay: 0.3s; }}
+        .voice-speaking-bar .wave span:nth-child(5) {{ height: 8px; animation-delay: 0.4s; }}
+        @keyframes wave-bar {{ 0%, 100% {{ transform: scaleY(1); }} 50% {{ transform: scaleY(0.4); }} }}
         .suggestions {{ display: flex; gap: 8px; padding: 0 16px 8px; flex-wrap: wrap; }}
         .suggestion {{ background: white; border: 1px solid #ddd; border-radius: 16px; padding: 6px 14px; font-size: 13px; cursor: pointer; transition: all 0.2s; white-space: nowrap; }}
         .suggestion:hover {{ background: #667eea; color: white; border-color: #667eea; }}
@@ -1345,6 +1430,11 @@ def get_chat_ui():
             color: #707070;
         }}
 
+        body.dark-mode .voice-toggle {{ color: #888; }}
+        body.dark-mode .voice-toggle .toggle-track {{ background: #444; }}
+        body.dark-mode .voice-toggle input:checked + .toggle-track {{ background: #8b5cf6; }}
+        body.dark-mode .voice-speaking-bar {{ background: #2d1f4e; color: #c4b5fd; }}
+
         body.dark-mode .suggestion {{
             background: #2a2a2a;
             border-color: #3a3a3a;
@@ -1490,7 +1580,7 @@ def get_chat_ui():
         <span style="font-size: 24px;">\U0001f916</span>
         <h1>{agent_name}</h1>
         <span class="badge">v{api.get_version()}</span>
-        <button id="sidebarToggleBtn" class="new-chat mobile-only" onclick="toggleSidebar()" title="{ui_js['conversations']}">\u2630</button>
+        <button id="sidebarToggleBtn" class="new-chat mobile-only" title="{ui_js['conversations']}">\u2630</button>
         <div id="modelSelectWrap">
           <select id="providerSelect" class="model-selector" title="{ui_js['change_model']}"></select>
           <select id="modelSelect" class="model-selector" title="{ui_js['change_model']}"></select>
@@ -1733,6 +1823,9 @@ def get_chat_ui():
             <button class="file-btn" title="Upload Document (PDF, DOCX, TXT, MD, YAML)" style="display: {file_upload_display};" id="fileUploadBtn">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
             </button>
+            <button class="mic-btn" title="{ui_js['voice_mode']}" style="display: {voice_display};" id="micBtn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            </button>
 
             <textarea id="input" rows="1" placeholder="{ui_js['input_placeholder']}"></textarea>
             <button id="sendBtn">
@@ -1740,11 +1833,73 @@ def get_chat_ui():
                 <svg id="stopIcon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="display:none"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
             </button>
         </div>
+        <div class="voice-toggle" id="voiceToggle" style="display: {voice_display};">
+            <label>
+                <input type="checkbox" id="voiceModeCheckbox" />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                <span class="toggle-label">{ui_js['voice_mode']}</span>
+            </label>
+        </div>
+        <div class="voice-speaking-bar" id="voiceSpeakingBar" title="{ui_js['voice_stop_speaking']}">
+            <div class="wave"><span></span><span></span><span></span><span></span><span></span></div>
+            <span id="voiceSpeakingLabel">{ui_js['voice_speaking']}</span>
+        </div>
     </div>
         </div>
     </div>
 
     <script>
+        // Global error handler — shows JS errors as visible banner + sends to backend
+        if (!window.__AMIRA_ERROR_HANDLER) {{
+            window.__AMIRA_ERROR_HANDLER = true;
+            window.__AMIRA_BROWSER_ERRORS = [];
+            function _amiraSendError(entry) {{
+                window.__AMIRA_BROWSER_ERRORS.push(entry);
+                if (window.__AMIRA_BROWSER_ERRORS.length > 100) window.__AMIRA_BROWSER_ERRORS.shift();
+                try {{
+                    var bp = (window.location.pathname || '/').endsWith('/') ? window.location.pathname : (window.location.pathname + '/');
+                    var url = window.location.origin.replace(/\\/$/, '') + bp + 'api/browser-errors';
+                    navigator.sendBeacon(url, JSON.stringify({{ errors: [entry] }}));
+                }} catch(e) {{}}
+            }}
+            window.onerror = function(msg, src, line, col, err) {{
+                console.error('[Amira JS Error]', msg, 'at', src, line + ':' + col, err);
+                _amiraSendError({{ level: 'error', message: String(msg), source: src || '', line: line, col: col, stack: err && err.stack || '', timestamp: new Date().toISOString(), ui: 'chat_ui' }});
+                var d = document.createElement('div');
+                d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#b00020;color:#fff;padding:12px 16px;font:13px/1.4 monospace;max-height:30vh;overflow:auto;cursor:pointer;';
+                d.textContent = '[JS Error] ' + msg + ' (line ' + line + ':' + col + ')';
+                d.title = 'Click per chiudere';
+                d.onclick = function() {{ d.remove(); }};
+                document.body ? document.body.prepend(d) : document.addEventListener('DOMContentLoaded', function() {{ document.body.prepend(d); }});
+            }};
+            window.addEventListener('unhandledrejection', function(ev) {{
+                console.error('[Amira Promise Error]', ev.reason);
+                var reason = ev.reason && ev.reason.message || ev.reason || 'Unknown';
+                _amiraSendError({{ level: 'error', message: '[Promise] ' + reason, source: '', stack: ev.reason && ev.reason.stack || '', timestamp: new Date().toISOString(), ui: 'chat_ui' }});
+                var d = document.createElement('div');
+                d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#b00020;color:#fff;padding:12px 16px;font:13px/1.4 monospace;max-height:30vh;overflow:auto;cursor:pointer;';
+                d.textContent = '[Promise Error] ' + reason;
+                d.title = 'Click per chiudere';
+                d.onclick = function() {{ d.remove(); }};
+                document.body ? document.body.prepend(d) : document.addEventListener('DOMContentLoaded', function() {{ document.body.prepend(d); }});
+            }});
+            // Also intercept console.error/console.warn to capture card/component errors
+            var _origError = console.error, _origWarn = console.warn;
+            console.error = function() {{
+                var msg = Array.prototype.slice.call(arguments).map(function(a) {{ return typeof a === 'object' ? JSON.stringify(a) : String(a); }}).join(' ');
+                if (msg.indexOf('_amiraSendError') === -1 && msg.indexOf('[Amira') === -1) {{
+                    _amiraSendError({{ level: 'error', message: msg.substring(0, 1000), source: 'console.error', timestamp: new Date().toISOString(), ui: 'chat_ui' }});
+                }}
+                _origError.apply(console, arguments);
+            }};
+            console.warn = function() {{
+                var msg = Array.prototype.slice.call(arguments).map(function(a) {{ return typeof a === 'object' ? JSON.stringify(a) : String(a); }}).join(' ');
+                if (msg.indexOf('_amiraSendError') === -1) {{
+                    _amiraSendError({{ level: 'warning', message: msg.substring(0, 1000), source: 'console.warn', timestamp: new Date().toISOString(), ui: 'chat_ui' }});
+                }}
+                _origWarn.apply(console, arguments);
+            }};
+        }}
         if (window.__UI_MAIN_INITIALIZED) {{
             console.log('[ui] main already initialized');
         }} else {{
@@ -1778,6 +1933,526 @@ def get_chat_ui():
 
         let sending = false;
         let currentReader = null;
+
+        // ---- Voice Mode State ----
+        const micBtn = document.getElementById('micBtn');
+        const voiceModeCheckbox = document.getElementById('voiceModeCheckbox');
+        const voiceSpeakingBar = document.getElementById('voiceSpeakingBar');
+        const voiceSpeakingLabel = document.getElementById('voiceSpeakingLabel');
+        let voiceModeActive = safeLocalStorageGet('amira_voice_mode') === 'true';
+        let isRecording = false;
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let currentAudio = null;
+        let voiceTriggeredMessage = false;
+        let audioContextUnlocked = false;
+        let sharedAudioContext = null;
+        let _silenceDetectorId = null;
+        let _voiceAudioCtx = null;
+        let _wakeWordTriggered = false;  // true when recording was started by wake word
+
+        // Polyfill: navigator.mediaDevices for older browsers / insecure iframe contexts
+        (function() {{
+            if (navigator.mediaDevices === undefined) {{
+                navigator.mediaDevices = {{}};
+            }}
+            if (navigator.mediaDevices.getUserMedia === undefined) {{
+                navigator.mediaDevices.getUserMedia = function(constraints) {{
+                    const legacy = navigator.getUserMedia || navigator.webkitGetUserMedia ||
+                                   navigator.mozGetUserMedia || navigator.msGetUserMedia;
+                    if (!legacy) {{
+                        return Promise.reject(new Error('getUserMedia not supported by this browser'));
+                    }}
+                    return new Promise(function(resolve, reject) {{
+                        legacy.call(navigator, constraints, resolve, reject);
+                    }});
+                }};
+            }}
+        }})();
+
+        // Unlock AudioContext on any user gesture (required for mobile autoplay)
+        function unlockAudioContext() {{
+            if (audioContextUnlocked) return;
+            try {{
+                sharedAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+                // Play a silent buffer to unlock
+                const buf = sharedAudioContext.createBuffer(1, 1, 22050);
+                const src = sharedAudioContext.createBufferSource();
+                src.buffer = buf;
+                src.connect(sharedAudioContext.destination);
+                src.start(0);
+                audioContextUnlocked = true;
+                console.log('AudioContext unlocked for TTS playback');
+            }} catch(e) {{ console.warn('AudioContext unlock failed:', e); }}
+        }}
+
+        // Restore voice mode toggle state
+        if (voiceModeCheckbox) {{
+            voiceModeCheckbox.checked = voiceModeActive;
+            voiceModeCheckbox.addEventListener('change', async function() {{
+                voiceModeActive = this.checked;
+                safeLocalStorageSet('amira_voice_mode', voiceModeActive ? 'true' : 'false');
+                unlockAudioContext();  // Unlock on toggle interaction
+                // Check TTS providers when enabling voice mode
+                if (voiceModeActive) {{
+                    try {{
+                        const provResp = await fetch(apiUrl('api/voice/tts/providers'));
+                        if (provResp.ok) {{
+                            const provData = await provResp.json();
+                            if (!provData.providers || provData.providers.length === 0) {{
+                                showNotification(T.voice_tts_no_provider || 'Voice output unavailable. Edge TTS or a Groq/OpenAI API key is needed.', 'warning');
+                            }} else {{
+                                console.log('[TTS] Available providers:', provData.providers);
+                            }}
+                        }}
+                    }} catch(e) {{ console.warn('[TTS] Could not check providers:', e); }}
+                }}
+            }});
+        }}
+
+        // Stop TTS playback when clicking the speaking bar
+        if (voiceSpeakingBar) {{
+            voiceSpeakingBar.addEventListener('click', function() {{
+                stopTTSPlayback();
+            }});
+        }}
+
+        function stopTTSPlayback() {{
+            if (currentAudio) {{
+                currentAudio.pause();
+                currentAudio.currentTime = 0;
+                currentAudio = null;
+            }}
+            if (voiceSpeakingBar) voiceSpeakingBar.classList.remove('active');
+        }}
+
+        async function startVoiceRecording() {{
+            if (isRecording) {{
+                stopVoiceRecording();
+                return;
+            }}
+            try {{
+                const stream = await navigator.mediaDevices.getUserMedia({{ audio: true }});
+                audioChunks = [];
+                // Prefer webm/opus, fall back to whatever browser supports
+                const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+                    ? 'audio/webm;codecs=opus'
+                    : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '');
+                const options = mimeType ? {{ mimeType }} : {{}};
+                mediaRecorder = new MediaRecorder(stream, options);
+                mediaRecorder.ondataavailable = function(e) {{
+                    if (e.data.size > 0) audioChunks.push(e.data);
+                }};
+                mediaRecorder.onstop = async function() {{
+                    stream.getTracks().forEach(t => t.stop());
+                    if (audioChunks.length === 0) return;
+                    const audioBlob = new Blob(audioChunks, {{ type: mediaRecorder.mimeType || 'audio/webm' }});
+                    await transcribeAndSend(audioBlob);
+                }};
+                mediaRecorder.start();
+                isRecording = true;
+                if (micBtn) {{
+                    micBtn.classList.add('recording');
+                    micBtn.title = T.voice_listening || 'Listening...';
+                }}
+                if (input) {{
+                    input.placeholder = T.voice_listening || 'Listening...';
+                }}
+                // --- Silence detection (only for wake-word triggered recordings) ---
+                if (_wakeWordTriggered) {{
+                    _startSilenceDetector(stream);
+                }}
+            }} catch (err) {{
+                console.error('Mic error:', err);
+                let msg = T.mic_error || 'Microphone error';
+                if (err.name === 'NotAllowedError') {{
+                    msg = T.mic_denied_settings || msg;
+                }} else if (err.name === 'NotFoundError') {{
+                    msg = T.mic_not_found || msg;
+                }} else if (err.name === 'NotReadableError') {{
+                    msg = T.mic_in_use || msg;
+                }}
+                addMessage('\u274c ' + msg, 'system');
+            }}
+        }}
+
+        function _startSilenceDetector(stream) {{
+            // Dynamic silence detection: calibrates ambient noise, then stops
+            // when audio drops back to noise floor after speech.
+            const CALIBRATION_MS = 400;   // measure noise floor for 400ms
+            const SPEECH_MARGIN  = 8;     // RMS above floor to count as speech
+            const SILENCE_DURATION = 1200; // 1.2s silence after speech = stop
+            const MAX_RECORD_MS = 10000;   // 10s absolute max
+            const CHECK_MS = 80;           // poll interval
+            try {{
+                _voiceAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const source = _voiceAudioCtx.createMediaStreamSource(stream);
+                const analyser = _voiceAudioCtx.createAnalyser();
+                analyser.fftSize = 512;
+                source.connect(analyser);
+                const buf = new Uint8Array(analyser.fftSize);
+                let calSamples = [];
+                let noiseFloor = 0;
+                let speechDetected = false;
+                let silenceStart = 0;
+                const t0 = Date.now();
+                _silenceDetectorId = setInterval(() => {{
+                    if (!isRecording) {{ _stopSilenceDetector(); return; }}
+                    const elapsed = Date.now() - t0;
+                    if (elapsed > MAX_RECORD_MS) {{
+                        console.log('[Voice] Max recording time — auto-stop');
+                        stopVoiceRecording(); return;
+                    }}
+                    analyser.getByteTimeDomainData(buf);
+                    let sum = 0;
+                    for (let i = 0; i < buf.length; i++) {{
+                        const v = buf[i] - 128; sum += v * v;
+                    }}
+                    const rms = Math.sqrt(sum / buf.length);
+                    // Phase 1: calibrate the ambient noise level
+                    if (elapsed < CALIBRATION_MS) {{ calSamples.push(rms); return; }}
+                    if (!noiseFloor && calSamples.length) {{
+                        noiseFloor = calSamples.reduce((a,b)=>a+b,0) / calSamples.length;
+                        console.log('[Voice] Noise floor calibrated:', noiseFloor.toFixed(1));
+                    }}
+                    const threshold = noiseFloor + SPEECH_MARGIN;
+                    // Phase 2: detect speech then silence
+                    if (rms > threshold) {{
+                        speechDetected = true;
+                        silenceStart = 0;
+                    }} else if (speechDetected) {{
+                        if (!silenceStart) silenceStart = Date.now();
+                        else if (Date.now() - silenceStart >= SILENCE_DURATION) {{
+                            console.log('[Voice] Silence detected — auto-stop');
+                            stopVoiceRecording(); return;
+                        }}
+                    }}
+                }}, CHECK_MS);
+            }} catch(e) {{
+                console.warn('[Voice] Silence detector init failed:', e);
+            }}
+        }}
+
+        function _stopSilenceDetector() {{
+            if (_silenceDetectorId) {{ clearInterval(_silenceDetectorId); _silenceDetectorId = null; }}
+            if (_voiceAudioCtx) {{ try {{ _voiceAudioCtx.close(); }} catch(e) {{}} _voiceAudioCtx = null; }}
+        }}
+
+        function stopVoiceRecording() {{
+            _stopSilenceDetector();
+            _wakeWordTriggered = false;
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {{
+                mediaRecorder.stop();
+            }}
+            isRecording = false;
+            if (micBtn) {{
+                micBtn.classList.remove('recording');
+                micBtn.classList.add('processing');
+                micBtn.title = T.voice_processing || 'Processing...';
+            }}
+        }}
+
+        async function transcribeAndSend(audioBlob) {{
+            try {{
+                if (input) input.placeholder = T.voice_processing || 'Processing audio...';
+                const formData = new FormData();
+                const ext = (audioBlob.type || '').includes('webm') ? 'webm' : 'wav';
+                formData.append('file', audioBlob, `voice.${{ext}}`);
+                const resp = await fetch(apiUrl('api/voice/transcribe'), {{
+                    method: 'POST',
+                    body: formData
+                }});
+                const data = await resp.json();
+                if (data.status === 'success' && data.text) {{
+                    if (input) input.value = data.text;
+                    voiceTriggeredMessage = true;
+                    await sendMessage();
+                }} else {{
+                    addMessage('\u274c ' + (data.message || T.voice_transcription_error || 'Transcription failed'), 'system');
+                }}
+            }} catch (err) {{
+                console.error('Transcription error:', err);
+                addMessage('\u274c ' + (T.voice_transcription_error || 'Transcription failed'), 'system');
+            }} finally {{
+                if (micBtn) {{
+                    micBtn.classList.remove('recording', 'processing');
+                    micBtn.title = T.voice_mode || 'Voice';
+                }}
+                if (input) input.placeholder = '{ui_js['input_placeholder']}';
+            }}
+        }}
+
+        async function playTTSResponse(text) {{
+            if (!text || !voiceModeActive) return;
+            // Strip markdown + technical info for cleaner speech
+            let cleanText = text
+                .replace(/```[\\s\\S]*?```/g, '')   // remove code blocks
+                .replace(/`[^`]+`/g, '')            // remove inline code
+                .replace(/\\[([^\\]]+)\\]\\([^)]+\\)/g, '$1')  // [text](url) -> text
+                .replace(/^[\\s]*[-*]\\s*(?:switch|light|sensor|binary_sensor|automation|script|input_boolean|climate|cover|fan|media_player|vacuum|lock|alarm)\\.[^\\n]*/gim, '')  // remove full lines: - sensor.xxx = value
+                .replace(/\\([^)]*(?:switch|light|sensor|binary_sensor|automation|script|input_boolean|climate|cover|fan|media_player|vacuum|lock|alarm)[^)]*\\)/gi, '')  // remove (entity_id: state) patterns
+                .replace(/\\b(?:switch|light|sensor|binary_sensor|automation|script|input_boolean|climate|cover|fan|media_player|vacuum|lock|alarm)\\.[a-z0-9_]+(?:\\s*[:=]\\s*[^\\n,)]*)?/gi, '')  // remove entity_id and optional = value
+                .replace(/\\p{{Emoji_Presentation}}|\\p{{Extended_Pictographic}}/gu, '')  // remove emoji
+                .replace(/[#*_~>|]/g, '')            // remove markdown chars (keep -)
+                .replace(/\\/{2,}/g, ' ')            // remove multiple slashes
+                .replace(/(?<=\\s)\\/(?=\\s)/g, ' ')  // remove isolated /
+                .replace(/\\n+/g, '. ')              // newlines to pauses
+                .replace(/\\s*\\.\\s*\\.\\s*/g, '. ')  // collapse multiple dots
+                .replace(/\\s+/g, ' ')               // collapse whitespace
+                .trim();
+            if (!cleanText || cleanText.length < 2) return;
+            // Limit length for TTS (avoid very long responses)
+            if (cleanText.length > 1000) cleanText = cleanText.substring(0, 1000) + '...';
+            try {{
+                if (voiceSpeakingBar) {{
+                    voiceSpeakingBar.classList.add('active');
+                    if (voiceSpeakingLabel) voiceSpeakingLabel.textContent = T.voice_speaking || 'Speaking...';
+                }}
+                console.log('[TTS] Fetching audio for', cleanText.length, 'chars...');
+                const ttsUrl = apiUrl('api/voice/tts');
+                console.log('[TTS] URL:', ttsUrl);
+                const resp = await fetch(ttsUrl, {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ text: cleanText }})
+                }});
+                console.log('[TTS] Response status:', resp.status, resp.statusText);
+                if (!resp.ok) {{
+                    const errBody = await resp.text().catch(() => '');
+                    console.error('[TTS] Error body:', errBody);
+                    throw new Error('TTS response ' + resp.status + ': ' + errBody);
+                }}
+                const audioBlob = await resp.blob();
+                console.log('[TTS] Got audio blob:', audioBlob.size, 'bytes, type:', audioBlob.type);
+                if (audioBlob.size < 100) {{
+                    console.error('[TTS] Audio blob too small, likely an error');
+                    throw new Error('TTS returned empty/invalid audio');
+                }}
+                const audioUrl = URL.createObjectURL(audioBlob);
+                stopTTSPlayback();  // stop any previous audio
+
+                // Ensure AudioContext is initialized even if not unlocked yet
+                if (!sharedAudioContext) {{
+                    try {{
+                        sharedAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+                        console.log('[TTS] Created AudioContext, state:', sharedAudioContext.state);
+                    }} catch(e) {{ console.warn('[TTS] AudioContext creation failed:', e); }}
+                }}
+
+                // Try Web Audio API first (works best after user gesture unlock)
+                if (sharedAudioContext) {{
+                    try {{
+                        if (sharedAudioContext.state === 'suspended') {{
+                            await sharedAudioContext.resume();
+                            console.log('[TTS] AudioContext resumed, state:', sharedAudioContext.state);
+                        }}
+                        const arrayBuffer = await audioBlob.arrayBuffer();
+                        const audioBuffer = await sharedAudioContext.decodeAudioData(arrayBuffer.slice(0));
+                        const source = sharedAudioContext.createBufferSource();
+                        source.buffer = audioBuffer;
+                        source.connect(sharedAudioContext.destination);
+                        source.onended = function() {{
+                            URL.revokeObjectURL(audioUrl);
+                            currentAudio = null;
+                            if (voiceSpeakingBar) voiceSpeakingBar.classList.remove('active');
+                        }};
+                        source.start(0);
+                        currentAudio = {{ _source: source, pause: function() {{ try {{ source.stop(); }} catch(e) {{}} }}, currentTime: 0 }};
+                        console.log('[TTS] Playing via Web Audio API');
+                        return;
+                    }} catch(webAudioErr) {{
+                        console.warn('[TTS] Web Audio API failed, trying HTML5 Audio:', webAudioErr);
+                    }}
+                }}
+
+                // Fallback: standard HTML5 Audio
+                console.log('[TTS] Trying HTML5 Audio fallback...');
+                currentAudio = new Audio(audioUrl);
+                currentAudio.onended = function() {{
+                    URL.revokeObjectURL(audioUrl);
+                    currentAudio = null;
+                    if (voiceSpeakingBar) voiceSpeakingBar.classList.remove('active');
+                }};
+                currentAudio.onerror = function(e) {{
+                    console.error('[TTS] HTML5 Audio error:', e);
+                    URL.revokeObjectURL(audioUrl);
+                    currentAudio = null;
+                    if (voiceSpeakingBar) voiceSpeakingBar.classList.remove('active');
+                }};
+                await currentAudio.play();
+                console.log('[TTS] Playing via HTML5 Audio');
+            }} catch (err) {{
+                console.error('[TTS] Error:', err);
+                if (voiceSpeakingBar) voiceSpeakingBar.classList.remove('active');
+            }}
+        }}
+
+        // Mic button click handler
+        if (micBtn) {{
+            micBtn.addEventListener('click', async function() {{
+                unlockAudioContext();  // Unlock audio on user gesture (mobile)
+                // Check if getUserMedia is possible
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {{
+                    const isSecure = window.isSecureContext || location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+                    if (!isSecure) {{
+                        const origin = location.origin || (location.protocol + '//' + location.host);
+                        const msg = '\u274c ' + (T.mic_needs_https || 'Microphone requires HTTPS.')
+                            + '\\n\\n\ud83d\udca1 Indirizzo corrente: ' + origin
+                            + '\\nCopia questo indirizzo nel flag Chrome per abilitare il microfono.';
+                        addMessage(msg, 'system');
+                    }} else {{
+                        addMessage('\u274c ' + (T.mic_not_supported || 'Browser does not support audio recording'), 'system');
+                    }}
+                    return;
+                }}
+                // On first click, try to get mic permission to detect issues early
+                if (!isRecording && !mediaRecorder) {{
+                    try {{
+                        const testStream = await navigator.mediaDevices.getUserMedia({{ audio: true }});
+                        testStream.getTracks().forEach(t => t.stop());
+                    }} catch (permErr) {{
+                        console.error('[Mic] Permission/access error:', permErr.name, permErr.message);
+                        if (permErr.name === 'NotAllowedError') {{
+                            addMessage('\u274c ' + (T.mic_denied_icon || 'Microphone denied. Check browser permissions.'), 'system');
+                        }} else if (permErr.name === 'NotFoundError') {{
+                            addMessage('\u274c ' + (T.mic_not_found || 'No microphone found.'), 'system');
+                        }} else if (permErr.name === 'NotReadableError' || permErr.name === 'AbortError') {{
+                            addMessage('\u274c ' + (T.mic_in_use || 'Microphone in use by another app.'), 'system');
+                        }} else {{
+                            // Likely insecure context (HTTP without localhost)
+                            const isSecure = window.isSecureContext || location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+                            if (!isSecure) {{
+                                const origin = location.origin || (location.protocol + '//' + location.host);
+                                const msg = '\u274c ' + (T.mic_needs_https || 'Microphone requires HTTPS.')
+                                    + '\\n\\n\ud83d\udca1 Indirizzo corrente: ' + origin
+                                    + '\\nCopia questo indirizzo nel flag Chrome per abilitare il microfono.';
+                                addMessage(msg, 'system');
+                            }} else {{
+                                addMessage('\u274c ' + (T.mic_error || 'Microphone error') + ': ' + permErr.message, 'system');
+                            }}
+                        }}
+                        return;
+                    }}
+                }}
+                if (isRecording) {{
+                    stopVoiceRecording();
+                }} else {{
+                    startVoiceRecording();
+                }}
+            }});
+        }}
+
+        // ---- Wake Word Detection ("Ok Amira") ----
+        // Uses Web Speech API in continuous mode to listen for the wake word.
+        // When detected, automatically starts MediaRecorder to capture the command.
+        let wakeWordRecognition = null;
+        let wakeWordActive = false;
+        const WAKE_PHRASES = ['ok amira', 'okay amira', 'ehi amira', 'hey amira', 'amira'];
+
+        function startWakeWordListener() {{
+            if (wakeWordActive || !voiceModeActive) return;
+            const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRec) return;
+
+            wakeWordRecognition = new SpeechRec();
+            wakeWordRecognition.lang = '{api.LANGUAGE}' === 'it' ? 'it-IT' : '{api.LANGUAGE}' === 'es' ? 'es-ES' : '{api.LANGUAGE}' === 'fr' ? 'fr-FR' : 'en-US';
+            wakeWordRecognition.continuous = true;
+            wakeWordRecognition.interimResults = true;
+
+            wakeWordRecognition.onresult = function(event) {{
+                for (let i = event.resultIndex; i < event.results.length; i++) {{
+                    const transcript = event.results[i][0].transcript.toLowerCase().trim();
+                    const detected = WAKE_PHRASES.some(p => transcript.includes(p));
+                    if (detected) {{
+                        // Stop wake word listener immediately
+                        stopWakeWordListener();
+                        // Visual feedback
+                        if (micBtn) {{
+                            micBtn.classList.add('recording');
+                            micBtn.title = T.wake_word_detected || 'Amira activated! Speak now...';
+                        }}
+                        if (input) input.placeholder = T.wake_word_detected || 'Amira activated! Speak now...';
+                        // Start recording after a tiny delay to avoid capturing the wake word itself
+                        setTimeout(function() {{
+                            _wakeWordTriggered = true;
+                            startVoiceRecording();
+                        }}, 300);
+                        return;
+                    }}
+                }}
+            }};
+
+            wakeWordRecognition.onend = function() {{
+                // Auto-restart if voice mode is still active (browser may stop it)
+                wakeWordActive = false;
+                if (voiceModeActive && !isRecording && !sending) {{
+                    setTimeout(function() {{ startWakeWordListener(); }}, 500);
+                }}
+            }};
+
+            wakeWordRecognition.onerror = function(e) {{
+                // 'no-speech' and 'aborted' are normal — just restart
+                if (e.error !== 'no-speech' && e.error !== 'aborted') {{
+                    console.warn('Wake word error:', e.error);
+                }}
+                wakeWordActive = false;
+            }};
+
+            try {{
+                wakeWordRecognition.start();
+                wakeWordActive = true;
+                console.log('Wake word listener started — say "Ok Amira"');
+            }} catch (err) {{
+                console.warn('Wake word start failed:', err);
+                wakeWordActive = false;
+            }}
+        }}
+
+        function stopWakeWordListener() {{
+            if (wakeWordRecognition) {{
+                try {{ wakeWordRecognition.abort(); }} catch(e) {{}}
+                wakeWordRecognition = null;
+            }}
+            wakeWordActive = false;
+        }}
+
+        // Start/stop wake word listener when voice mode is toggled
+        if (voiceModeCheckbox) {{
+            voiceModeCheckbox.addEventListener('change', function() {{
+                if (voiceModeActive) {{
+                    startWakeWordListener();
+                }} else {{
+                    stopWakeWordListener();
+                }}
+            }});
+            // Auto-start on page load if voice mode was previously enabled
+            if (voiceModeActive) {{
+                setTimeout(function() {{ startWakeWordListener(); }}, 1000);
+            }}
+        }}
+
+        // Restart wake word listener after TTS finishes playing
+        const _origOnEnded = function() {{
+            // Re-enable wake word after response is read aloud
+            if (voiceModeActive && !isRecording) {{
+                setTimeout(function() {{ startWakeWordListener(); }}, 500);
+            }}
+        }};
+
+        // Patch playTTSResponse to restart wake word after TTS playback
+        const _originalPlayTTS = playTTSResponse;
+        playTTSResponse = async function(text) {{
+            stopWakeWordListener();  // Pause wake word during TTS playback
+            await _originalPlayTTS(text);
+            // The onended handler in the audio will trigger _origOnEnded indirectly;
+            // but as a safety net, restart after a delay
+            setTimeout(function() {{
+                if (voiceModeActive && !isRecording && !currentAudio) {{
+                    startWakeWordListener();
+                }}
+            }}, 2000);
+        }};
+
         function safeLocalStorageGet(key) {{
             try {{
                 return localStorage.getItem(key);
@@ -3213,7 +3888,8 @@ def get_chat_ui():
                 const payload = {{
                     message: fileCtx ? fileCtx + '\\n\\n' + _baseMsg : _baseMsg,
                     session_id: currentSessionId,
-                    read_only: readOnlyMode
+                    read_only: readOnlyMode,
+                    voice_mode: !!voiceModeActive
                 }};
                 if (imageToSend) {{
                     payload.image = imageToSend;
@@ -3377,6 +4053,10 @@ def get_chat_ui():
                                         div.insertAdjacentHTML('beforeend', usageHtml);
                                     }}
                                     updateConversationUsage(evt.usage);
+                                }}
+                                // TTS: read response aloud if voice mode is active
+                                if (voiceModeActive && fullText) {{
+                                    playTTSResponse(fullText);
                                 }}
                                 shouldStop = true;
                                 try {{ reader.cancel(); }} catch (e) {{}}
@@ -4174,39 +4854,70 @@ def get_chat_ui():
             const btn = document.getElementById('testNvidiaBtn');
             if (!btn) return;
 
-            const cursorKey = 'nvidiaTestCursor';
-            const cursor = parseInt(safeLocalStorageGet(cursorKey) || '0', 10) || 0;
+            const BATCH = 50;
+            let cursor = 0;
+            let totalOk = 0, totalRemoved = 0, totalTested = 0, grandTotal = 0;
+            let anyBlocklisted = false;
+            let batchNum = 0;
 
             const oldText = btn.textContent;
             btn.disabled = true;
-            btn.textContent = '⏳ Test...';
-            try {{
-                const response = await fetch(apiUrl('api/nvidia/test_models'), {{
-                    method: 'POST',
-                    headers: {{'Content-Type': 'application/json'}},
-                    body: JSON.stringify({{max_models: 20, cursor: cursor}})
-                }});
-                const data = await response.json().catch(() => ({{}}));
 
-                if (response.ok && data && data.success) {{
+            try {{
+                while (true) {{
+                    batchNum++;
+                    btn.textContent = `\u23f3 Test batch ${{batchNum}}...`;
+
+                    const response = await fetch(apiUrl('api/nvidia/test_models'), {{
+                        method: 'POST',
+                        headers: {{'Content-Type': 'application/json'}},
+                        body: JSON.stringify({{max_models: BATCH, cursor: cursor}})
+                    }});
+                    const data = await response.json().catch(() => ({{}}));
+
+                    if (!response.ok || !data || !data.success) {{
+                        const msg = (data && (data.message || data.error)) || (T.nvidia_test_failed + ' (' + response.status + ')');
+                        addMessage('\u26a0\ufe0f ' + msg, 'system');
+                        break;
+                    }}
+
+                    totalOk += (data.ok || 0);
+                    totalRemoved += (data.removed || 0);
+                    totalTested += (data.tested || 0);
+                    grandTotal = data.total || grandTotal;
+                    if (data.blocklisted) anyBlocklisted = true;
+
+                    // Se rate limit o errore di rete, ferma e mostra parziale
+                    if (data.stopped_reason && (data.stopped_reason.includes('rate') || data.stopped_reason.includes('auth') || data.stopped_reason.includes('errore'))) {{
+                        const parts = [];
+                        parts.push(T.nvidia_test_result.replace('{{ok}}', totalOk).replace('{{removed}}', totalRemoved).replace('{{tested}}', totalTested).replace('{{total}}', grandTotal));
+                        parts.push(`(${{data.stopped_reason}})`);
+                        if (typeof data.remaining === 'number' && data.remaining > 0) parts.push('\u2014 ' + T.nvidia_remaining.replace('{{n}}', data.remaining));
+                        addMessage('\U0001f50d ' + parts.join(' '), 'system');
+                        break;
+                    }}
+
+                    // Aggiorna cursor
                     if (typeof data.next_cursor === 'number') {{
-                        safeLocalStorageSet(cursorKey, String(data.next_cursor));
+                        cursor = data.next_cursor;
                     }}
-                    if (typeof data.remaining === 'number' && data.remaining <= 0) {{
-                        safeLocalStorageSet(cursorKey, '0');
+
+                    // Se non ci sono più modelli da testare, fine
+                    if (typeof data.remaining !== 'number' || data.remaining <= 0) {{
+                        break;
                     }}
-                    const parts = [];
-                    parts.push(T.nvidia_test_result.replace('{{ok}}', data.ok).replace('{{removed}}', data.removed).replace('{{tested}}', data.tested).replace('{{total}}', data.total));
-                    if (data.stopped_reason) parts.push(`(${{data.stopped_reason}})`);
-                    if (typeof data.timeouts === 'number' && data.timeouts > 0) parts.push('\u2014 ' + T.nvidia_timeout.replace('{{n}}', data.timeouts));
-                    if (typeof data.remaining === 'number' && data.remaining > 0) parts.push('\u2014 ' + T.nvidia_remaining.replace('{{n}}', data.remaining));
-                    addMessage('\U0001f50d ' + parts.join(' '), 'system');
-                }} else {{
-                    const msg = (data && (data.message || data.error)) || (T.nvidia_test_failed + ' (' + response.status + ')');
-                    addMessage('\u26a0\ufe0f ' + msg, 'system');
+
+                    // Piccola pausa per non saturare NVIDIA
+                    await new Promise(r => setTimeout(r, 500));
                 }}
 
-                if (data && data.blocklisted) await loadModels();
+                // Messaggio riepilogo finale
+                const parts = [];
+                parts.push(T.nvidia_test_result.replace('{{ok}}', totalOk).replace('{{removed}}', totalRemoved).replace('{{tested}}', totalTested).replace('{{total}}', grandTotal));
+                if (totalTested >= grandTotal) parts.push('\u2705 Completato!');
+                addMessage('\U0001f50d ' + parts.join(' '), 'system');
+
+                if (anyBlocklisted) await loadModels();
             }} catch (e) {{
                 addMessage('\u26a0\ufe0f ' + T.nvidia_test_failed + ': ' + (e && e.message ? e.message : String(e)), 'system');
             }} finally {{

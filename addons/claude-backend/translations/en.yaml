@@ -95,6 +95,9 @@ configuration:
   enable_voice_input:
     name: Enable Voice Input
     description: "Enable microphone button for voice messages (Groq Whisper, with OpenAI/Google fallback) - requires HTTPS"
+  tts_voice:
+    name: Voice Type
+    description: "Choose the voice for AI spoken responses: female (default) or male. The voice is automatically selected for your language (Edge TTS - free, no API key needed)."
   enable_rag:
     name: Enable RAG
     description: "[EXPERIMENTAL] Enable RAG (Retrieval-Augmented Generation) for document search and context injection"
