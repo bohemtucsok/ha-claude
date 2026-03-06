@@ -9,6 +9,9 @@
 - **Fix sessione bubble non persistita**: cliccando su una conversazione bubble nella sidebar, il suo ID non viene più salvato in `localStorage` — riaprendo la pagina si riparte dalla chat UI, non dalla bubble
 - **Fix icona cestino non visibile**: il carattere Unicode U+1F5D1 (🗑) non era supportato da tutti i browser/dispositivi e appariva come un quadrato con caratteri — sostituito con un'icona SVG trash universalmente compatibile
 - **Fix salvataggio agente silenzioso**: creare un agente con ID contenente maiuscole (es. "Amira") falliva silenziosamente perché la validazione `[a-z0-9_-]` rifiutava l'input senza mostrare errori — ora l'ID viene auto-convertito in minuscolo e gli errori di validazione/salvataggio mostrano un `alert()` visibile
+- **Fix `[object Object]` nella card agente**: con `include_disabled=true` l'API restituisce `model` come oggetto `{primary, fallbacks}` anziché stringa — la card e il form ora estraggono correttamente `model.primary`
+- **Fix TypeError `model.split` nel form agente**: `agentData.model.split('/')` crashava quando `model` era un oggetto — ora viene normalizzato a stringa prima dello split
+- **Fix icona cestino card agente**: anche il bottone delete sulle card agente usava il carattere Unicode U+1F5D1 non renderizzato — sostituito con SVG come nella lista conversazioni
 
 ## 4.5.0 — Architettura OpenClaw: catalogo modelli, cost tracking, multi-agent, safety guards
 

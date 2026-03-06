@@ -3746,7 +3746,7 @@ def get_chat_ui():
                     const isProtected = (a.id === 'amira');
                     const card = document.createElement('div');
                     card.className = 'agent-card' + (a.id === activeAgentId ? ' active' : '') + (isProtected ? ' protected' : '');
-                    const model = a.model || '';
+                    const model = typeof a.model === 'string' ? a.model : (a.model && a.model.primary ? a.model.primary : '');
                     const badges = [];
                     if (isProtected) badges.push('<span class="agent-protected-badge">\U0001f512 ' + (T.agent_protected || 'Protected') + '</span>');
                     if (a.is_default) badges.push('<span class="agent-badge default">default</span>');
@@ -3767,7 +3767,7 @@ def get_chat_ui():
                         + '</div>'
                         + (isProtected ? '' : '<div class="agent-card-actions">'
                         + '<button class="edit" title="Edit">\u270f\ufe0f</button>'
-                        + '<button class="delete" title="Delete">\U0001f5d1\ufe0f</button>'
+                        + '<button class="delete" title="Delete"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>'
                         + '</div>');
 
                     if (!isProtected) {{
@@ -3958,7 +3958,8 @@ def get_chat_ui():
             let currentProv = '';
             let currentMod = '';
             if (agentData && agentData.model) {{
-                const parts = agentData.model.split('/');
+                const _mStr = typeof agentData.model === 'string' ? agentData.model : (agentData.model.primary || '');
+                const parts = _mStr.split('/');
                 if (parts.length >= 2) {{
                     currentProv = parts[0];
                     currentMod = parts.slice(1).join('/');
