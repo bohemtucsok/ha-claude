@@ -2,7 +2,7 @@
 
 > **⚠️ Dopo l'aggiornamento, ricostruire l'add-on** (Impostazioni → Add-on → Amira → Ricostruisci) per applicare le nuove dipendenze (`edge-tts`).
 
-## 4.5.3 — Pricing engine: 120 modelli, tutti i 22 provider coperti
+## 4.5.4 — Pricing engine: 120 modelli, tutti i 22 provider coperti
 
 ### 💰 Cost Tracking
 - **120 modelli con pricing esplicito**: da 59 a 120 entries nella tabella `MODEL_PRICING` — copertura completa per tutti i 22 provider supportati
