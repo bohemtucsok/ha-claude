@@ -83,6 +83,8 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en", show_bubble: bool
             "qa_card_fix": "Fix this card",
             "qa_card_fix_text": "Check this Lovelace card YAML for errors or issues and fix them",
             "card_no_yaml_warn": "\u26a0\ufe0f Card editor \u2014 switch to code mode to read YAML",
+            "card_new_chat": "New chat",
+            "card_history": "Chat history",
             "confirm_yes": "Yes, confirm",
             "confirm_no": "No, cancel",
             "confirm_yes_value": "yes",
@@ -156,6 +158,8 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en", show_bubble: bool
             "qa_card_fix": "Correggi card",
             "qa_card_fix_text": "Controlla questo YAML della card Lovelace per errori o problemi e correggili",
             "card_no_yaml_warn": "\u26a0\ufe0f Editor card \u2014 passa alla modalit\u00e0 codice per leggere lo YAML",
+            "card_new_chat": "Nuova chat",
+            "card_history": "Storico chat",
             "confirm_yes": "Sì, conferma",
             "confirm_no": "No, annulla",
             "confirm_yes_value": "si",
@@ -229,6 +233,8 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en", show_bubble: bool
             "qa_card_fix": "Corregir tarjeta",
             "qa_card_fix_text": "Revisa el YAML de esta tarjeta Lovelace en busca de errores y corrígelos",
             "card_no_yaml_warn": "\u26a0\ufe0f Editor de tarjeta \u2014 cambia al modo c\u00f3digo para leer el YAML",
+            "card_new_chat": "Nuevo chat",
+            "card_history": "Historial de chats",
             "confirm_yes": "Sí, confirma",
             "confirm_no": "No, cancela",
             "confirm_yes_value": "si",
@@ -302,6 +308,8 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en", show_bubble: bool
             "qa_card_fix": "Corriger la carte",
             "qa_card_fix_text": "Vérifie le YAML de cette carte Lovelace pour des erreurs et corrige-les",
             "card_no_yaml_warn": "\u26a0\ufe0f \u00c9diteur de carte \u2014 passe en mode code pour lire le YAML",
+            "card_new_chat": "Nouveau chat",
+            "card_history": "Historique des chats",
             "confirm_yes": "Oui, confirme",
             "confirm_no": "Non, annule",
             "confirm_yes_value": "oui",
@@ -1953,6 +1961,87 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en", show_bubble: bool
     return text;
   }}
 
+  // ── Card conversation history ───────────────────────────────────────────
+  let _cardHistoryOpen = false;
+
+  async function _toggleCardHistory(msgsContainer) {{
+    if (_cardHistoryOpen) {{
+      // Close history → restore chat messages
+      _cardHistoryOpen = false;
+      if (msgsContainer) msgsContainer.innerHTML = '';
+      await _loadCardConversation(getCardSessionId(), msgsContainer);
+      return;
+    }}
+    _cardHistoryOpen = true;
+    if (!msgsContainer) return;
+    msgsContainer.innerHTML = '<div style="text-align:center;padding:16px;color:var(--secondary-text-color,#999);">⏳</div>';
+    try {{
+      const resp = await fetch(API_BASE + '/api/conversations?source=card', {{credentials:'same-origin'}});
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      const convs = data.conversations || [];
+      msgsContainer.innerHTML = '';
+      if (convs.length === 0) {{
+        msgsContainer.innerHTML = '<div style="text-align:center;padding:16px;color:var(--secondary-text-color,#999);font-size:12px;">' + (T.no_conversations || 'No conversations') + '</div>';
+        return;
+      }}
+      const currentSid = getCardSessionId();
+      convs.forEach(conv => {{
+        const item = document.createElement('div');
+        const isActive = conv.id === currentSid;
+        item.style.cssText = 'padding:8px 10px;border-bottom:1px solid var(--divider-color,#e0e0e0);cursor:pointer;font-size:12px;display:flex;justify-content:space-between;align-items:center;' + (isActive ? 'background:rgba(102,126,234,0.1);' : '');
+        const info = document.createElement('div');
+        info.style.cssText = 'flex:1;min-width:0;';
+        const title = document.createElement('div');
+        title.style.cssText = 'font-weight:500;color:var(--primary-text-color,#212121);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+        title.textContent = conv.title || 'Chat';
+        const meta = document.createElement('div');
+        meta.style.cssText = 'font-size:10px;color:var(--secondary-text-color,#999);margin-top:2px;';
+        meta.textContent = (conv.message_count || 0) + ' ' + (T.messages_count || 'messages');
+        info.appendChild(title);
+        info.appendChild(meta);
+        item.appendChild(info);
+        if (isActive) {{
+          const badge = document.createElement('span');
+          badge.textContent = '●';
+          badge.style.cssText = 'color:#667eea;font-size:10px;flex-shrink:0;margin-left:6px;';
+          item.appendChild(badge);
+        }}
+        item.addEventListener('click', () => {{
+          // Switch to this conversation
+          try {{ localStorage.setItem(CARD_SESSION_KEY, conv.id); }} catch(e) {{}}
+          _cardHistoryOpen = false;
+          msgsContainer.innerHTML = '';
+          _loadCardConversation(conv.id, msgsContainer);
+        }});
+        msgsContainer.appendChild(item);
+      }});
+    }} catch(e) {{
+      console.error('[Amira card] history error:', e);
+      msgsContainer.innerHTML = '<div style="text-align:center;padding:16px;color:#f44336;font-size:12px;">' + (T.error_connection || 'Error') + '</div>';
+    }}
+  }}
+
+  async function _loadCardConversation(sessionId, msgsContainer) {{
+    if (!msgsContainer) return;
+    try {{
+      const resp = await fetch(API_BASE + '/api/conversations/' + encodeURIComponent(sessionId), {{credentials:'same-origin'}});
+      if (!resp.ok) return;
+      const data = await resp.json();
+      if (data.messages && data.messages.length > 0) {{
+        const recent = data.messages.slice(-30);
+        recent.forEach(m => {{
+          if (m.role === 'user' || m.role === 'assistant') {{
+            _cardPanelAddMsg(m.role, m.content, true);
+          }}
+        }});
+        msgsContainer.scrollTop = msgsContainer.scrollHeight;
+      }}
+    }} catch(e) {{
+      console.error('[Amira card] load conversation error:', e);
+    }}
+  }}
+
   function openCardPanel() {{
     if (_cardPanelOpen) return;
     const surface = _getCardSurface();
@@ -2011,14 +2100,35 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en", show_bubble: bool
       }});
       cardModSel.addEventListener('change', () => {{ _mainModSel.value = cardModSel.value; _mainModSel.dispatchEvent(new Event('change')); }});
     }}
+    // Spacer to push action buttons to the right
+    const hdrSpacer = document.createElement('span');
+    hdrSpacer.style.cssText = 'flex:1;';
+    // New chat button
+    const hdrNew = document.createElement('button');
+    hdrNew.textContent = '＋';
+    hdrNew.title = T.card_new_chat || 'New chat';
+    hdrNew.style.cssText = 'background:rgba(255,255,255,0.2);border:none;color:#fff;cursor:pointer;font-size:14px;padding:2px 7px;border-radius:4px;line-height:1;';
+    hdrNew.onclick = () => {{
+      resetCardSession();
+      if (_cardMsgsEl) _cardMsgsEl.innerHTML = '';
+    }};
+    // History button
+    const hdrHistory = document.createElement('button');
+    hdrHistory.textContent = '📋';
+    hdrHistory.title = T.card_history || 'Chat history';
+    hdrHistory.style.cssText = 'background:rgba(255,255,255,0.2);border:none;color:#fff;cursor:pointer;font-size:13px;padding:2px 7px;border-radius:4px;line-height:1;';
+    hdrHistory.onclick = () => _toggleCardHistory(msgs);
     const hdrClose = document.createElement('button');
-    hdrClose.textContent = '✕';
-    hdrClose.style.cssText = 'background:none;border:none;color:#fff;cursor:pointer;font-size:16px;padding:0 4px;line-height:1;margin-left:auto;';
+    hdrClose.textContent = '\u2715';
+    hdrClose.style.cssText = 'background:none;border:none;color:#fff;cursor:pointer;font-size:16px;padding:0 4px;line-height:1;';
     hdrClose.onclick = closeCardPanel;
     hdr.appendChild(hdrTitle);
     if (_mainAgentSel && _mainAgentSel.style.display !== 'none' && _mainAgentSel.options.length) hdr.appendChild(cardAgentSel);
     if (_mainProvSel && _mainProvSel.options.length) hdr.appendChild(cardProvSel);
     if (_mainModSel  && _mainModSel.options.length)  hdr.appendChild(cardModSel);
+    hdr.appendChild(hdrSpacer);
+    hdr.appendChild(hdrNew);
+    hdr.appendChild(hdrHistory);
     hdr.appendChild(hdrClose);
 
     // Quick actions

@@ -52,6 +52,9 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
     "claude-3-sonnet-20240229":   {"input": 3.00,  "output": 15.00, "cache_read": 0.30,  "cache_write": 3.75},
     "claude-3-haiku-20240307":    {"input": 0.25,  "output": 1.25,  "cache_read": 0.03,  "cache_write": 0.30},
     "claude-3-haiku":             {"input": 0.25,  "output": 1.25,  "cache_read": 0.03,  "cache_write": 0.30},
+    "claude-sonnet":              {"input": 3.00,  "output": 15.00, "cache_read": 0.30,  "cache_write": 3.75},
+    "claude-opus":                {"input": 15.00, "output": 75.00, "cache_read": 1.50,  "cache_write": 18.75},
+    "claude-haiku":               {"input": 0.80,  "output": 4.00,  "cache_read": 0.08,  "cache_write": 1.00},
     # ------------------------------------------------------------------ OpenAI
     # OpenAI: cached input = 50% of input (no separate write cost)
     "gpt-5.2":          {"input": 2.50,  "output": 10.00, "cache_read": 1.25},
@@ -144,9 +147,31 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
     "qwen-max":       {"input": 1.60, "output": 6.40},
     "qwen-plus":      {"input": 0.40, "output": 1.20},
     "qwen-turbo":     {"input": 0.20, "output": 0.60},
+    # ------------------------------------------------------------------ OpenAI Codex (CLI)
+    "gpt-5.3-codex":       {"input": 2.50,  "output": 10.00, "cache_read": 1.25},
+    "gpt-5.3-codex-spark": {"input": 0.40,  "output": 1.60,  "cache_read": 0.20},
+    "gpt-5.2-codex":       {"input": 2.50,  "output": 10.00, "cache_read": 1.25},
+    "gpt-5.1-codex-max":   {"input": 10.00, "output": 40.00, "cache_read": 5.00},
+    "gpt-5.1-codex":       {"input": 2.00,  "output": 8.00,  "cache_read": 1.00},
+    "gpt-5-codex":         {"input": 2.00,  "output": 8.00,  "cache_read": 1.00},
+    "gpt-5-codex-mini":    {"input": 0.40,  "output": 1.60,  "cache_read": 0.20},
+    # ------------------------------------------------------------------ Open-source / cross-provider
+    # Llama (GitHub Models, OpenRouter, SiliconFlow, VolcEngine)
+    "meta-llama-3.1-405b-instruct":   {"input": 2.70, "output": 2.70},
+    "meta-llama-3.1-70b-instruct":    {"input": 0.59, "output": 0.79},
+    "llama-3.1-405b":                 {"input": 2.70, "output": 2.70},
+    "Llama-3.1-8B-Instruct":          {"input": 0.05, "output": 0.08},
+    "Llama-3.1-70B-Instruct":         {"input": 0.59, "output": 0.79},
+    # Qwen (SiliconFlow, VolcEngine)
+    "Qwen2.5-7B-Instruct":    {"input": 0.14, "output": 0.14},
+    "Qwen2.5-32B-Instruct":   {"input": 0.70, "output": 0.70},
+    # Mistral open (GitHub Models, OpenRouter)
+    "mistral-large":    {"input": 2.00, "output": 6.00},
+    "mistral-nemo":     {"input": 0.15, "output": 0.15},
+    "Mistral-7B-Instruct-v0.3": {"input": 0.14, "output": 0.14},
 }
 
-FREE_PROVIDERS = {"nvidia", "ollama", "github_copilot"}
+FREE_PROVIDERS = {"nvidia", "ollama", "github_copilot", "github", "claude_web", "chatgpt_web"}
 
 CURRENCY_RATES = {"USD": 1.0, "EUR": 0.92}
 

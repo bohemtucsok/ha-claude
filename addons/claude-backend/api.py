@@ -7242,7 +7242,9 @@ def api_conversation_messages(session_id):
 
 @app.route('/api/conversations', methods=['GET'])
 def api_conversations_list():
-    """List all conversation sessions with metadata."""
+    """List all conversation sessions with metadata.
+    Optional query param ?source=card|bubble|chat to filter by source."""
+    source_filter = request.args.get("source", "").strip().lower()
     result = []
     for sid, msgs in conversations.items():
         if not msgs:
@@ -7260,11 +7262,11 @@ def api_conversations_list():
                     if clean:
                         title = clean[:50] + ("..." if len(clean) > 50 else "")
                     break
-        # Determine source: bubble sessions start with "bubble_"
-        source = "bubble" if sid.startswith("bubble_") else "chat"
-        
+        # Determine source: bubble_, card_ or chat
+        source = "bubble" if sid.startswith("bubble_") else ("card" if sid.startswith("card_") else "chat")
+
         # Extract timestamp for sorting/date grouping
-        if source == "bubble" and sid.startswith("bubble_"):
+        if source in ("bubble", "card") and "_" in sid:
             # Parse bubble session_id: bubble_<base36_timestamp>_<random>
             try:
                 parts = sid.split("_")
@@ -7282,6 +7284,9 @@ def api_conversations_list():
             except:
                 last_updated = sid if msgs else 0
         
+        # Apply source filter if requested
+        if source_filter and source != source_filter:
+            continue
         result.append({
             "id": sid,
             "title": title,

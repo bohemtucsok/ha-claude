@@ -2,15 +2,17 @@
 
 > **⚠️ Dopo l'aggiornamento, ricostruire l'add-on** (Impostazioni → Add-on → Amira → Ricostruisci) per applicare le nuove dipendenze (`edge-tts`).
 
-## 4.5.3 — Pricing engine: 100 modelli, fuzzy fix, nuovi provider
+## 4.5.3 — Pricing engine: 120 modelli, tutti i 22 provider coperti
 
 ### 💰 Cost Tracking
-- **100 modelli con pricing esplicito**: da 59 a 100 entries nella tabella `MODEL_PRICING` — copertura completa per tutti i provider supportati
-- **Nuovi modelli Anthropic**: Claude Opus 4.6, Sonnet 4.6, Haiku 4.5, Opus 4.5, Opus 4.1 con relativi alias datati
+- **120 modelli con pricing esplicito**: da 59 a 120 entries nella tabella `MODEL_PRICING` — copertura completa per tutti i 22 provider supportati
+- **Nuovi modelli Anthropic**: Claude Opus 4.6, Sonnet 4.6, Haiku 4.5, Opus 4.5, Opus 4.1 con relativi alias datati + alias generici (`claude-sonnet`, `claude-opus`, `claude-haiku`)
 - **Nuovi modelli OpenAI**: GPT-4.1 family (4.1, 4.1-mini, 4.1-nano), GPT-5.1, GPT-5-mini, GPT-4 legacy, GPT-3.5 Turbo
+- **OpenAI Codex (CLI)**: GPT-5.3/5.2/5.1/5 Codex family con varianti max, spark, mini
 - **Nuovi modelli Google**: Gemini 3.x (3.1-pro, 3-pro, 3-flash) con pricing preview
-- **Nuovi provider**: Perplexity (Sonar, Sonar Pro, Sonar Reasoning Pro), MiniMax (M2, M2.1), Zhipu (GLM-4 Flash/Plus), DashScope (Qwen Max/Plus/Turbo), Kimi K2
-- **GitHub Copilot gratuito**: aggiunto a `FREE_PROVIDERS` — i modelli usati via Copilot non generano costi token (subscription-based)
+- **Nuovi provider con pricing**: Perplexity (Sonar, Sonar Pro, Sonar Reasoning Pro), MiniMax (M2, M2.1), Zhipu (GLM-4 Flash/Plus), DashScope (Qwen Max/Plus/Turbo), Kimi K2
+- **Modelli open-source cross-provider**: Llama 3.1 (8B/70B/405B), Qwen 2.5 (7B/32B), Mistral 7B/Nemo/Large — usati da SiliconFlow, VolcEngine, OpenRouter, GitHub Models
+- **6 provider gratuiti**: `nvidia`, `ollama`, `github_copilot`, `github` (GitHub Models), `claude_web`, `chatgpt_web` — tutti in `FREE_PROVIDERS`
 - **Alias Copilot-specifici**: `gpt-41-copilot` → GPT-4.1 pricing, `gpt-4-o-preview` → GPT-4o pricing
 
 ### 🐛 Fix
