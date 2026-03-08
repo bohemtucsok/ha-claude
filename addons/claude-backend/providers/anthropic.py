@@ -313,13 +313,13 @@ class AnthropicProvider(EnhancedProvider):
     def get_available_models(self) -> List[str]:
         return [
             "claude-opus-4-6",
-            "claude-opus-4.6",
             "claude-sonnet-4-6",
-            "claude-sonnet-4.6",
             "claude-haiku-4-5",
-            "claude-haiku-4.5",
             "claude-opus-4-5",
             "claude-sonnet-4-5",
+            "claude-opus-4-20250514",
+            "claude-sonnet-4-20250514",
+            "claude-haiku-4-20250514",
         ]
 
     def get_error_translations(self) -> Dict[str, Dict[str, str]]:
