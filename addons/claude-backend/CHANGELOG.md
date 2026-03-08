@@ -2,6 +2,12 @@
 
 > **⚠️ Dopo l'aggiornamento, ricostruire l'add-on** (Impostazioni → Add-on → Amira → Ricostruisci) per applicare le nuove dipendenze (`edge-tts`).
 
+## 4.5.5 — Fix modelli duplicati nel dropdown + pricing 120 modelli
+
+### 🐛 Fix
+- **Fix modelli Anthropic duplicati nel dropdown agente**: `get_available_models()` elencava sia la notazione con trattini (`claude-opus-4-6`) che con punti (`claude-opus-4.6`) — rimossi i duplicati, mantenuti solo gli ID API ufficiali
+- **Aggiunti modelli v4 datati mancanti**: `claude-opus-4-20250514`, `claude-sonnet-4-20250514`, `claude-haiku-4-20250514`
+
 ## 4.5.4 — Pricing engine: 120 modelli, tutti i 22 provider coperti
 
 ### 💰 Cost Tracking
