@@ -182,7 +182,9 @@ Amira supports **Telegram** (long polling, no public IP) and **WhatsApp** (via T
 
 ## 🔌 MCP (Model Context Protocol)
 
-Extend Amira with external tools. Enable MCP in **Settings → Features**, then configure `/config/amira/mcp_config.json`:
+Extend Amira with external tools. Enable MCP in **Settings → Features**, then configure servers directly from the **Settings → MCP Config** editor in the chat UI.
+
+Example server configuration:
 
 ```json
 {
@@ -193,6 +195,8 @@ Extend Amira with external tools. Enable MCP in **Settings → Features**, then 
   }
 }
 ```
+
+The config is saved to `/config/amira/mcp_config.json` automatically.
 
 → Full guide: [docs/MCP.md](docs/MCP.md)
 

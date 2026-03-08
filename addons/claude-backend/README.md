@@ -333,8 +333,8 @@ No per-message keyword search, no cross-session contamination. Simple and token-
 Extend the AI with external tools via [Model Context Protocol](https://modelcontextprotocol.io/):
 
 1. Enable MCP in **Settings → Features → MCP**
-2. Configure the MCP config file path (default: `/config/amira/mcp_config.json`)
-3. Add your servers to the config file:
+2. Open **Settings → MCP Config** in the chat UI
+3. Add your servers in the JSON editor:
 
 ```json
 {

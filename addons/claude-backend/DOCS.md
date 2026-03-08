@@ -322,7 +322,7 @@ nano /config/amira/memory/MEMORY.md
 Requires File Access to be enabled in Settings → Features. Snapshots stored in `/config/amira/snapshots/`.
 
 ### MCP Tools
-Enable MCP in Settings → Features → MCP, then configure the MCP config file (default: `/config/amira/mcp_config.json`):
+Enable MCP in Settings → Features → MCP, then open **Settings → MCP Config** in the chat UI to add servers (saved to `/config/amira/mcp_config.json`):
 
 ```json
 {
