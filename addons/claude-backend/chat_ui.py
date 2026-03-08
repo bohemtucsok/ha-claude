@@ -1956,7 +1956,7 @@ def get_chat_ui():
         .agent-form-group .emoji-btn:hover {{ background: #e8e8ff; }}
         .agent-form-group .emoji-btn.selected {{ border-color: #667eea; background: #e8ebff; }}
         .agent-tools-grid {{
-            display: flex; flex-wrap: wrap; gap: 4px; max-height: 120px; overflow-y: auto;
+            display: flex; flex-wrap: wrap; gap: 4px; max-height: 200px; overflow-y: auto;
         }}
         .agent-tool-chip {{
             font-size: 11px; padding: 3px 8px; border-radius: 4px; cursor: pointer;
@@ -1966,8 +1966,12 @@ def get_chat_ui():
         .agent-tool-chip:hover {{ background: #e8ebff; }}
         .agent-tool-chip.selected {{ background: #667eea; color: white; border-color: #5a6fd6; }}
         .agent-form-actions {{
-            display: flex; gap: 8px; justify-content: flex-end; padding-top: 8px;
+            display: flex; gap: 8px; justify-content: flex-end; padding: 8px 0 0;
             border-top: 1px solid #e0e0e0;
+        }}
+        .agent-form-actions button {{
+            padding: 6px 16px; border-radius: 6px; border: none;
+            cursor: pointer; font-size: 12px; font-weight: 500;
         }}
         .agent-card.protected {{ opacity: 0.92; }}
         .agent-card.protected .agent-card-actions {{ display: none; }}
@@ -2560,6 +2564,8 @@ def get_chat_ui():
             background: #1e1e2e; color: #cdd6f4;
         }}
         body.dark-mode .config-editor-footer {{ border-top-color: #3a3a4a; }}
+        body.dark-mode .config-save-btn {{ background: #5a6fd6; }}
+        body.dark-mode .config-save-btn:hover {{ background: #4e60c4; }}
         body.dark-mode .config-cancel-btn {{ background: #3a3a4a; color: #ccc; }}
         body.dark-mode .config-cancel-btn:hover {{ background: #4a4a5a; }}
         body.dark-mode .config-status.success {{ background: #1a3a2a; color: #6ee7b7; }}
@@ -2579,6 +2585,8 @@ def get_chat_ui():
         body.dark-mode .settings-eye-btn {{ color: #aaa; }}
 
         /* Agent form dark mode */
+        body.dark-mode .agent-add-btn {{ background: #5a6fd6; }}
+        body.dark-mode .agent-add-btn:hover {{ background: #4e60c4; }}
         body.dark-mode .agent-list-header {{ border-bottom-color: #3a3a4a; }}
         body.dark-mode .agent-list-header h3 {{ color: #e0e0e0; }}
         body.dark-mode .agent-card {{ border-bottom-color: #3a3a4a; }}
@@ -5042,7 +5050,7 @@ def get_chat_ui():
             const saveRow = document.createElement('div');
             saveRow.style.cssText = 'margin-top:16px;display:flex;align-items:center;gap:10px;';
             const saveBtn = document.createElement('button');
-            saveBtn.className = 'agent-add-btn';
+            saveBtn.className = 'config-save-btn';
             saveBtn.style.cssText = 'padding:8px 22px;font-size:13px;';
             saveBtn.textContent = '\U0001f4be ' + (T.config_save || 'Save');
             const saveStatus = document.createElement('span');
@@ -5265,7 +5273,7 @@ def get_chat_ui():
             const saveRow = document.createElement('div');
             saveRow.style.cssText = 'margin-top:16px;display:flex;align-items:center;gap:10px;padding-bottom:20px;';
             const saveBtn = document.createElement('button');
-            saveBtn.className = 'agent-add-btn';
+            saveBtn.className = 'config-save-btn';
             saveBtn.style.cssText = 'padding:8px 22px;font-size:13px;';
             saveBtn.textContent = '\U0001f4be ' + (T.config_save || 'Save');
             const saveStatus = document.createElement('span');
