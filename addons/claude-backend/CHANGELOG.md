@@ -2,7 +2,11 @@
 
 > **⚠️ Dopo l'aggiornamento, ricostruire l'add-on** (Impostazioni → Add-on → Amira → Ricostruisci) per applicare le nuove dipendenze (`edge-tts`).
 
-## 4.5.6 — Tool descriptions nell'agent form
+## 4.5.7 — Fix tasto Copia nella bubble/card + tool descriptions agent form
+
+### 🐛 Fix
+- **Fix tasto Copia nei code block della bubble e card editor**: il bottone "Copia" nei blocchi di codice non funzionava perché usava `onclick` inline, bloccato dal CSP di Home Assistant. Ora usa event delegation tramite `document.addEventListener` con classe `.amira-copy-btn`
+- **i18n bottone Copia nella bubble**: aggiunto `copy_btn` e `copied` nelle 4 lingue (EN/IT/ES/FR) — prima era hardcoded "Copia"/"Copiato!"
 
 ### ✨ UX
 - **Descrizioni leggibili per i tool nell'agent form**: le chip dei tool consentiti ora mostrano una descrizione chiara (es. "Modifica automazione", "Carica storico") invece del nome tecnico (`update_automation`, `get_history`). Il nome tecnico resta visibile al hover come tooltip
