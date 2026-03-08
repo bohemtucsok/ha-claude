@@ -93,6 +93,12 @@ Supports **22+ AI providers** and **60+ models**: Anthropic Claude, OpenAI, Goog
 - **Safe Editing**: Automatic snapshots before modifications
 - **Config Validation**: Check configuration before applying changes
 
+### 🧠 Memory
+- **Persistent Knowledge**: `MEMORY.md` injected in every conversation — the AI always remembers
+- **Dynamic Notes**: `memory_notes.json` for structured facts the AI can update itself
+- **Enable in Settings**: Settings → Features → Memory (OFF by default)
+- **Storage**: `/config/amira/memory/`
+
 ### 💬 Interactive Chat Interface
 - **Chat History**: Keep last N conversations, switch between them
 - **Streaming Responses**: Real-time token-by-token output
