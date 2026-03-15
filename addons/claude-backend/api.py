@@ -150,6 +150,9 @@ app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10 MB max upload
 CORS(app)
 
+# Register blueprints (will be done after route definitions)
+# This will be called at the end of the file before app.run()
+
 
 # Version: read from config.yaml
 def get_version():
@@ -9065,6 +9068,10 @@ def api_settings_post():
         logger.error(f"Failed to save settings: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+
+# Register blueprints
+from routes import register_blueprints
+register_blueprints(app)
 
 if __name__ == "__main__":
     logger.info(f"Provider: {AI_PROVIDER} | Model: {get_active_model()}")

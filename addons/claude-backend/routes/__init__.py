@@ -1,13 +1,15 @@
 """Blueprint registration for Flask routes."""
 
-from flask import Flask, Blueprint
+from flask import Flask
+from routes.chat_routes import chat_bp
 
 
 def register_blueprints(app: Flask) -> None:
     """Register all Flask blueprints with the app.
 
     This function is called during app initialization to set up route blueprints.
-    For now, this is a placeholder. Blueprint registration will be added in later phases.
+    Currently registers the chat blueprint.
+    Additional blueprints will be registered in future phases.
     """
-    # Placeholder for future blueprint registration
-    pass
+    # Register chat routes blueprint
+    app.register_blueprint(chat_bp)
