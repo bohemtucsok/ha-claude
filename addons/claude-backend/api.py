@@ -399,40 +399,59 @@ if _persisted_prompt:
     logger.info(f"Loaded custom system prompt from disk ({len(CUSTOM_SYSTEM_PROMPT)} chars)")
 
 
-def load_agents_config() -> Optional[Dict]:
-    """Reload agent config via AgentManager and sync globals.
+def _sync_active_agent_globals() -> None:
+    """Read the currently active agent from AgentManager and update globals.
 
-    Updates AGENT_NAME, AGENT_AVATAR, AGENT_INSTRUCTIONS from the active agent.
+    Called every time the active agent changes (set_agent endpoint,
+    _apply_channel_agent, load_agents_config).  Keeps AGENT_NAME,
+    AGENT_AVATAR, AGENT_INSTRUCTIONS and AGENT_SYSTEM_PROMPT_OVERRIDE
+    in sync without reloading the config file from disk.
+    """
+    global AGENT_NAME, AGENT_AVATAR, AGENT_INSTRUCTIONS, AGENT_SYSTEM_PROMPT_OVERRIDE
+    if not AGENT_CONFIG_AVAILABLE:
+        return
+    try:
+        mgr = agent_config.get_agent_manager()
+        active = mgr.get_active_agent()
+        if not active:
+            return
+        AGENT_NAME = (active.identity.name or active.name or "Amira").strip()
+        AGENT_AVATAR = (active.identity.emoji or "\U0001f916").strip()
+        _override = (active.system_prompt_override or "").strip()
+        if _override:
+            AGENT_SYSTEM_PROMPT_OVERRIDE = _override
+            AGENT_INSTRUCTIONS = ""
+        else:
+            AGENT_SYSTEM_PROMPT_OVERRIDE = None
+            AGENT_INSTRUCTIONS = ""
+        try:
+            import tools as _tools_mod
+            _tools_mod.AI_SIGNATURE = AGENT_NAME
+        except Exception:
+            pass
+        logger.debug(
+            f"Agent globals synced → '{active.id}': name={AGENT_NAME}, "
+            f"override={'yes' if _override else 'no'}"
+        )
+    except Exception as e:
+        logger.warning(f"_sync_active_agent_globals error: {e}")
+
+
+def load_agents_config() -> Optional[Dict]:
+    """Reload agent config from disk via AgentManager, then sync globals.
+
     All format parsing (canonical array, legacy dict, flat dict) is handled
     by AgentManager._parse_config() — no duplicate logic here.
     """
-    global AGENT_NAME, AGENT_AVATAR, AGENT_INSTRUCTIONS, AGENT_SYSTEM_PROMPT_OVERRIDE
     if not AGENT_CONFIG_AVAILABLE:
         return None
     try:
         mgr = agent_config.get_agent_manager()
         mgr.reload_config()
+        _sync_active_agent_globals()
         active = mgr.get_active_agent()
         if active:
-            AGENT_NAME = (active.identity.name or active.name or "Amira").strip()
-            AGENT_AVATAR = (active.identity.emoji or "\U0001f916").strip()
-            _override = (active.system_prompt_override or "").strip()
-            if _override:
-                # Full system prompt replacement — takes absolute priority over
-                # CUSTOM_SYSTEM_PROMPT and the default HA prompt.
-                AGENT_SYSTEM_PROMPT_OVERRIDE = _override
-                AGENT_INSTRUCTIONS = ""   # not used when full override is set
-            else:
-                AGENT_SYSTEM_PROMPT_OVERRIDE = None
-                AGENT_INSTRUCTIONS = ""
-            try:
-                import tools as _tools_mod
-                _tools_mod.AI_SIGNATURE = AGENT_NAME
-            except Exception:
-                pass
-            logger.info(
-                f"Agent '{active.id}': name={AGENT_NAME}, avatar={AGENT_AVATAR}"
-            )
+            logger.info(f"Agent '{active.id}': name={AGENT_NAME}, avatar={AGENT_AVATAR}")
         # Return raw config data for callers that need it
         if os.path.isfile(AGENTS_FILE):
             with open(AGENTS_FILE, "r", encoding="utf-8") as f:
@@ -1278,42 +1297,33 @@ def _apply_channel_agent(channel: str):
             return
 
         ref = agent.model_config.primary
-        # Nothing to change if already on the right agent
-        if ref.provider == AI_PROVIDER and ref.model == AI_MODEL:
-            # Still set the agent as active so identity/tools resolve correctly
-            prev_active = mgr.get_active_agent()
-            prev_active_id = prev_active.id if prev_active else None
-            mgr.set_active_agent(agent_id)
-            try:
-                yield
-            finally:
-                if prev_active_id:
-                    mgr.set_active_agent(prev_active_id)
-            return
-
-        # Save current state
-        saved = (AI_PROVIDER, AI_MODEL, SELECTED_PROVIDER, SELECTED_MODEL, ai_client)
+        # Save current state (including agent globals)
         prev_active = mgr.get_active_agent()
         prev_active_id = prev_active.id if prev_active else None
+        saved_globals = (AI_PROVIDER, AI_MODEL, SELECTED_PROVIDER, SELECTED_MODEL, ai_client)
 
         # Switch to channel agent
-        AI_PROVIDER = ref.provider
-        AI_MODEL = ref.model
-        SELECTED_PROVIDER = ref.provider
-        SELECTED_MODEL = ref.model
         mgr.set_active_agent(agent_id)
-        initialize_ai_client()
+        _sync_active_agent_globals()   # update AGENT_SYSTEM_PROMPT_OVERRIDE etc.
+
+        if ref.provider != AI_PROVIDER or ref.model != AI_MODEL:
+            AI_PROVIDER = ref.provider
+            AI_MODEL = ref.model
+            SELECTED_PROVIDER = ref.provider
+            SELECTED_MODEL = ref.model
+            initialize_ai_client()
+
         logger.info(f"Channel '{channel}' → agent '{agent_id}' ({ref.provider}/{ref.model})")
 
         try:
             yield
         finally:
-            # Restore previous state
-            AI_PROVIDER, AI_MODEL, SELECTED_PROVIDER, SELECTED_MODEL, ai_client = saved
+            # Restore previous provider state
+            AI_PROVIDER, AI_MODEL, SELECTED_PROVIDER, SELECTED_MODEL, ai_client = saved_globals
             if prev_active_id:
                 mgr.set_active_agent(prev_active_id)
+                _sync_active_agent_globals()   # restore AGENT_SYSTEM_PROMPT_OVERRIDE
             else:
-                # re-init to the saved provider
                 initialize_ai_client()
     except Exception as e:
         logger.warning(f"_apply_channel_agent('{channel}') error: {e}")
@@ -6283,6 +6293,9 @@ def api_agent_set_active():
         mgr = agent_config.get_agent_manager()
         if not mgr.set_active_agent(agent_id):
             return jsonify({"success": False, "error": f"Agent '{agent_id}' not found or disabled"}), 404
+
+        # Sync AGENT_SYSTEM_PROMPT_OVERRIDE and other globals immediately
+        _sync_active_agent_globals()
 
         # If agent has a configured model, apply it as the active model
         # (user can still override via the cascade dropdowns)
