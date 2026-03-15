@@ -246,6 +246,9 @@ TWILIO_WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "")
 for _msg_key in ("TELEGRAM_BOT_TOKEN", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM"):
     if globals()[_msg_key] in ("null", "None", "none", "NULL"):
         globals()[_msg_key] = ""
+# Per-channel enable/disable toggle (config.yaml: enable_telegram / enable_whatsapp)
+ENABLE_TELEGRAM = os.getenv("ENABLE_TELEGRAM", "true").lower() not in ("false", "0", "no")
+ENABLE_WHATSAPP = os.getenv("ENABLE_WHATSAPP", "true").lower() not in ("false", "0", "no")
 ENABLE_MCP = os.getenv("ENABLE_MCP", "true").lower() not in ("false", "0", "")
 MCP_CONFIG_FILE = os.getenv("MCP_CONFIG_FILE", "/config/amira/mcp_config.json")
 FALLBACK_ENABLED = os.getenv("FALLBACK_ENABLED", "true").lower() not in ("false", "0", "no")
@@ -6633,6 +6636,8 @@ def _strip_markdown_for_telegram(text: str) -> str:
 @app.route('/api/telegram/message', methods=['POST'])
 def api_telegram_message():
     """Process incoming Telegram message and return AI response."""
+    if not ENABLE_TELEGRAM:
+        return jsonify({"status": "error", "message": "Telegram is disabled"}), 503
     try:
         data = request.get_json()
         user_id = data.get("user_id")
@@ -6713,6 +6718,8 @@ def api_messaging_chat(channel, user_id):
 @app.route('/api/whatsapp/webhook', methods=['POST'])
 def api_whatsapp_webhook():
     """Handle incoming WhatsApp messages via Twilio webhook."""
+    if not ENABLE_WHATSAPP:
+        return jsonify({"status": "error", "message": "WhatsApp is disabled"}), 503
     try:
         from whatsapp_bot import get_whatsapp_bot
         from messaging import get_messaging_manager
@@ -8648,26 +8655,32 @@ def start_messaging_bots() -> None:
 
     if MESSAGING_AVAILABLE:
         try:
-            t_token = _env("TELEGRAM_BOT_TOKEN")
-            if t_token:
-                bot = telegram_bot.get_telegram_bot(t_token)
-                if bot:
-                    bot.start()
-                    logger.info("✅ Telegram bot started")
+            if not ENABLE_TELEGRAM:
+                logger.info("Telegram bot disabled via configuration (enable_telegram: false)")
             else:
-                logger.info("Telegram bot not configured (no token)")
+                t_token = _env("TELEGRAM_BOT_TOKEN")
+                if t_token:
+                    bot = telegram_bot.get_telegram_bot(t_token)
+                    if bot:
+                        bot.start()
+                        logger.info("✅ Telegram bot started")
+                else:
+                    logger.info("Telegram bot not configured (no token)")
         except Exception as e:
             logger.warning(f"⚠️ Telegram bot initialization error: {e}")
 
         try:
-            wa_sid   = _env("TWILIO_ACCOUNT_SID")
-            wa_token = _env("TWILIO_AUTH_TOKEN")
-            wa_from  = _env("TWILIO_WHATSAPP_FROM")
-            if wa_sid and wa_token and wa_from:
-                whatsapp_bot.get_whatsapp_bot(wa_sid, wa_token, wa_from)
-                logger.info("✅ WhatsApp bot initialized (webhook mode)")
+            if not ENABLE_WHATSAPP:
+                logger.info("WhatsApp bot disabled via configuration (enable_whatsapp: false)")
             else:
-                logger.info("WhatsApp bot not configured (no Twilio credentials)")
+                wa_sid   = _env("TWILIO_ACCOUNT_SID")
+                wa_token = _env("TWILIO_AUTH_TOKEN")
+                wa_from  = _env("TWILIO_WHATSAPP_FROM")
+                if wa_sid and wa_token and wa_from:
+                    whatsapp_bot.get_whatsapp_bot(wa_sid, wa_token, wa_from)
+                    logger.info("✅ WhatsApp bot initialized (webhook mode)")
+                else:
+                    logger.info("WhatsApp bot not configured (no Twilio credentials)")
         except Exception as e:
             logger.warning(f"⚠️ WhatsApp bot initialization error: {e}")
 
