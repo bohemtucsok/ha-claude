@@ -337,6 +337,7 @@ class AgentManager:
         1. Canonical: {"defaults": {...}, "agents": [ {id, name, ...}, ... ]}
         2. Legacy dict: {"agents": {"home": {...}, "coder": {...}}, "active": "home"}
         3. Flat dict (README shorthand): {"home": {...}, "coder": {...}}
+        4. Single agent object at root: {"id": "chatbot", "name": "...", ...}
         """
         # Defaults
         defaults_data = data.get("defaults") or {}
@@ -346,7 +347,15 @@ class AgentManager:
         agents_raw = data.get("agents")
         self._agents.clear()
 
-        if isinstance(agents_raw, list):
+        # Format 4: single agent object at root level (has "id" key, no "agents" key)
+        if agents_raw is None and "id" in data:
+            try:
+                entry = AgentEntry.from_dict(data)
+                self._agents[entry.id] = entry
+                logger.info(f"AgentManager: loaded single-agent root format (id='{entry.id}')")
+            except Exception as e:
+                logger.warning(f"AgentManager: could not parse single-agent root format: {e}")
+        elif isinstance(agents_raw, list):
             # Format 1: canonical array
             for agent_data in agents_raw:
                 try:
