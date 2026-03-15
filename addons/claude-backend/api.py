@@ -32,6 +32,13 @@ from services.model_service import (
     load_model_blocklists, save_model_blocklists, mark_nvidia_model_tested_ok,
     blocklist_nvidia_model, blocklist_model, _fetch_nvidia_models_live, get_nvidia_models_cached
 )
+import services.settings_service as settings_service
+from services.settings_service import (
+    RUNTIME_SELECTION_FILE, SETTINGS_FILE, MCP_RUNTIME_FILE,
+    SETTINGS_DEFAULTS, _SETTINGS_GLOBAL_MAP, CONFIG_EDITABLE_FILES,
+    _load_settings, _save_settings, _load_mcp_runtime_state, _save_mcp_runtime_state,
+    _set_mcp_server_autostart
+)
 
 # Optional feature modules
 try:
@@ -207,10 +214,6 @@ _last_sync_usage: dict = {}
 
 SUPERVISOR_TOKEN = os.getenv("SUPERVISOR_TOKEN", "") or os.getenv("HASSIO_TOKEN", "")
 
-# Persisted runtime selection (preferred over add-on configuration).
-# This enables choosing the agent/model from the chat dropdown only.
-RUNTIME_SELECTION_FILE = "/config/amira/runtime_selection.json"
-
 # Custom system prompt override (can be set dynamically via API)
 CUSTOM_SYSTEM_PROMPT = None
 
@@ -236,125 +239,6 @@ for _msg_key in ("TELEGRAM_BOT_TOKEN", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"
 ENABLE_MCP = os.getenv("ENABLE_MCP", "true").lower() not in ("false", "0", "")
 MCP_CONFIG_FILE = os.getenv("MCP_CONFIG_FILE", "/config/amira/mcp_config.json")
 FALLBACK_ENABLED = os.getenv("FALLBACK_ENABLED", "true").lower() not in ("false", "0", "no")
-
-# ── Settings overlay (runtime-configurable via chat UI) ──────────────
-SETTINGS_FILE = "/config/amira/settings.json"
-MCP_RUNTIME_FILE = "/config/amira/mcp_runtime.json"
-
-SETTINGS_DEFAULTS = {
-    "language": "en",
-    "enable_memory": False,
-    "enable_file_access": False,
-    "enable_file_upload": True,
-    "enable_voice_input": True,
-    "enable_rag": False,
-    "enable_chat_bubble": True,
-    "enable_amira_card_button": True,
-    "enable_mcp": False,
-    "fallback_enabled": False,
-    "anthropic_extended_thinking": False,
-    "anthropic_prompt_caching": False,
-    "openai_extended_thinking": False,
-    "nvidia_thinking_mode": False,
-    "tts_voice": "female",
-    "telegram_bot_token": "",
-    "twilio_account_sid": "",
-    "twilio_auth_token": "",
-    "twilio_whatsapp_from": "",
-    "timeout": 30,
-    "max_retries": 3,
-    "max_conversations": 10,
-    "max_snapshots_per_file": 5,
-    "cost_currency": "USD",
-    "mcp_config_file": "/config/amira/mcp_config.json",
-}
-
-# Maps settings key → Python global variable name
-_SETTINGS_GLOBAL_MAP = {
-    "language": "LANGUAGE",
-    "enable_memory": "ENABLE_MEMORY",
-    "enable_file_access": "ENABLE_FILE_ACCESS",
-    "enable_file_upload": "ENABLE_FILE_UPLOAD",
-    "enable_voice_input": "ENABLE_VOICE_INPUT",
-    "enable_rag": "ENABLE_RAG",
-    "enable_chat_bubble": "ENABLE_CHAT_BUBBLE",
-    "enable_amira_card_button": "ENABLE_AMIRA_CARD_BUTTON",
-    "enable_mcp": "ENABLE_MCP",
-    "fallback_enabled": "FALLBACK_ENABLED",
-    "anthropic_extended_thinking": "ANTHROPIC_EXTENDED_THINKING",
-    "anthropic_prompt_caching": "ANTHROPIC_PROMPT_CACHING",
-    "openai_extended_thinking": "OPENAI_EXTENDED_THINKING",
-    "nvidia_thinking_mode": "NVIDIA_THINKING_MODE",
-    "tts_voice": "TTS_VOICE",
-    "telegram_bot_token": "TELEGRAM_BOT_TOKEN",
-    "twilio_account_sid": "TWILIO_ACCOUNT_SID",
-    "twilio_auth_token": "TWILIO_AUTH_TOKEN",
-    "twilio_whatsapp_from": "TWILIO_WHATSAPP_FROM",
-    "timeout": "TIMEOUT",
-    "max_retries": "MAX_RETRIES",
-    "max_conversations": "MAX_CONVERSATIONS",
-    "max_snapshots_per_file": "MAX_SNAPSHOTS_PER_FILE",
-    "cost_currency": "COST_CURRENCY",
-    "mcp_config_file": "MCP_CONFIG_FILE",
-}
-
-
-def _load_settings() -> dict:
-    """Load settings.json, return empty dict if file missing or invalid."""
-    try:
-        if os.path.isfile(SETTINGS_FILE):
-            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        logging.getLogger(__name__).warning(f"Failed to load settings.json: {e}")
-    return {}
-
-
-def _save_settings(data: dict) -> None:
-    """Atomic write to settings.json."""
-    os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
-    tmp = SETTINGS_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-    os.replace(tmp, SETTINGS_FILE)
-
-
-def _load_mcp_runtime_state() -> dict:
-    """Load MCP runtime state (autostart servers)."""
-    try:
-        if os.path.isfile(MCP_RUNTIME_FILE):
-            with open(MCP_RUNTIME_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f) or {}
-                servers = data.get("autostart_servers", [])
-                if isinstance(servers, list):
-                    data["autostart_servers"] = [str(s) for s in servers if isinstance(s, str) and s.strip()]
-                else:
-                    data["autostart_servers"] = []
-                return data
-    except (json.JSONDecodeError, OSError) as e:
-        logging.getLogger(__name__).warning(f"Failed to load MCP runtime state: {e}")
-    return {"autostart_servers": []}
-
-
-def _save_mcp_runtime_state(data: dict) -> None:
-    """Atomic write to MCP runtime state file."""
-    os.makedirs(os.path.dirname(MCP_RUNTIME_FILE), exist_ok=True)
-    tmp = MCP_RUNTIME_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-    os.replace(tmp, MCP_RUNTIME_FILE)
-
-
-def _set_mcp_server_autostart(server_name: str, enabled: bool) -> None:
-    """Persist whether a specific MCP server should auto-start on addon boot."""
-    state = _load_mcp_runtime_state()
-    current = set(state.get("autostart_servers", []))
-    if enabled:
-        current.add(server_name)
-    else:
-        current.discard(server_name)
-    state["autostart_servers"] = sorted(current)
-    _save_mcp_runtime_state(state)
 
 
 def _apply_settings(settings: dict) -> None:
@@ -410,20 +294,6 @@ _startup_settings = _load_settings()
 _merged_startup = {k: v for k, v in SETTINGS_DEFAULTS.items() if k in _SETTINGS_GLOBAL_MAP}
 _merged_startup.update(_startup_settings)  # user-saved values win
 _apply_settings(_merged_startup)
-
-# Persist system prompt override across restarts
-CUSTOM_SYSTEM_PROMPT_FILE = "/config/amira/custom_system_prompt.txt"
-
-# Agent profiles configuration file
-AGENTS_FILE = "/config/amira/agents.json"
-
-# Whitelist of config files editable via /api/config/save
-CONFIG_EDITABLE_FILES = {
-    "amira/agents.json",
-    "amira/mcp_config.json",
-    "amira/custom_system_prompt.txt",
-    "amira/memory/MEMORY.md",
-}
 
 _LOG_LEVEL = logging.DEBUG if DEBUG_MODE else logging.INFO
 
@@ -707,53 +577,20 @@ def load_runtime_selection() -> bool:
     Returns True if a valid selection was loaded.
     """
     global AI_PROVIDER, AI_MODEL, SELECTED_MODEL, SELECTED_PROVIDER
-    try:
-        if not os.path.isfile(RUNTIME_SELECTION_FILE):
-            return False
-        with open(RUNTIME_SELECTION_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f) or {}
-        provider = (data.get("provider") or "").strip().lower()
-        model = (data.get("model") or "").strip()
-        if not provider or not model:
-            return False
-
-        # Accept only known providers; model is expected to be a technical id.
-        _known = {
-            "anthropic", "openai", "google", "nvidia", "github",
-            "groq", "mistral", "openrouter", "deepseek", "minimax",
-            "aihubmix", "siliconflow", "volcengine", "dashscope",
-            "moonshot", "zhipu", "ollama", "github_copilot", "openai_codex",
-            "claude_web", "chatgpt_web",
-        }
-        if provider not in _known:
-            return False
-
+    provider, model = settings_service.load_runtime_selection()
+    if provider and model:
         AI_PROVIDER = provider
         AI_MODEL = model
         SELECTED_PROVIDER = provider
         SELECTED_MODEL = model
         logger.info(f"Loaded runtime selection: {AI_PROVIDER} / {AI_MODEL}")
         return True
-    except Exception as e:
-        logger.warning(f"Could not load runtime selection: {e}")
-        return False
+    return False
 
 
 def save_runtime_selection(provider: str, model: str) -> bool:
     """Persist provider/model selection to disk."""
-    try:
-        os.makedirs(os.path.dirname(RUNTIME_SELECTION_FILE), exist_ok=True)
-        payload = {
-            "provider": (provider or "").strip().lower(),
-            "model": (model or "").strip(),
-            "updated_at": datetime.now().isoformat(),
-        }
-        with open(RUNTIME_SELECTION_FILE, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False)
-        return True
-    except Exception as e:
-        logger.warning(f"Could not save runtime selection: {e}")
-        return False
+    return settings_service.save_runtime_selection(provider, model)
 
 # Load multilingual keywords for intent detection
 KEYWORDS = {}
