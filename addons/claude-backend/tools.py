@@ -5902,19 +5902,15 @@ def get_system_prompt() -> str:
 
     Priority order:
     1. Active agent's system_prompt_override  → replaces everything (full control)
-    2. Global CUSTOM_SYSTEM_PROMPT            → replaces the HA default
-    3. Agent persona block + HA default prompt
+    2. Agent persona block + CUSTOM_SYSTEM_PROMPT (prepended) + HA default
+       The custom prompt is ADDED to the default, not a replacement.
     """
     # Priority 1: active agent has a full system prompt override
     agent_override = getattr(api, "AGENT_SYSTEM_PROMPT_OVERRIDE", None)
     if agent_override:
         return agent_override
 
-    # Priority 2: global custom system prompt
-    if api.CUSTOM_SYSTEM_PROMPT is not None:
-        return api.CUSTOM_SYSTEM_PROMPT
-
-    # Priority 3: optional agent persona block prepended to the HA default
+    # Priority 2: optional agent persona block prepended to the HA default
     agent_instr = getattr(api, "AGENT_INSTRUCTIONS", "") or ""
     agent_block = ""
     if agent_instr.strip():
@@ -5924,7 +5920,16 @@ def get_system_prompt() -> str:
             + "\n\n"
         )
 
-    base_prompt = agent_block + """You are an AI assistant integrated into Home Assistant. You help users manage their smart home.
+    # Custom user instructions (prepended before the HA default, not a replacement)
+    custom_block = ""
+    if api.CUSTOM_SYSTEM_PROMPT:
+        custom_block = (
+            "## User Instructions\n"
+            + api.CUSTOM_SYSTEM_PROMPT.strip()
+            + "\n\n"
+        )
+
+    base_prompt = agent_block + custom_block + """You are an AI assistant integrated into Home Assistant. You help users manage their smart home.
 
 You can:
 1. **Query entities** - See device states (lights, sensors, switches, climate, covers, etc.)

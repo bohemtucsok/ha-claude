@@ -338,7 +338,7 @@ def get_chat_ui():
             # System prompt form
             "prompt_chars": "characters",
             "prompt_reset": "Clear",
-            "prompt_hint": "Write custom instructions here. They will be added to the default system prompt sent to the AI...",
+            "prompt_hint": "Write custom instructions here. They will be prepended to the default system prompt.\nExample: The user's name is John Smith. Always respond in English.",
             # Memory form
             "memory_hint": "Markdown notes the AI will remember across conversations...",
             "memory_lines": "lines",
@@ -618,7 +618,7 @@ def get_chat_ui():
             # System prompt form
             "prompt_chars": "caratteri",
             "prompt_reset": "Cancella",
-            "prompt_hint": "Scrivi istruzioni personalizzate qui. Verranno aggiunte al prompt di sistema predefinito inviato all'AI...",
+            "prompt_hint": "Scrivi istruzioni personalizzate qui. Verranno aggiunte PRIMA del prompt di sistema predefinito.\nEsempio: Il nome dell'utente è Silvio Rossi. Rispondi sempre in italiano.",
             # Memory form
             "memory_hint": "Note in formato Markdown che l'AI ricorder\u00e0 tra le conversazioni...",
             "memory_lines": "righe",
