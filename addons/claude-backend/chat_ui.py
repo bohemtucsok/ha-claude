@@ -4504,7 +4504,7 @@ def get_chat_ui():
                     + (chDisabled
                         ? '<div style="font-size:10px;margin-top:2px;padding:2px 6px;border-radius:4px;'
                           + 'background:rgba(255,160,0,0.15);color:#e65100;display:inline-flex;align-items:center;gap:3px;">'
-                          + '\uD83D\uDD12 ' + (T.agent_channel_taken || 'Used by') + ': <b>' + otherAgent + '</b></div>'
+                          + '\U0001F512 ' + (T.agent_channel_taken || 'Used by') + ': <b>' + otherAgent + '</b></div>'
                         : '')
                     + '</div>';
             }});
