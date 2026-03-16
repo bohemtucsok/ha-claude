@@ -1,6 +1,40 @@
 # Changelog
 
 > **⚠️ Dopo l'aggiornamento, ricostruire l'add-on** (Impostazioni → Add-on → Amira → Ricostruisci) per applicare le nuove dipendenze.
+
+## 4.6.17 — Fix agent globals, Groq failed_generation, UI agent form
+
+### Fix: `_sync_active_agent_globals` crash
+- Rimosso riferimento a `_override` rimasto dopo il refactor di `system_prompt_override` — causava `NameError` ad ogni cambio agente attivo
+
+### Fix: Groq `failed_generation` — fallback automatico al tool simulator
+- Quando Groq restituisce `"Failed to call a function. Please adjust your prompt."` nell'SSE stream (prima di qualsiasi contenuto), ora viene intercettato automaticamente e la richiesta viene ritentata con il **XML tool simulator** senza mostrare errori all'utente
+- Distingue due casi: `"tool calling not supported"` → il modello viene marcato permanentemente come simulator-only; `"failed_generation"` → fallback solo per quella richiesta (il modello rimane nativo per le successive)
+
+### Fix: canali Telegram/WhatsApp già assegnati — UI agente
+- Il checkbox del canale è ora **disabilitato** (non cliccabile) se già assegnato ad un altro agente
+- Aggiunto badge arancione visibile `🔒 Già assegnato a: <agent_id>` sotto il checkbox — non più nascosto nel tooltip
+- Corretto escape Unicode del lucchetto (`\uD83D\uDD12` surrogato → `\U0001F512`)
+- Aggiunta stringa di traduzione `agent_channel_taken` in EN/IT/ES/FR
+
+### Miglioria UI: emoji picker a tendina nel form agente
+- Sostituita la griglia piatta di 16 emoji (occupava molto spazio) con un **dropdown compatto**: bottone con emoji attuale + `▾`, click apre pannello flottante, selezione chiude il pannello, click fuori chiude senza modifiche
+
+### Refactor: agent `instructions` — prepend al prompt HA (da 4.6.16)
+- Rimosso `system_prompt_override` (rimpiazzava l'intero prompt HA); introdotto campo `instructions` che si **antepone** al prompt di sistema predefinito di HA
+- Backward compatibility: vecchia chiave `system_prompt` nel JSON → letta come `instructions`
+- UI aggiornata: label "ISTRUZIONI AGENTE" con placeholder che mostra l'uso corretto in terza persona
+- `get_system_prompt()` in `tools.py`: compone `agent_instructions + custom_user_block + HA_default`
+
+### Fix vari (da 4.6.16)
+- **Gemini Web**: aggiunto a `catalog_routes.py` e `model_catalog.py` — ora appare nel dropdown provider; modale non più sempre visibile (fix CSS); JS connect/disconnect completato
+- **Bubble JS Error**: il banner rosso ora compare solo per errori nel nostro script, non per errori di componenti terzi (Bubble Card, ecc.)
+- **Custom system prompt**: non rimpiazza più il prompt HA ma si aggiunge in testa
+- **`armv7` → `armhf`**: corretto valore arch deprecato in `config.yaml`
+- **s6 finish script**: riavvio automatico fino a 5 volte su crash inatteso; halt solo su stop pulito o SIGTERM
+
+---
+
 ## 4.6.15 — Fix provider: errori tool call, TPM Groq, hallucination claude_web; UI stato sessione bubble
 
 ### Fix: provider Groq

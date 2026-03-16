@@ -426,7 +426,7 @@ def _sync_active_agent_globals() -> None:
             pass
         logger.debug(
             f"Agent globals synced → '{active.id}': name={AGENT_NAME}, "
-            f"override={'yes' if _override else 'no'}"
+            f"instructions={len(AGENT_INSTRUCTIONS)} chars"
         )
     except Exception as e:
         logger.warning(f"_sync_active_agent_globals error: {e}")
