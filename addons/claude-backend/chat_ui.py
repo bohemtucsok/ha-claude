@@ -4476,13 +4476,17 @@ def get_chat_ui():
                 const chDisabled = !!otherAgent;
                 chHtml += '<div class="agent-form-group" style="flex:1;">'
                     + '<label style="display:flex;align-items:center;gap:6px;font-size:12px;'
-                    + (chDisabled ? 'cursor:not-allowed;opacity:0.45;' : 'cursor:pointer;') + '">'
+                    + (chDisabled ? 'cursor:not-allowed;opacity:0.5;' : 'cursor:pointer;') + '">'
                     + '<input type="checkbox" class="af_channel" data-channel="' + ch + '"'
                     + (isAssigned ? ' checked' : '')
-                    + (chDisabled ? ' disabled title="' + (T.agent_channel_taken || 'Already assigned to') + ': ' + otherAgent + '"' : '') + '> '
-                    + icon + ' ' + label
-                    + (chDisabled ? ' <span style="font-size:10px;color:var(--text-muted,#888);">(' + otherAgent + ')</span>' : '')
-                    + '</label></div>';
+                    + (chDisabled ? ' disabled' : '') + '> '
+                    + icon + ' ' + label + '</label>'
+                    + (chDisabled
+                        ? '<div style="font-size:10px;margin-top:2px;padding:2px 6px;border-radius:4px;'
+                          + 'background:rgba(255,160,0,0.15);color:#e65100;display:inline-flex;align-items:center;gap:3px;">'
+                          + '\uD83D\uDD12 ' + (T.agent_channel_taken || 'Used by') + ': <b>' + otherAgent + '</b></div>'
+                        : '')
+                    + '</div>';
             }});
             chHtml += '</div></div>';
             form.innerHTML += chHtml;
