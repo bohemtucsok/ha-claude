@@ -351,9 +351,18 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en", show_bubble: bool
         navigator.sendBeacon(url, JSON.stringify({{ errors: [entry] }}));
       }} catch(e) {{}}
     }}
+    var _ourScriptSrc = (document.currentScript && document.currentScript.src) || '';
     window.addEventListener('error', function(ev) {{
-      console.error('[Amira Bubble JS Error]', ev.message, 'at', ev.filename, ev.lineno + ':' + ev.colno);
-      _amiraBubbleSendError({{ level: 'error', message: String(ev.message), source: ev.filename || '', line: ev.lineno, col: ev.colno, stack: ev.error && ev.error.stack || '', timestamp: new Date().toISOString(), ui: 'bubble' }});
+      var src = ev.filename || '';
+      var isOurs = _ourScriptSrc && src && src.indexOf(_ourScriptSrc.split('?')[0].split('/').pop().replace('.js','')) !== -1;
+      // Always log + beacon, but only show red banner for errors from our own script
+      _amiraBubbleSendError({{ level: 'error', message: String(ev.message), source: src, line: ev.lineno, col: ev.colno, stack: ev.error && ev.error.stack || '', timestamp: new Date().toISOString(), ui: 'bubble' }});
+      if (!isOurs) {{
+        // Third-party component error — log quietly, don't show banner
+        console.warn('[Amira] third-party JS error (not ours):', ev.message, 'at', src, ev.lineno + ':' + ev.colno);
+        return;
+      }}
+      console.error('[Amira Bubble JS Error]', ev.message, 'at', src, ev.lineno + ':' + ev.colno);
       var d = document.createElement('div');
       d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#b00020;color:#fff;padding:12px 16px;font:13px/1.4 monospace;max-height:30vh;overflow:auto;cursor:pointer;';
       d.textContent = '[Bubble JS Error] ' + ev.message + ' (line ' + ev.lineno + ':' + ev.colno + ')';
