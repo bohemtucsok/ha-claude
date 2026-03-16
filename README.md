@@ -159,6 +159,7 @@ Supports **23+ AI providers** and **60+ models**: Anthropic Claude, OpenAI, Goog
 - **WhatsApp**: Twilio integration with webhook support
 - **Context Aware**: Full conversation history per user per channel
 - **Enable/Disable**: Toggle Telegram and WhatsApp independently from **Settings → Messaging** in the chat UI
+- **Telegram Whitelist**: Restrict bot access to specific Telegram user IDs — anyone not on the list is blocked
 
 ### ⏰ Scheduled Tasks
 - **Cron-based**: Schedule automations using cron expressions
@@ -217,7 +218,21 @@ Supports **23+ AI providers** and **60+ models**: Anthropic Claude, OpenAI, Goog
 
 Amira supports **Telegram** (long polling, no public IP) and **WhatsApp** (via Twilio webhook).
 
-→ Setup guide: [docs/MESSAGING.md](docs/MESSAGING.md) · WhatsApp details: [docs/WHATSAPP.md](docs/WHATSAPP.md)
+### 🔒 Telegram Security — User Whitelist
+
+By default, **anyone who finds your bot link can send commands to your home**. It is strongly recommended to restrict access to known user IDs.
+
+**Setup:**
+1. Find your Telegram user ID: open Telegram → search `@userinfobot` → send `/start` → it replies with your numeric ID
+2. In Amira: **Settings → Messaging → Allowed User IDs**
+3. Enter one or more IDs separated by commas: `123456789` or `123456789,987654321`
+4. Save — unauthorized users will immediately receive `⛔ Non sei autorizzato a usare questo bot.`
+
+> **Tip:** To add a family member, ask them to send `/start` to `@userinfobot` and share their ID with you.
+
+> **Leave empty** only if you intentionally want the bot to be publicly accessible.
+
+→ Full setup guide: [docs/MESSAGING.md](docs/MESSAGING.md) · WhatsApp details: [docs/WHATSAPP.md](docs/WHATSAPP.md)
 
 ---
 
