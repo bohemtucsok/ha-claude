@@ -182,14 +182,52 @@ class GroqProvider(EnhancedProvider):
         messages: List[Dict[str, Any]],
         intent_info: Optional[Dict[str, Any]] = None,
     ) -> Generator[Dict[str, Any], None, None]:
-        """Stream with optional tool-simulator fallback for incompatible models."""
+        """Stream with optional tool-simulator fallback for incompatible models.
+
+        Handles two failure modes:
+        1. Exception: "tool calling not supported" → permanently mark model as simulator-only.
+        2. Error event (failed_generation): Groq returns the error inside the SSE stream
+           before any content. In that case, transparently retry with the XML simulator
+           for this single request (does NOT permanently mark the model).
+        """
         if self.uses_tool_simulator():
             yield from self._stream_with_simulator(messages, intent_info)
             return
 
-        # Try native tool calling; if the model doesn't support it, auto-fallback to simulator.
+        content_started = False
         try:
-            items = list(super()._do_stream(messages, intent_info))
+            for event in super()._do_stream(messages, intent_info):
+                # Check for in-stream error events before any content has been emitted.
+                if event.get("type") == "error" and not content_started:
+                    err_msg = event.get("message", "")
+                    err_low = err_msg.lower()
+
+                    # Native tool calling explicitly not supported → permanently use simulator.
+                    if "tool calling" in err_low and "not supported" in err_low:
+                        model = self._get_model()
+                        logger.warning(
+                            f"Groq: model '{model}' does not support native tool calling "
+                            f"(in-stream error) — permanently switching to XML tool simulator"
+                        )
+                        self._SIMULATOR_MODELS.add(model)
+                        yield from self._stream_with_simulator(messages, intent_info)
+                        return
+
+                    # failed_generation: model couldn't produce a valid tool call JSON.
+                    # One-shot retry with the XML simulator for this request only.
+                    if "failed to call a function" in err_low or "failed_generation" in err_low:
+                        model = self._get_model()
+                        logger.warning(
+                            f"Groq: model '{model}' returned failed_generation — "
+                            f"retrying with XML tool simulator for this request"
+                        )
+                        yield from self._stream_with_simulator(messages, intent_info)
+                        return
+
+                if event.get("type") in ("content", "text", "delta"):
+                    content_started = True
+                yield event
+
         except Exception as e:
             err_low = str(e).lower()
             if "tool calling" in err_low and "not supported" in err_low:
@@ -203,8 +241,6 @@ class GroqProvider(EnhancedProvider):
                 yield from self._stream_with_simulator(messages, intent_info)
                 return
             raise
-
-        yield from items
 
     def stream_chat(
         self,
@@ -299,6 +335,8 @@ class GroqProvider(EnhancedProvider):
             return "Groq: Rate limit exceeded. Please retry in a moment."
         if "tool calling" in error_msg and "not supported" in error_msg:
             return f"Groq: tool calling not supported by this model — switching to XML simulator"
+        if "failed to call a function" in error_msg or "failed_generation" in error_msg:
+            return f"Groq: model failed to generate a valid tool call — retrying with XML simulator"
         if "model_decommissioned" in error_msg or "decommissioned" in error_msg:
             get_catalog().remove_model("groq", self._get_model())
             return "Groq: This model has been decommissioned. Please select a different Groq model in the add-on settings."
