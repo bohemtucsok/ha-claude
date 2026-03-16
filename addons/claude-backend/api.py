@@ -1335,6 +1335,15 @@ ai_client = None
 load_runtime_selection()
 initialize_ai_client()
 
+# Sync AGENT_SYSTEM_PROMPT_OVERRIDE and other agent globals from the persisted
+# active agent so the first chat request already has the correct system prompt.
+if AGENT_CONFIG_AVAILABLE:
+    try:
+        _sync_active_agent_globals()
+        logger.info("Startup: agent globals synced from persisted active agent")
+    except Exception as _e:
+        logger.warning(f"Startup agent globals sync failed: {_e}")
+
 import pathlib
 
 # Conversation history
@@ -2535,6 +2544,16 @@ def _is_mcp_data_request(text: str) -> bool:
 
 def chat_with_ai(user_message: str, session_id: str = "default") -> str:
     """Send a message to the configured AI provider with HA tools."""
+    # Debug: log which system prompt source is active
+    _sp_override = AGENT_SYSTEM_PROMPT_OVERRIDE
+    _sp_custom   = CUSTOM_SYSTEM_PROMPT
+    if _sp_override:
+        logger.debug(f"System prompt: AGENT_OVERRIDE ({len(_sp_override)} chars) — {_sp_override[:80]!r}")
+    elif _sp_custom:
+        logger.debug(f"System prompt: CUSTOM ({len(_sp_custom)} chars)")
+    else:
+        logger.debug("System prompt: DEFAULT HA prompt")
+
     # Legacy providers use ai_client directly; manager.py providers have ai_client=None (normal).
     _LEGACY_PROVIDERS = {"anthropic", "openai", "google", "nvidia", "github"}
 
@@ -5447,22 +5466,7 @@ def api_chat_abort():
     return jsonify({"status": "abort_requested"}), 200
 
 
-@app.route('/api/memory/clear', methods=['POST'])
-def api_memory_clear():
-    """Clear file memory cache (Layer 2)."""
-    try:
-        file_cache = memory.get_config_file_cache()
-        old_stats = file_cache.stats()
-        file_cache.clear()
-        logger.info(f"Memory cache cleared: was {old_stats['cached_files']} files, {old_stats['total_bytes']} bytes")
-        return jsonify({
-            "status": "success",
-            "message": f"Cleared {old_stats['cached_files']} files",
-            "freed_bytes": old_stats['total_bytes'],
-        }), 200
-    except Exception as e:
-        logger.error(f"Memory clear error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+# moved to routes/memory_routes.py: api_memory_clear
 
 
 # ============ MCP (Model Context Protocol) Endpoints ============
@@ -5860,122 +5864,8 @@ def api_mcp_server_tools(server_name):
 
 # ============ Nanobot-Inspired Features Endpoints ============
 
-@app.route('/api/cache/semantic/stats', methods=['GET'])
-def api_semantic_cache_stats():
-    """Get semantic cache statistics."""
-    try:
-        if not SEMANTIC_CACHE_AVAILABLE:
-            return jsonify({"status": "error", "message": "Semantic cache not available"}), 501
-        
-        cache = semantic_cache.get_semantic_cache()
-        if not cache:
-            return jsonify({"status": "error", "message": "Semantic cache not initialized"}), 503
-        
-        stats = cache.stats()
-        return jsonify({
-            "status": "success",
-            "cache_stats": stats,
-        }), 200
-    except Exception as e:
-        logger.error(f"Semantic cache stats error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route('/api/cache/semantic/clear', methods=['POST'])
-def api_semantic_cache_clear():
-    """Clear semantic cache."""
-    try:
-        if not SEMANTIC_CACHE_AVAILABLE:
-            return jsonify({"status": "error", "message": "Semantic cache not available"}), 501
-        
-        cache = semantic_cache.get_semantic_cache()
-        if not cache:
-            return jsonify({"status": "error", "message": "Semantic cache not initialized"}), 503
-        
-        cache.clear()
-        return jsonify({
-            "status": "success",
-            "message": "Semantic cache cleared",
-        }), 200
-    except Exception as e:
-        logger.error(f"Semantic cache clear error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route('/api/tools/optimizer/stats', methods=['GET'])
-def api_tool_optimizer_stats():
-    """Get tool execution optimizer statistics."""
-    try:
-        if not TOOL_OPTIMIZER_AVAILABLE:
-            return jsonify({"status": "error", "message": "Tool optimizer not available"}), 501
-        
-        optimizer = tool_optimizer.get_tool_optimizer()
-        stats = optimizer.stats()
-        return jsonify({
-            "status": "success",
-            "optimizer_stats": stats,
-        }), 200
-    except Exception as e:
-        logger.error(f"Tool optimizer stats error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route('/api/quality/stats', methods=['GET'])
-def api_quality_metrics_stats():
-    """Get response quality metrics statistics."""
-    try:
-        if not QUALITY_METRICS_AVAILABLE:
-            return jsonify({"status": "error", "message": "Quality metrics not available"}), 501
-        
-        analyzer = quality_metrics.get_quality_analyzer()
-        stats = analyzer.get_stats()
-        return jsonify({
-            "status": "success",
-            "quality_stats": stats,
-        }), 200
-    except Exception as e:
-        logger.error(f"Quality metrics stats error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-# ============ Image Support Endpoints ============
-
-@app.route('/api/image/stats', methods=['GET'])
-def api_image_stats():
-    """Get image analyzer statistics."""
-    try:
-        if not IMAGE_SUPPORT_AVAILABLE:
-            return jsonify({"status": "error", "message": "Image support not available"}), 501
-        analyzer = image_support.get_image_analyzer()
-        return jsonify({"status": "success", "image_stats": analyzer.get_stats()}), 200
-    except Exception as e:
-        logger.error(f"Image stats error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route('/api/image/analyze', methods=['POST'])
-def api_image_analyze():
-    """Analyze an image file using vision models with automatic fallback.
-    
-    JSON body: { "image_path": "/config/amira/images/photo.jpg", "prompt": "Describe this image" }
-    """
-    try:
-        if not IMAGE_SUPPORT_AVAILABLE:
-            return jsonify({"status": "error", "message": "Image support not available"}), 501
-        data = request.json or {}
-        image_path = data.get("image_path", "")
-        prompt = data.get("prompt", "Describe this image in detail.")
-        if not image_path:
-            return jsonify({"status": "error", "message": "image_path is required"}), 400
-        analyzer = image_support.get_image_analyzer()
-        success, analysis, provider = analyzer.analyze_with_fallback(image_path, prompt)
-        if success:
-            return jsonify({"status": "success", "analysis": analysis, "provider": provider}), 200
-        else:
-            return jsonify({"status": "error", "message": analysis}), 502
-    except Exception as e:
-        logger.error(f"Image analyze error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+# moved to routes/analytics_routes.py: api_semantic_cache_stats, api_semantic_cache_clear,
+# api_tool_optimizer_stats, api_quality_metrics_stats, api_image_stats, api_image_analyze
 
 
 # ============ Scheduled Tasks Endpoints ============
@@ -6151,41 +6041,7 @@ def api_scheduler_agent_clear_session(session_id):
 
 # ============ Browser Console Errors Endpoint ============
 
-@app.route('/api/browser-errors', methods=['POST'])
-def api_browser_errors_post():
-    """Receive browser console errors from frontend JS."""
-    try:
-        # sendBeacon sends text/plain, so try get_json first, then fall back to raw data
-        data = request.get_json(silent=True)
-        if data is None:
-            try:
-                raw = request.get_data(as_text=True)
-                if raw:
-                    data = json.loads(raw)
-            except Exception:
-                data = {}
-        if not isinstance(data, dict):
-            data = {}
-        errors = data.get("errors", [])
-        if not isinstance(errors, list):
-            errors = [errors]
-        for err in errors:
-            if isinstance(err, dict):
-                err.setdefault("timestamp", datetime.now().isoformat())
-                _browser_console_errors.append(err)
-        # Keep only last 200
-        while len(_browser_console_errors) > 200:
-            _browser_console_errors.pop(0)
-        return jsonify({"status": "ok", "stored": len(errors)}), 200
-    except Exception as e:
-        logger.error(f"Browser errors endpoint: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route('/api/browser-errors', methods=['GET'])
-def api_browser_errors_get():
-    """Get stored browser console errors."""
-    return jsonify({"errors": _browser_console_errors, "count": len(_browser_console_errors)}), 200
+# moved to routes/system_routes.py: api_browser_errors_post, api_browser_errors_get
 
 
 # ============ Agent / Catalog / Fallback Endpoints ============
@@ -6412,53 +6268,7 @@ def api_agent_defaults_update():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route('/api/catalog/stats', methods=['GET'])
-def api_catalog_stats():
-    """Get model catalog statistics."""
-    if not MODEL_CATALOG_AVAILABLE:
-        return jsonify({"success": False, "error": "Model catalog not available"}), 501
-    try:
-        cat = model_catalog.get_catalog()
-        return jsonify({"success": True, "catalog": cat.stats()}), 200
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/catalog/models', methods=['GET'])
-def api_catalog_models():
-    """Get all catalog models (optionally filtered by provider or capability)."""
-    if not MODEL_CATALOG_AVAILABLE:
-        return jsonify({"success": False, "error": "Model catalog not available"}), 501
-    try:
-        cat = model_catalog.get_catalog()
-        provider = request.args.get("provider")
-        capability = request.args.get("capability")
-        include_deprecated = request.args.get("include_deprecated", "false").lower() == "true"
-
-        entries = cat.get_all(provider, include_deprecated=include_deprecated)
-        if capability:
-            try:
-                cap_enum = model_catalog.ModelCapability[capability.upper()]
-                entries = [e for e in entries if cap_enum in e.capabilities]
-            except KeyError:
-                pass
-
-        result = []
-        for e in entries:
-            result.append({
-                "id": e.id,
-                "provider": e.provider,
-                "name": e.name or e.id,
-                "capabilities": [c.name.lower() for c in e.capabilities],
-                "context_window": e.context_window,
-                "max_output_tokens": e.max_output_tokens,
-                "reasoning": e.reasoning,
-                "pricing_tier": e.pricing_tier.value,
-                "deprecated": e.deprecated,
-            })
-        return jsonify({"success": True, "models": result, "count": len(result)}), 200
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+# moved to routes/catalog_routes.py: api_catalog_stats, api_catalog_models
 
 
 @app.route('/api/fallback/stats', methods=['GET'])
@@ -6494,99 +6304,7 @@ def api_fallback_clear():
 
 # ============ Voice Transcription Endpoints ============
 
-@app.route('/api/voice/stats', methods=['GET'])
-def api_voice_stats():
-    """Get voice transcription statistics."""
-    try:
-        if not VOICE_TRANSCRIPTION_AVAILABLE:
-            return jsonify({"status": "error", "message": "Voice transcription not available"}), 501
-        transcriber = voice_transcription.get_voice_transcriber()
-        return jsonify({"status": "success", "voice_stats": transcriber.get_stats()}), 200
-    except Exception as e:
-        logger.error(f"Voice stats error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route('/api/voice/transcribe', methods=['POST'])
-def api_voice_transcribe():
-    """Transcribe uploaded audio file to text (Groq Whisper → OpenAI → Google fallback).
-    
-    Multipart: audio file in field 'file'
-    """
-    try:
-        if not VOICE_TRANSCRIPTION_AVAILABLE:
-            return jsonify({"status": "error", "message": "Voice transcription not available"}), 501
-        if 'file' not in request.files:
-            return jsonify({"status": "error", "message": "No audio file in request (field: 'file')"}), 400
-        audio_file = request.files['file']
-        # Save to a temporary path
-        import tempfile, os as _os
-        suffix = _os.path.splitext(audio_file.filename or 'audio.wav')[1] or '.wav'
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            audio_file.save(tmp.name)
-            tmp_path = tmp.name
-        try:
-            transcriber = voice_transcription.get_voice_transcriber()
-            success, text, provider = transcriber.transcribe_with_fallback(tmp_path)
-        finally:
-            _os.unlink(tmp_path)
-        if success:
-            return jsonify({"status": "success", "text": text, "provider": provider}), 200
-        else:
-            return jsonify({"status": "error", "message": text}), 502
-    except Exception as e:
-        logger.error(f"Voice transcribe error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route('/api/voice/tts', methods=['POST'])
-def api_voice_tts():
-    """Convert text to speech (Edge → Groq → OpenAI → Google fallback).
-    
-    JSON body: { "text": "...", "voice": "..." }
-    Returns: audio binary or JSON error
-    """
-    try:
-        if not VOICE_TRANSCRIPTION_AVAILABLE:
-            return jsonify({"status": "error", "message": "Voice transcription not available"}), 501
-        data = request.json or {}
-        text = data.get("text", "")
-        if not text:
-            return jsonify({"status": "error", "message": "text is required"}), 400
-        tts = voice_transcription.get_text_to_speech()
-        voice = data.get("voice", TTS_VOICE) or TTS_VOICE
-        success, audio_bytes = tts.speak_with_fallback(text, voice=voice)
-        if success and audio_bytes:
-            from flask import Response as FlaskResponse
-            # Edge TTS produces mp3, Groq produces wav, OpenAI produces mp3
-            # Detect format from first bytes
-            if audio_bytes[:4] == b'RIFF':
-                mimetype = "audio/wav"
-            else:
-                mimetype = "audio/mpeg"
-            return FlaskResponse(audio_bytes, mimetype=mimetype)
-        else:
-            available = tts.get_available_providers()
-            msg = f"TTS failed — no provider available. Available: {', '.join(available) if available else 'none'}"
-            return jsonify({"status": "error", "message": msg}), 502
-    except Exception as e:
-        logger.error(f"Voice TTS error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route('/api/voice/tts/providers', methods=['GET'])
-def api_voice_tts_providers():
-    """Get available TTS providers."""
-    try:
-        if not VOICE_TRANSCRIPTION_AVAILABLE:
-            return jsonify({"status": "error", "message": "Voice module not available"}), 501
-        tts = voice_transcription.get_text_to_speech()
-        return jsonify({
-            "status": "success",
-            "providers": tts.get_available_providers(),
-        }), 200
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+# moved to routes/voice_routes.py: api_voice_stats, api_voice_transcribe, api_voice_tts, api_voice_tts_providers
 
 
 # ============ Messaging Integration Endpoints ============
@@ -6822,46 +6540,7 @@ def api_whatsapp_webhook():
 #  to Amira as a conversation agent.                                           #
 # --------------------------------------------------------------------------- #
 
-@app.route('/api/conversation/process', methods=['POST'])
-def api_conversation_process():
-    """HA Conversation Agent compatible endpoint.
-
-    Expects:
-        {"text": "...", "language": "it", "conversation_id": "..."}
-    Returns:
-        {"response": {"speech": {"plain": {"speech": "...", "extra_data": null}},
-                       "card": {}, "language": "it"}, "conversation_id": "..."}
-    """
-    data = request.get_json(silent=True) or {}
-    text = (data.get("text") or "").strip()
-    lang = data.get("language", LANGUAGE)
-    conv_id = data.get("conversation_id") or "conversation_agent"
-
-    if not text:
-        return jsonify({"error": "Empty text"}), 400
-
-    logger.info(f"[ConversationAgent] ({lang}) {text[:80]}")
-
-    try:
-        response_text = chat_with_ai(text, conv_id)
-    except Exception as e:
-        logger.error(f"[ConversationAgent] Error: {e}")
-        response_text = f"Mi dispiace, si è verificato un errore: {str(e)[:100]}"
-
-    # Return in HA conversation agent response format
-    return jsonify({
-        "response": {
-            "speech": {
-                "plain": {
-                    "speech": response_text,
-                    "extra_data": None,
-                }
-            },
-            "card": {},
-            "language": lang,
-        },
-        "conversation_id": conv_id,
-    }), 200
+# moved to routes/conversation_routes.py: api_conversation_process
 
 
 # --------------------------------------------------------------------------- #
@@ -7000,36 +6679,7 @@ def api_alexa_webhook():
         return jsonify(_alexa_response("Si è verificato un errore. Riprova tra poco.", end_session=False)), 200
 
 
-@app.route('/api/system/features', methods=['GET'])
-def api_system_features():
-    """Get list of available advanced features."""
-    features = {
-        "mcp_support": MCP_AVAILABLE,
-        "fallback_chain": FALLBACK_AVAILABLE,
-        "semantic_cache": SEMANTIC_CACHE_AVAILABLE,
-        "tool_optimizer": TOOL_OPTIMIZER_AVAILABLE,
-        "quality_metrics": QUALITY_METRICS_AVAILABLE,
-        "prompt_caching": ANTHROPIC_PROMPT_CACHING if ANTHROPIC_PROMPT_CACHING else False,
-        "file_memory": MEMORY_AVAILABLE if MEMORY_AVAILABLE else False,
-        "image_support": IMAGE_SUPPORT_AVAILABLE,
-        "scheduled_tasks": SCHEDULED_TASKS_AVAILABLE,
-        "voice_transcription": VOICE_TRANSCRIPTION_AVAILABLE,
-        "scheduler_agent": SCHEDULER_AGENT_AVAILABLE,
-    }
-
-    # SDK availability for the current provider
-    provider_sdk_ok, provider_sdk_msg = _check_provider_sdk(AI_PROVIDER)
-    pkg_status = _check_optional_sdks()
-    missing = [k for k, v in pkg_status.items() if not v]
-
-    return jsonify({
-        "status": "success",
-        "features": features,
-        "enabled_count": sum(1 for v in features.values() if v),
-        "provider_sdk_available": provider_sdk_ok,
-        "provider_sdk_message": provider_sdk_msg,
-        "missing_packages": missing,
-    }), 200
+# moved to routes/system_routes.py: api_system_features
 
 
 @app.route('/api/mcp/conversations/<session_id>/messages', methods=['GET'])
@@ -7253,204 +6903,7 @@ def api_conversation_delete(session_id):
     session_last_intent.pop(session_id, None)
     return jsonify({"status": "ok", "message": f"Session '{session_id}' cleared."}), 200
 
-@app.route('/api/get_models', methods=['GET'])
-def api_get_models():
-    """Get available models (chat + HA settings) without duplicate routes."""
-    try:
-        # --- Providers disponibili (per HA settings) ---
-        available_providers = []
-        if ANTHROPIC_API_KEY:
-            available_providers.append({"id": "anthropic", "name": "Anthropic Claude"})
-        if OPENAI_API_KEY:
-            available_providers.append({"id": "openai", "name": "OpenAI"})
-        if GOOGLE_API_KEY:
-            available_providers.append({"id": "google", "name": "Google Gemini"})
-        if NVIDIA_API_KEY:
-            available_providers.append({"id": "nvidia", "name": "NVIDIA NIM"})
-        if GITHUB_TOKEN:
-            available_providers.append({"id": "github", "name": "GitHub Models"})
-        if GROQ_API_KEY:
-            available_providers.append({"id": "groq", "name": "Groq"})
-        if MISTRAL_API_KEY:
-            available_providers.append({"id": "mistral", "name": "Mistral"})
-        if OPENROUTER_API_KEY:
-            available_providers.append({"id": "openrouter", "name": "OpenRouter"})
-        if DEEPSEEK_API_KEY:
-            available_providers.append({"id": "deepseek", "name": "DeepSeek"})
-        if MINIMAX_API_KEY:
-            available_providers.append({"id": "minimax", "name": "MiniMax"})
-        if AIHUBMIX_API_KEY:
-            available_providers.append({"id": "aihubmix", "name": "AiHubMix"})
-        if SILICONFLOW_API_KEY:
-            available_providers.append({"id": "siliconflow", "name": "SiliconFlow"})
-        if VOLCENGINE_API_KEY:
-            available_providers.append({"id": "volcengine", "name": "VolcEngine"})
-        if DASHSCOPE_API_KEY:
-            available_providers.append({"id": "dashscope", "name": "DashScope (Qwen)"})
-        if MOONSHOT_API_KEY:
-            available_providers.append({"id": "moonshot", "name": "Moonshot (Kimi)"})
-        if ZHIPU_API_KEY:
-            available_providers.append({"id": "zhipu", "name": "Zhipu (GLM)"})
-        if PERPLEXITY_API_KEY:
-            available_providers.append({"id": "perplexity", "name": "Perplexity (Sonar)"})
-        if CUSTOM_API_BASE:
-            available_providers.append({"id": "custom", "name": "Custom Endpoint"})
-        # Ollama: sempre disponibile se ha un URL configurato (è locale)
-        if OLLAMA_BASE_URL:
-            available_providers.append({"id": "ollama", "name": "Ollama (Local)"})
-        # GitHub Copilot: sempre visibile nel selettore; il banner OAuth guida l'autenticazione
-        available_providers.append({"id": "github_copilot", "name": "GitHub Copilot", "web": True})
-        # OpenAI Codex: sempre visibile nel selettore; il banner OAuth guida l'autenticazione
-        available_providers.append({"id": "openai_codex", "name": "OpenAI Codex", "web": True})
-        # Provider web non ufficiali — sempre visibili; il token di sessione guida l'autenticazione
-        available_providers.append({"id": "claude_web", "name": "Claude.ai Web", "web": True})
-        # chatgpt_web: in standby — Cloudflare blocca le richieste da server nel 2026
-        # available_providers.append({"id": "chatgpt_web", "name": "ChatGPT Web [UNSTABLE]"})
-
-        # --- Tutti i modelli per provider (come li vuole la chat: display/prefissi) ---
-        models_display = {}
-        models_technical = {}
-        nvidia_models_tested_display: list[str] = []
-        nvidia_models_to_test_display: list[str] = []
-        
-        # Get list of configured providers (only those with API keys)
-        configured_providers = {p["id"] for p in available_providers}
-        
-        for provider, models in PROVIDER_MODELS.items():
-            # ONLY include models for providers that have API keys configured
-            if provider not in configured_providers:
-                continue
-
-            filtered_models = list(models)
-
-            # Live discovery for GitHub Copilot (models depend on subscription)
-            # Live discovery for GitHub Copilot: use cache only on regular loads.
-            # This avoids automatic HTTP calls on every UI startup/reload.
-            if provider == "github_copilot":
-                try:
-                    from providers.github_copilot import get_copilot_models_cached
-                    live = get_copilot_models_cached()
-                    if live:
-                        filtered_models = live
-                except Exception as _e:
-                    logger.debug(f"Copilot model discovery skipped: {_e}")
-
-            # Live discovery for NVIDIA (per-key availability)
-            if provider == "nvidia":
-                live_models = get_nvidia_models_cached(NVIDIA_API_KEY)
-                if live_models:
-                    filtered_models = list(live_models)
-                if NVIDIA_MODEL_BLOCKLIST:
-                    filtered_models = [m for m in filtered_models if m not in NVIDIA_MODEL_BLOCKLIST]
-
-                # Partition into tested vs not-yet-tested (keep only currently available models)
-                tested_ok = [m for m in filtered_models if m in NVIDIA_MODEL_TESTED_OK]
-                to_test = [m for m in filtered_models if m not in NVIDIA_MODEL_TESTED_OK]
-                filtered_models = tested_ok + to_test
-
-            models_technical[provider] = list(filtered_models)
-            # Use per-provider display mapping to avoid cross-provider conflicts
-            prov_map = PROVIDER_DISPLAY.get(provider, {})
-            models_display[provider] = [prov_map.get(m, m) for m in filtered_models]
-
-            if provider == "nvidia":
-                # Provide explicit groups for UI (display names)
-                nvidia_models_tested_display = [prov_map.get(m, m) for m in filtered_models if m in NVIDIA_MODEL_TESTED_OK]
-                nvidia_models_to_test_display = [prov_map.get(m, m) for m in filtered_models if m not in NVIDIA_MODEL_TESTED_OK]
-
-        # --- Current model (sia tech che display) ---
-        current_model_tech = get_active_model()
-        # Use provider-specific display to avoid cross-provider collisions
-        # (e.g. "openai/gpt-4o" exists in both GitHub and OpenRouter with different display names)
-        current_model_display = (
-            PROVIDER_DISPLAY.get(AI_PROVIDER, {}).get(current_model_tech)
-            or MODEL_DISPLAY_MAPPING.get(current_model_tech)
-            or current_model_tech
-        )
-
-        # --- Modelli del provider corrente (per HA settings: lista con flag current) ---
-        provider_models = models_technical.get(AI_PROVIDER, PROVIDER_MODELS.get(AI_PROVIDER, []))
-        available_models = []
-        for tech_name in provider_models:
-            available_models.append({
-                "technical_name": tech_name,
-                "display_name": MODEL_DISPLAY_MAPPING.get(tech_name, tech_name),
-                "is_current": tech_name == current_model_tech
-            })
-
-        # --- Agent info for UI ---
-        agents_info = []
-        active_agent_id = None
-        active_agent_identity = None
-        if AGENT_CONFIG_AVAILABLE:
-            try:
-                mgr = agent_config.get_agent_manager()
-                agents_info = mgr.get_agents_for_api()
-                active = mgr.get_active_agent()
-                if active:
-                    active_agent_id = active.id
-                    active_agent_identity = {
-                        "name": active.identity.name,
-                        "emoji": active.identity.emoji,
-                        "description": active.identity.description or active.description,
-                    }
-            except Exception as _e:
-                logger.debug(f"Agent info for get_models: {_e}")
-
-        # --- Catalog capability badges per model ---
-        model_capabilities = {}
-        if MODEL_CATALOG_AVAILABLE:
-            try:
-                cat = model_catalog.get_catalog()
-                for prov_key in models_technical:
-                    for mid in models_technical[prov_key]:
-                        entry = cat.get_entry(prov_key, mid)
-                        if entry:
-                            model_capabilities[f"{prov_key}/{mid}"] = {
-                                "caps": [c.name.lower() for c in entry.capabilities
-                                         if c not in (model_catalog.ModelCapability.TEXT,
-                                                      model_catalog.ModelCapability.STREAMING)],
-                                "ctx": entry.context_window,
-                                "out": entry.max_output_tokens,
-                                "tier": entry.pricing_tier.value,
-                                "reasoning": entry.reasoning,
-                            }
-            except Exception as _e:
-                logger.debug(f"Catalog info for get_models: {_e}")
-
-        return jsonify({
-            "success": True,
-
-            # First-run onboarding: chat should prompt user to pick an agent once
-            "needs_first_selection": not os.path.isfile(RUNTIME_SELECTION_FILE),
-
-            # compat chat (quello che già usa il tuo JS)
-            "current_provider": AI_PROVIDER,
-            "current_model": current_model_display,
-            "models": models_display,
-
-            # NVIDIA UI grouping: tested models first, then not-yet-tested
-            "nvidia_models_tested": nvidia_models_tested_display,
-            "nvidia_models_to_test": nvidia_models_to_test_display,
-
-            # extra per HA (più completo)
-            "current_model_technical": current_model_tech,
-            "models_technical": models_technical,
-            "available_providers": available_providers,
-            "available_models": available_models,
-
-            # Agent system
-            "agents": agents_info,
-            "active_agent": active_agent_id,
-            "active_agent_identity": active_agent_identity,
-            "channel_agents": agent_config.get_agent_manager().get_all_channel_agents() if AGENT_CONFIG_AVAILABLE else {},
-
-            # Model catalog capabilities (keyed by "provider/model")
-            "model_capabilities": model_capabilities,
-        }), 200
-    except Exception as e:
-        logger.error(f"api_get_models error: {e}")
-        return jsonify({"success": False, "error": str(e), "models": {}, "available_providers": []}), 500
+# moved to routes/catalog_routes.py: api_get_models
 
 
 @app.route('/api/snapshots/restore', methods=['POST'])
@@ -7753,116 +7206,8 @@ def api_nvidia_test_models():
 
 # ---- Memory API Endpoints ----
 
-@app.route('/api/memory', methods=['GET'])
-def api_get_memory():
-    """Get recent saved conversations from memory."""
-    if not ENABLE_MEMORY:
-        return jsonify({"error": "Memory feature not enabled"}), 400
-    
-    try:
-        limit = request.args.get('limit', default=10, type=int)
-        days_back = request.args.get('days_back', default=30, type=int)
-        provider = request.args.get('provider', default=None, type=str)
-        
-        conversations = memory.get_past_conversations(limit=limit, days_back=days_back, provider=provider)
-        
-        return jsonify({
-            "success": True,
-            "count": len(conversations),
-            "conversations": conversations
-        }), 200
-    except Exception as e:
-        logger.error(f"Memory retrieval error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/memory/search', methods=['GET'])
-def api_search_memory():
-    """Search past conversations by query."""
-    if not ENABLE_MEMORY:
-        return jsonify({"error": "Memory feature not enabled"}), 400
-    
-    query = request.args.get('q', default='', type=str)
-    if not query:
-        return jsonify({"error": "Query parameter 'q' required"}), 400
-    
-    try:
-        limit = request.args.get('limit', default=5, type=int)
-        days_back = request.args.get('days_back', default=30, type=int)
-        
-        results = memory.search_memory(query, limit=limit, days_back=days_back)
-        conversations = [{"conversation": conv, "score": score} for conv, score in results]
-        
-        return jsonify({
-            "success": True,
-            "query": query,
-            "count": len(conversations),
-            "results": conversations
-        }), 200
-    except Exception as e:
-        logger.error(f"Memory search error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/memory/stats', methods=['GET'])
-def api_memory_stats():
-    """Get statistics about stored memories."""
-    if not ENABLE_MEMORY:
-        return jsonify({"error": "Memory feature not enabled"}), 400
-    
-    try:
-        stats = memory.get_memory_stats()
-        return jsonify({
-            "success": True,
-            "stats": stats
-        }), 200
-    except Exception as e:
-        logger.error(f"Memory stats error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/memory/<conversation_id>', methods=['DELETE'])
-def api_delete_memory(conversation_id):
-    """Delete a conversation from memory."""
-    if not ENABLE_MEMORY:
-        return jsonify({"error": "Memory feature not enabled"}), 400
-    
-    try:
-        deleted = memory.delete_conversation(conversation_id)
-        if deleted:
-            return jsonify({
-                "success": True,
-                "message": f"Conversation {conversation_id} deleted"
-            }), 200
-        else:
-            return jsonify({
-                "success": False,
-                "error": "Conversation not found"
-            }), 404
-    except Exception as e:
-        logger.error(f"Memory delete error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/memory/cleanup', methods=['POST'])
-def api_cleanup_memory():
-    """Clean up old conversations from memory."""
-    if not ENABLE_MEMORY:
-        return jsonify({"error": "Memory feature not enabled"}), 400
-    
-    try:
-        body = request.get_json(silent=True) or {}
-        days = int(body.get('days', 90))
-        
-        deleted_count = memory.clear_old_memories(days=days)
-        return jsonify({
-            "success": True,
-            "deleted": deleted_count,
-            "message": f"Deleted {deleted_count} conversations older than {days} days"
-        }), 200
-    except Exception as e:
-        logger.error(f"Memory cleanup error: {e}")
-        return jsonify({"error": str(e)}), 500
+# moved to routes/memory_routes.py: api_get_memory, api_search_memory, api_memory_stats,
+# api_delete_memory, api_cleanup_memory
 
 
 
@@ -7939,232 +7284,13 @@ def clear_conversation():
 
 
 # ===== FILE UPLOAD ENDPOINTS =====
-@app.route("/api/documents/upload", methods=["POST"])
-def upload_document():
-    """Upload a document (PDF, DOCX, TXT, MD, etc.)."""
-    if not ENABLE_FILE_UPLOAD or not FILE_UPLOAD_AVAILABLE:
-        return jsonify({"error": "File upload feature not available"}), 503
-    
-    if "file" not in request.files:
-        return jsonify({"error": "No file provided"}), 400
-    
-    file = request.files["file"]
-    if not file.filename:
-        return jsonify({"error": "Empty filename"}), 400
-    
-    try:
-        file_content = file.read()
-        note = request.form.get("note", "")
-        tags = request.form.getlist("tags")
-        
-        doc_id = file_upload.process_uploaded_file(
-            file_content, 
-            file.filename,
-            note=note,
-            tags=tags
-        )
-        
-        # Auto-index in RAG if available AND enabled
-        rag_indexed = False
-        if RAG_AVAILABLE and ENABLE_RAG:
-            try:
-                doc_info = file_upload.get_document(doc_id)
-                if doc_info:
-                    rag_indexed = rag.index_document(
-                        doc_id,
-                        doc_info.get("content", ""),
-                        {
-                            "filename": doc_info.get("filename"),
-                            "uploaded_at": doc_info.get("uploaded_at"),
-                            "tags": doc_info.get("tags", []),
-                            "note": doc_info.get("note")
-                        }
-                    )
-            except Exception as e:
-                logger.error(f"RAG indexing failed (non-fatal): {e}")
-        
-        return jsonify({
-            "status": "uploaded",
-            "doc_id": doc_id,
-            "filename": file.filename,
-            "indexed_in_rag": rag_indexed
-        }), 201
-        
-    except Exception as e:
-        logger.error(f"File upload error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/documents", methods=["GET"])
-def list_documents():
-    """List uploaded documents."""
-    if not ENABLE_FILE_UPLOAD or not FILE_UPLOAD_AVAILABLE:
-        return jsonify({"error": "File upload feature not available"}), 503
-    
-    try:
-        tags_filter = request.args.getlist("tags")
-        docs = file_upload.list_documents(tags=tags_filter)
-        return jsonify({"documents": docs}), 200
-    except Exception as e:
-        logger.error(f"List documents error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/documents/<doc_id>", methods=["GET"])
-def get_document(doc_id):
-    """Get a specific document."""
-    if not ENABLE_FILE_UPLOAD or not FILE_UPLOAD_AVAILABLE:
-        return jsonify({"error": "File upload feature not available"}), 503
-    
-    try:
-        doc = file_upload.get_document(doc_id)
-        if not doc:
-            return jsonify({"error": "Document not found"}), 404
-        return jsonify(doc), 200
-    except Exception as e:
-        logger.error(f"Get document error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/documents/search", methods=["GET"])
-def search_documents():
-    """Search documents by query."""
-    if not ENABLE_FILE_UPLOAD or not FILE_UPLOAD_AVAILABLE:
-        return jsonify({"error": "File upload feature not available"}), 503
-    
-    query = request.args.get("q", "")
-    if not query:
-        return jsonify({"error": "Query parameter 'q' required"}), 400
-    
-    try:
-        results = file_upload.search_documents(query)
-        return jsonify({"query": query, "results": results}), 200
-    except Exception as e:
-        logger.error(f"Search documents error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/documents/<doc_id>", methods=["DELETE"])
-def delete_document(doc_id):
-    """Delete a document."""
-    if not ENABLE_FILE_UPLOAD or not FILE_UPLOAD_AVAILABLE:
-        return jsonify({"error": "File upload feature not available"}), 503
-    
-    try:
-        # Remove from RAG index if available
-        if RAG_AVAILABLE:
-            rag.delete_indexed_document(doc_id)
-        
-        success = file_upload.delete_document(doc_id)
-        if not success:
-            return jsonify({"error": "Document not found"}), 404
-        return jsonify({"status": "deleted", "doc_id": doc_id}), 200
-    except Exception as e:
-        logger.error(f"Delete document error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/documents/stats", methods=["GET"])
-def document_stats():
-    """Get document upload statistics."""
-    if not ENABLE_FILE_UPLOAD or not FILE_UPLOAD_AVAILABLE:
-        return jsonify({"error": "File upload feature not available"}), 503
-    
-    try:
-        stats = file_upload.get_upload_stats()
-        return jsonify(stats), 200
-    except Exception as e:
-        logger.error(f"Get stats error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-# ===== RAG / SEMANTIC SEARCH ENDPOINTS =====
-@app.route("/api/rag/index", methods=["POST"])
-def rag_index():
-    """Index a document for semantic search."""
-    if not RAG_AVAILABLE:
-        return jsonify({"error": "RAG feature not available"}), 503
-    
-    data = request.get_json()
-    doc_id = data.get("doc_id")
-    content = data.get("content", "")
-    metadata = data.get("metadata", {})
-    
-    if not doc_id or not content:
-        return jsonify({"error": "doc_id and content required"}), 400
-    
-    try:
-        rag.index_document(doc_id, content, metadata)
-        return jsonify({
-            "status": "indexed",
-            "doc_id": doc_id,
-        }), 201
-    except Exception as e:
-        logger.error(f"RAG index error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/rag/search", methods=["GET"])
-def rag_search():
-    """Semantic search in indexed documents."""
-    if not RAG_AVAILABLE:
-        return jsonify({"error": "RAG feature not available"}), 503
-    
-    query = request.args.get("q", "")
-    if not query:
-        return jsonify({"error": "Query parameter 'q' required"}), 400
-    
-    try:
-        limit = int(request.args.get("limit", "5"))
-        threshold = float(request.args.get("threshold", "0.0"))
-        
-        results = rag.semantic_search(query, limit=limit, threshold=threshold)
-        return jsonify({
-            "query": query,
-            "results": results
-        }), 200
-    except Exception as e:
-        logger.error(f"RAG search error: {e}")
-        return jsonify({"error": str(e)}), 500
+# moved to routes/document_routes.py: upload_document, list_documents, get_document,
+# search_documents, delete_document, document_stats, rag_index, rag_search
 
 
 # ===== HA LOGS PROXY =====
 
-@app.route('/api/ha_logs')
-def api_ha_logs():
-    """Proxy GET /api/error_log from Home Assistant — used by the bubble for log context."""
-    level_filter = request.args.get('level', 'warning')
-    limit = min(int(request.args.get('limit', 100)), 500)
-    keyword = request.args.get('keyword', '').strip().lower()
-
-    try:
-        resp = requests.get(
-            f"{HA_URL}/api/error_log",
-            headers=get_ha_headers(),
-            timeout=15
-        )
-        if not resp.ok:
-            return jsonify({"error": f"HA returned {resp.status_code}"}), resp.status_code
-
-        lines = [l for l in (resp.text or "").splitlines() if l.strip()]
-
-        level_map = {
-            "error":   ["ERROR", "CRITICAL"],
-            "warning": ["ERROR", "CRITICAL", "WARNING"],
-            "info":    ["ERROR", "CRITICAL", "WARNING", "INFO"],
-            "all":     [],
-        }
-        allowed = level_map.get(level_filter, [])
-        if allowed:
-            lines = [l for l in lines if any(lv in l for lv in allowed)]
-        if keyword:
-            lines = [l for l in lines if keyword in l.lower()]
-
-        lines = lines[-limit:]
-        return jsonify({"logs": lines, "total": len(lines)})
-    except Exception as e:
-        logger.error(f"ha_logs proxy error: {e}")
-        return jsonify({"error": str(e)}), 500
+# moved to routes/system_routes.py: api_ha_logs
 
 
 
@@ -8174,89 +7300,7 @@ def api_ha_logs():
 # so navigation is instant regardless of which AI provider is selected.
 # Security: path traversal blocked (no "..", no absolute paths) — same as tools.py.
 
-@app.route('/api/files/list', methods=['GET'])
-def api_files_list():
-    """List files and directories in the HA config dir (or a subdirectory).
-
-    Query param: path (optional) — relative subpath, e.g. 'packages'
-    Returns: {path, entries: [{name, type, path, size?}], count}
-    """
-    subpath = request.args.get('path', '').strip()
-    if '..' in subpath or (subpath and subpath.startswith('/')):
-        return jsonify({"error": "Invalid path."}), 400
-    dirpath = os.path.join(HA_CONFIG_DIR, subpath) if subpath else HA_CONFIG_DIR
-    if not os.path.isdir(dirpath):
-        return jsonify({"error": f"Directory '{subpath}' not found."}), 404
-    try:
-        entries = []
-        for entry in sorted(os.listdir(dirpath)):
-            if entry.startswith('.'):
-                continue
-            full = os.path.join(dirpath, entry)
-            rel = os.path.join(subpath, entry).replace('\\', '/') if subpath else entry
-            if os.path.isdir(full):
-                entries.append({"name": entry, "type": "directory", "path": rel})
-            else:
-                try:
-                    size = os.path.getsize(full)
-                except OSError:
-                    size = 0
-                entries.append({"name": entry, "type": "file", "path": rel, "size": size})
-        entries = entries[:100]
-        return jsonify({"path": subpath or "/", "entries": entries, "count": len(entries)})
-    except Exception as e:
-        logger.error(f"api_files_list error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/files/read', methods=['GET'])
-def api_files_read():
-    """Read a file from the HA config dir (chunked for large files).
-
-    Query params:
-      file   — relative path, e.g. 'packages/lights.yaml'
-      offset — char offset to start reading from (default 0)
-      chunk  — max chars to return per request (default 0 = whole file)
-    Returns: {filename, content, size, offset, chunk_size, has_more}
-    """
-    CHUNK_SIZE = 40000  # chars per page (0 = no chunking)
-    filename = request.args.get('file', '').strip()
-    if not filename:
-        return jsonify({"error": "file parameter is required."}), 400
-    if '..' in filename or filename.startswith('/'):
-        return jsonify({"error": "Invalid filename. Use relative paths only."}), 400
-    filepath = os.path.join(HA_CONFIG_DIR, filename)
-    if not os.path.isfile(filepath):
-        return jsonify({"error": f"File '{filename}' not found."}), 404
-    try:
-        with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
-            full = f.read()
-        total = len(full)
-        try:
-            offset = max(0, int(request.args.get('offset', 0)))
-        except (ValueError, TypeError):
-            offset = 0
-        try:
-            chunk = max(0, int(request.args.get('chunk', 0)))
-        except (ValueError, TypeError):
-            chunk = 0
-        if chunk > 0:
-            content = full[offset:offset + chunk]
-            has_more = (offset + chunk) < total
-        else:
-            content = full[offset:]
-            has_more = False
-        return jsonify({
-            "filename": filename,
-            "content": content,
-            "size": total,
-            "offset": offset,
-            "chunk_size": len(content),
-            "has_more": has_more,
-        })
-    except Exception as e:
-        logger.error(f"api_files_read error: {e}")
-        return jsonify({"error": str(e)}), 500
+# moved to routes/file_routes.py: api_files_list, api_files_read
 
 
 # ===== DASHBOARD API PROXY =====
@@ -8405,61 +7449,14 @@ def list_html_dashboards():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/rag/stats", methods=["GET"])
-def rag_stats():
-    """Get RAG indexing statistics."""
-    if not RAG_AVAILABLE:
-        return jsonify({"error": "RAG feature not available"}), 503
-    
-    try:
-        stats = rag.get_rag_stats()
-        return jsonify(stats), 200
-    except Exception as e:
-        logger.error(f"RAG stats error: {e}")
-        return jsonify({"error": str(e)}), 500
+# moved to routes/document_routes.py: rag_stats
 
 
 # ---------------------------------------------------------------------------
 # Usage / cost tracking endpoints (inspired by OpenClaw)
 # ---------------------------------------------------------------------------
 
-@app.route("/api/usage_stats", methods=["GET"])
-def usage_stats():
-    """Return usage statistics (daily, by model, by provider).
-
-    Query params:
-        days (int): number of days to include (default 30)
-    """
-    try:
-        from usage_tracker import get_tracker
-        days = request.args.get("days", 30, type=int)
-        return jsonify(get_tracker().get_summary(days)), 200
-    except Exception as e:
-        logger.error(f"Usage stats error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/usage_stats/today", methods=["GET"])
-def usage_stats_today():
-    """Return today's usage totals."""
-    try:
-        from usage_tracker import get_tracker
-        return jsonify(get_tracker().get_today()), 200
-    except Exception as e:
-        logger.error(f"Usage stats today error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/usage_stats/reset", methods=["POST"])
-def usage_stats_reset():
-    """Clear all accumulated usage data."""
-    try:
-        from usage_tracker import get_tracker
-        get_tracker().reset()
-        return jsonify({"status": "ok"}), 200
-    except Exception as e:
-        logger.error(f"Usage stats reset error: {e}")
-        return jsonify({"error": str(e)}), 500
+# moved to routes/usage_routes.py: usage_stats, usage_stats_today, usage_stats_reset
 
 
 # ---------------------------------------------------------------------------
@@ -9039,26 +8036,7 @@ def api_settings_get():
     return jsonify({"success": True, "settings": current, "sections": sections})
 
 
-@app.route('/api/addon/restart', methods=['POST'])
-def api_addon_restart():
-    """Restart this add-on via the HA Supervisor API."""
-    token = SUPERVISOR_TOKEN
-    if not token:
-        return jsonify({"success": False, "error": "No Supervisor token available"}), 500
-    try:
-        import requests as req_lib
-        resp = req_lib.post(
-            "http://supervisor/addons/self/restart",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            return jsonify({"success": True})
-        else:
-            return jsonify({"success": False, "error": f"Supervisor returned {resp.status_code}"}), 502
-    except Exception as e:
-        logger.error(f"Addon restart failed: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+# moved to routes/system_routes.py: api_addon_restart
 
 
 @app.route('/api/settings', methods=['POST'])
