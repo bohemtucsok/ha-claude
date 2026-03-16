@@ -7170,7 +7170,11 @@ def api_settings_get():
         else:
             gvar = _SETTINGS_GLOBAL_MAP.get(key)
             if gvar and gvar in _g:
-                current[key] = _g[gvar]
+                val = _g[gvar]
+                # set is not JSON-serializable — convert back to comma-separated string
+                if isinstance(val, set):
+                    val = ",".join(str(i) for i in sorted(val))
+                current[key] = val
             else:
                 current[key] = default
 
