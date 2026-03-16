@@ -1526,6 +1526,11 @@ def get_chat_ui():
         #chatgptWebBanner button:hover {{ background:#d97706; }}
         #chatgptWebModal {{ display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center; }}
         #chatgptWebModal.open {{ display:flex; }}
+        #geminiWebModal {{ display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center; }}
+        #geminiWebModal.open {{ display:flex; }}
+        .gemini-web-modal-box {{ background:#fff; border-radius:16px; padding:28px 32px; max-width:500px; width:92%; box-shadow:0 8px 32px rgba(0,0,0,0.25); font-size:14px; color:#333; }}
+        .gemini-web-modal-box h3 {{ margin:0 0 16px; font-size:18px; color:#222; }}
+        .modal-step {{ background:#f7f7f7; border-radius:10px; padding:14px 16px; margin-bottom:14px; }}
         .chatgptweb-modal-box {{ background:#fff; border-radius:16px; padding:28px 32px; max-width:520px; width:92%; box-shadow:0 8px 32px rgba(0,0,0,0.25); font-size:14px; color:#333; }}
         .chatgptweb-modal-box h3 {{ margin:0 0 16px; font-size:18px; color:#222; }}
         .chatgptweb-modal-step {{ background:#f7f7f7; border-radius:10px; padding:14px 16px; margin-bottom:14px; }}
@@ -2832,8 +2837,8 @@ def get_chat_ui():
     </div>
 
     <!-- Gemini Web modal -->
-    <div id="geminiWebModal" class="modal-overlay">
-        <div class="modal-box" style="max-width:480px;">
+    <div id="geminiWebModal">
+        <div class="gemini-web-modal-box">
             <h3>&#128273; Gemini Web &mdash; Connessione</h3>
             <div class="modal-step">
                 <strong>Step 1 &mdash; Apri DevTools su gemini.google.com</strong>
