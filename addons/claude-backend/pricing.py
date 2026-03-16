@@ -171,7 +171,8 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
     "Mistral-7B-Instruct-v0.3": {"input": 0.14, "output": 0.14},
 }
 
-FREE_PROVIDERS = {"nvidia", "ollama", "github_copilot", "github", "claude_web", "chatgpt_web"}
+FREE_PROVIDERS = {"nvidia", "ollama", "github_copilot", "github", "claude_web", "chatgpt_web",
+                  "groq"}  # Groq free tier — no billing for most models
 
 CURRENCY_RATES = {"USD": 1.0, "EUR": 0.92}
 
