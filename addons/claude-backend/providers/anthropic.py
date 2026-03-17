@@ -271,15 +271,23 @@ class AnthropicProvider(EnhancedProvider):
                 # Already Anthropic format (from ToolRegistry AnthropicAdapter)
                 anthropic_tools.append(t)
 
-        kwargs: Dict[str, Any] = {"model": model, "messages": conv_msgs, "max_tokens": 8192}
+        _is_html_intent = bool(
+            isinstance(intent_info, dict)
+            and str(intent_info.get("intent", "")).lower() == "create_html_dashboard"
+        )
+        # HTML dashboards can be long; raise output ceiling for this intent.
+        _max_tokens = 16384 if _is_html_intent else 8192
+        kwargs: Dict[str, Any] = {"model": model, "messages": conv_msgs, "max_tokens": _max_tokens}
         if system:
             kwargs["system"] = system
         if anthropic_tools:
             kwargs["tools"] = anthropic_tools
 
         with client.messages.stream(**kwargs) as stream:
+            text_chunks: List[str] = []
             for text in stream.text_stream:
                 if text:
+                    text_chunks.append(text)
                     yield {"type": "text", "text": text}
             final = stream.get_final_message()
 
@@ -288,6 +296,17 @@ class AnthropicProvider(EnhancedProvider):
             "type": "done",
             "finish_reason": getattr(final, "stop_reason", None) or "stop",
         }
+        try:
+            _u = getattr(final, "usage", None)
+            logger.info(
+                "anthropic: stream finished reason=%s (input=%s, output=%s, max_tokens=%s)",
+                done_event["finish_reason"],
+                getattr(_u, "input_tokens", 0) or 0,
+                getattr(_u, "output_tokens", 0) or 0,
+                _max_tokens,
+            )
+        except Exception:
+            pass
         if getattr(final, "usage", None):
             done_event["usage"] = {
                 "input_tokens": final.usage.input_tokens,
@@ -306,7 +325,19 @@ class AnthropicProvider(EnhancedProvider):
                     "arguments": _json.dumps(block.input),
                 })
         if tool_calls:
-            done_event["tool_calls"] = tool_calls
+            done_event["tool_calls"] = self._normalize_tool_calls(
+                tool_calls, tools=tool_schemas
+            )
+        elif text_chunks and tool_schemas:
+            # Some models/providers may emit pseudo tool-calls as text
+            # instead of tool_use blocks. Recover when possible.
+            recovered = self._recover_tool_calls_from_text(
+                "".join(text_chunks), tools=tool_schemas
+            )
+            if recovered:
+                logger.info("anthropic: recovered %s tool_call(s) from text", len(recovered))
+                done_event["tool_calls"] = recovered
+                done_event["finish_reason"] = "tool_calls"
 
         yield done_event
 

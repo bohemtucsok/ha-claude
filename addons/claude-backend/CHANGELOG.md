@@ -2,6 +2,37 @@
 
 > **⚠️ Dopo l'aggiornamento, ricostruire l'add-on** (Impostazioni → Add-on → Amira → Ricostruisci) per applicare le nuove dipendenze.
 
+## 4.6.19 — Tool-calling unificato, dashboard HTML più affidabili, Gemini Web stabilizzato
+
+### Tool-calling (stile OpenClaw) su provider API-key
+- Normalizzazione centralizzata dei `tool_calls` in `providers/enhanced.py` (ID, nome tool, arguments JSON)
+- Riparazione robusta degli arguments malformati (trailing comma, control chars, JSON sporco)
+- Recovery automatico di tool-call da output testuale quando il modello chiude con `malformed_function_call`
+- Stessa logica applicata anche a provider con path dedicato:
+  - `providers/google.py`
+  - `providers/anthropic.py`
+  - `providers/ollama.py`
+
+### HTML dashboard: robustezza no-tool providers
+- Auto-save HTML da risposta testuale ora usa `html_base64` per payload lunghi su provider no-tool (`gemini_web`, `openai_codex`, ecc.), evitando blocchi `RAW_HTML_REQUIRED` su inline HTML lungo
+- Parsing arguments tool più resiliente in `api.py` prima dell’esecuzione
+- Retry one-shot su intent `create_html_dashboard` quando arriva `malformed_function_call` senza call eseguibili
+
+### Gemini Web (UNSTABLE) — miglioramenti pratici
+- Fix crash SDK: `_base_timeout` non definito
+- Supporto modello `gemini-3.1-pro` nel catalogo Gemini Web
+- Timeout hard su SDK stream/non-stream per evitare stalli infiniti
+- Retry alias dopo failure `3.1-pro` e gestione più chiara degli errori gateway
+- Per intent HTML, preferenza automatica modello più stabile (`gemini-3.0-flash`) su richieste lunghe
+- In caso di instabilità web (`timeout/stalled/502`), fallback automatico al provider Google API key quando configurato
+
+### UX dashboard
+- Titoli sidebar puliti: rimossi duplicati tipo `Amira — Amira - ...`
+- Rimosso suffisso forzato `Dashboard` nel titolo finale
+- Prefisso agente applicato una sola volta
+
+---
+
 ## 4.6.18 — Sicurezza Telegram: whitelist utenti autorizzati
 
 ### Nuova funzionalità: whitelist Telegram

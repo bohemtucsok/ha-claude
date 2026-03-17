@@ -72,6 +72,12 @@ class GoogleProvider(EnhancedProvider):
         """Actual Google Gemini API call via httpx REST."""
         import json
         import httpx
+        try:
+            import api as _api  # type: ignore
+            _base_timeout = int(getattr(_api, "TIMEOUT", 30) or 30)
+        except Exception:
+            _base_timeout = 30
+        _base_timeout = max(30, min(300, _base_timeout))
         model = (self.model or "gemini-2.0-flash").replace("google/", "")
         # Guard: models that only support the Interactions API cannot use
         # the standard streamGenerateContent endpoint.
@@ -95,17 +101,54 @@ class GoogleProvider(EnhancedProvider):
                     contents.append({"role": g_role, "parts": [{"text": text}]})
         if not contents:
             return
+        _is_html_intent = bool(
+            isinstance(intent_info, dict)
+            and str(intent_info.get("intent", "")).lower() == "create_html_dashboard"
+        )
+        # HTML dashboards are often long and risk getting cut mid-output.
+        # Allow larger output budget for this intent.
+        _max_output_tokens = 16384 if _is_html_intent else 8192
         body: Dict[str, Any] = {
             "contents": contents,
-            "generationConfig": {"maxOutputTokens": 8192},
+            "generationConfig": {"maxOutputTokens": _max_output_tokens},
         }
+        # Enable native Gemini function calling using the existing OpenAI-format
+        # tool schemas injected by api.py (intent_info["tool_schemas"]).
+        _tool_schemas = self._get_intent_tools(intent_info) or []
+        if _tool_schemas:
+            _decls: List[Dict[str, Any]] = []
+            for _t in _tool_schemas:
+                _fn = (_t or {}).get("function") if isinstance(_t, dict) else None
+                if not isinstance(_fn, dict):
+                    continue
+                _name = str(_fn.get("name") or "").strip()
+                if not _name:
+                    continue
+                _decl = {
+                    "name": _name,
+                    "description": str(_fn.get("description") or ""),
+                    "parameters": _fn.get("parameters") or {"type": "object", "properties": {}},
+                }
+                _decls.append(_decl)
+            if _decls:
+                body["tools"] = [{"functionDeclarations": _decls}]
+                # Keep AUTO for stability: forcing ANY on large HTML payloads can
+                # trigger malformed_function_call with some Gemini versions.
+                _fc_cfg: Dict[str, Any] = {"mode": "AUTO"}
+                body["toolConfig"] = {"functionCallingConfig": _fc_cfg}
+                logger.info("google: function-calling enabled (%s declarations)", len(_decls))
         if system.strip():
             body["systemInstruction"] = {"parts": [{"text": system.strip()}]}
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
             f"{model}:streamGenerateContent?key={self.api_key}&alt=sse"
         )
-        _timeout = httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=5.0)
+        _timeout = httpx.Timeout(
+            connect=float(min(20, _base_timeout)),
+            read=float(max(180, _base_timeout * 6)),
+            write=float(min(30, max(15, _base_timeout // 2))),
+            pool=10.0,
+        )
         with httpx.stream("POST", url, json=body, timeout=_timeout) as response:
             if response.status_code != 200:
                 error_text = response.read().decode("utf-8", errors="ignore")
@@ -118,6 +161,12 @@ class GoogleProvider(EnhancedProvider):
                     raise RuntimeError(f"Google: quota esaurita. Controlla il piano e la fatturazione su ai.google.dev. (HTTP 429)")
                 raise RuntimeError(f"Google HTTP {response.status_code}: {error_text[:300]}")
             captured_usage = None
+            final_finish_reason = "stop"
+            saw_text = False
+            text_chunks: List[str] = []
+            # Gemini may emit functionCall parts instead of (or alongside) text.
+            accumulated_tool_calls: List[Dict[str, Any]] = []
+            seen_tool_sigs = set()
             for line in response.iter_lines():
                 if not line.startswith("data:"):
                     continue
@@ -140,22 +189,88 @@ class GoogleProvider(EnhancedProvider):
                         for part in parts:
                             text = part.get("text", "")
                             if text:
+                                saw_text = True
+                                text_chunks.append(text)
                                 yield {"type": "text", "text": text}
+                            fc = part.get("functionCall") if isinstance(part, dict) else None
+                            if isinstance(fc, dict) and fc.get("name"):
+                                _name = str(fc.get("name", "")).strip()
+                                _args_obj = fc.get("args")
+                                if isinstance(_args_obj, str):
+                                    _args_json = _args_obj
+                                else:
+                                    _args_json = json.dumps(_args_obj or {}, ensure_ascii=False)
+                                _sig = f"{_name}:{_args_json}"
+                                if _sig not in seen_tool_sigs:
+                                    seen_tool_sigs.add(_sig)
+                                    accumulated_tool_calls.append({
+                                        "id": f"call_{_name}_{len(accumulated_tool_calls)}",
+                                        "name": _name,
+                                        "arguments": _args_json,
+                                    })
                         finish = candidates[0].get("finishReason", "")
                         if finish and finish not in ("", "STOP_REASON_UNSPECIFIED"):
-                            done_evt: dict = {"type": "done", "finish_reason": finish.lower()}
-                            if captured_usage:
-                                done_evt["usage"] = captured_usage
-                            yield done_evt
+                            final_finish_reason = str(finish).lower()
                 except json.JSONDecodeError:
                     continue
-        done_evt_final: dict = {"type": "done", "finish_reason": "stop"}
+        try:
+            logger.info(
+                "google: stream finished with reason=%s (prompt=%s, candidates=%s, maxOutputTokens=%s, tool_calls=%s)",
+                final_finish_reason,
+                (captured_usage or {}).get("input_tokens", 0),
+                (captured_usage or {}).get("output_tokens", 0),
+                _max_output_tokens,
+                len(accumulated_tool_calls),
+            )
+        except Exception:
+            pass
+        done_evt_final: dict = {"type": "done", "finish_reason": final_finish_reason or "stop"}
         if captured_usage:
             done_evt_final["usage"] = captured_usage
+        if accumulated_tool_calls:
+            done_evt_final["tool_calls"] = self._normalize_tool_calls(
+                accumulated_tool_calls, tools=_tool_schemas
+            )
+        if (
+            not done_evt_final.get("tool_calls")
+            and _tool_schemas
+            and str(final_finish_reason or "").lower() in {"malformed_function_call", "function_call"}
+            and text_chunks
+        ):
+            recovered = self._recover_tool_calls_from_text(
+                "".join(text_chunks), tools=_tool_schemas
+            )
+            if recovered:
+                logger.info("google: recovered %s tool_call(s) from malformed response text", len(recovered))
+                done_evt_final["tool_calls"] = recovered
+                done_evt_final["finish_reason"] = "tool_calls"
+        if (
+            final_finish_reason == "malformed_function_call"
+            and not accumulated_tool_calls
+            and not saw_text
+        ):
+            # Avoid silent failure in chat UI when Gemini emits no text and no
+            # executable tool call.
+            logger.warning(
+                "google: malformed_function_call with empty payload "
+                "(no text, no tool_calls). Returning explicit error event."
+            )
+            yield {
+                "type": "error",
+                "message": (
+                    "Google/Gemini returned malformed_function_call (nessun tool valido). "
+                    "Riprova oppure riduci il prompt."
+                ),
+            }
+            return
         yield done_evt_final
 
     def get_available_models(self) -> List[str]:
         return [
+            "gemini-3-pro-preview",
+            "gemini-3-flash-preview",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
             "gemini-2.0-flash",
             "gemini-2.0-pro",
             "gemini-1.5-pro",

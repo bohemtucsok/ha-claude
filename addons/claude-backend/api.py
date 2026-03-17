@@ -743,6 +743,8 @@ MODEL_NAME_MAPPING = {
     "OpenAI: o3": "o3",
     "OpenAI: o3-mini": "o3-mini",
     "OpenAI: o1": "o1",
+    "Google: Gemini 3 Pro (Preview)": "gemini-3-pro-preview",
+    "Google: Gemini 3 Flash (Preview)": "gemini-3-flash-preview",
     "Google: Gemini 2.0 Flash": "gemini-2.0-flash",
     "Google: Gemini 2.5 Pro": "gemini-2.5-pro",
     "Google: Gemini 2.5 Flash": "gemini-2.5-flash",
@@ -925,6 +927,10 @@ MODEL_NAME_MAPPING = {
     "ChatGPT Web: o3": "o3",
     "ChatGPT Web: o3-mini": "o3-mini",
     "ChatGPT Web: o4-mini": "o4-mini",
+    "Gemini Web: gemini-3.1-pro": "gemini-3.1-pro",
+    "Gemini Web: gemini-3.0-pro": "gemini-3.0-pro",
+    "Gemini Web: gemini-3.0-flash": "gemini-3.0-flash",
+    "Gemini Web: gemini-3.0-flash-thinking": "gemini-3.0-flash-thinking",
 }
 
 # Per-provider reverse mapping: {provider: {technical_name: display_name}}
@@ -951,6 +957,7 @@ _PREFIX_TO_PROVIDER = {
     "GitHub Copilot:": "github_copilot",
     "OpenAI Codex:": "openai_codex",
     "ChatGPT Web:": "chatgpt_web",
+    "Gemini Web:": "gemini_web",
 }
 for _display_name, _tech_name in MODEL_NAME_MAPPING.items():
     for _prefix, _prov in _PREFIX_TO_PROVIDER.items():
@@ -1244,7 +1251,7 @@ def initialize_ai_client():
         "groq", "mistral", "openrouter", "deepseek", "minimax",
         "aihubmix", "siliconflow", "volcengine", "dashscope",
         "moonshot", "zhipu", "github_copilot", "openai_codex",
-        "claude_web", "chatgpt_web",
+        "claude_web", "chatgpt_web", "gemini_web",
     ):
         # Questi provider usano providers/manager.py — non serve un ai_client dedicato
         if api_key:
@@ -3271,12 +3278,14 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
         _tool_cache: dict = {}
         _tool_call_history: set = set()  # tracks all (name, args_json) to detect loops
         _duplicate_count = 0             # how many consecutive duplicate rounds
+        _deferred_done_event = None      # postpone done for HTML autosave flows
         _skip_tool_extraction = False    # after dedup, skip ToolSimulator next round
         _last_write_result = None        # last WRITE tool result (for fallback display)
         _preview_round_done = False      # True after preview_automation_change executes
         _html_draft_pending_name = ""    # create_html_dashboard draft name pending finalize
         _html_dashboard_saved_this_turn = False
         _write_tools_executed: list = []  # names of write tools actually called this turn
+        _html_force_execute_retry_used = False
 
         def _pending_call_signature(_tc: dict) -> str:
             """Build a stable signature for loop detection (name + canonical args)."""
@@ -3310,6 +3319,9 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
         # Helper: is this tool call read-only? (used for UI suppression + write detection)
         def _is_read_only_call(tc):
             name = tc.get("name", "")
+            if name == "create_html_dashboard":
+                # HTML dashboard creation writes files + Lovelace config.
+                return False
             if name in _read_only_tools:
                 return True
             # manage_statistics(action=validate) is read-only
@@ -3416,13 +3428,52 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
             for event in provider_gen:
                 if event.get("type") == "done":
                     _pending_tool_calls = event.get("tool_calls") or []
+                    _finish_reason_done = str(event.get("finish_reason", "") or "").lower()
                     if not _pending_tool_calls:
                         full_buf = "".join(_text_buffer)
+                        # Native-tool providers can occasionally return malformed_function_call
+                        # with no executable calls. Retry once with a strict execution hint.
+                        if (
+                            _is_html_dash
+                            and not _is_no_tool_provider
+                            and _finish_reason_done == "malformed_function_call"
+                            and not _html_force_execute_retry_used
+                        ):
+                            _html_force_execute_retry_used = True
+                            _cur_prompt = ((intent_info or {}).get("prompt") or "").strip()
+                            _retry_rule = (
+                                "HTML DASHBOARD EXECUTION RULE:\n"
+                                "- Return exactly one valid tool call to create_html_dashboard.\n"
+                                "- Do NOT output plain HTML in chat.\n"
+                                "- Do NOT ask confirmation.\n"
+                                "- Arguments must be strict JSON (escaped), with name/title/entities/html."
+                            )
+                            if intent_info is not None:
+                                intent_info["prompt"] = (_cur_prompt + "\n\n" + _retry_rule).strip() if _cur_prompt else _retry_rule
+                            logger.warning("HTML dashboard retry: malformed_function_call with no tool_calls, forcing strict tool call")
+                            _text_buffer = []
+                            _streamed_text_parts = []
+                            break
 
                         # ── Tool Simulator: extract <tool_call> blocks from buffered text ──
-                        if _is_no_tool_provider and full_buf and not _is_html_dash and not _skip_tool_extraction:
+                        if _is_no_tool_provider and full_buf and not _skip_tool_extraction:
                             from providers.tool_simulator import extract_tool_calls, clean_response_text
                             _sim_calls = extract_tool_calls(full_buf)
+                            if not _sim_calls:
+                                # Gemini/Web models often escape tool XML as markdown text:
+                                # \<tool\_call\> ... create\_html\_dashboard ...
+                                # Normalize common escapes and try extraction again.
+                                _sim_norm = (
+                                    full_buf
+                                    .replace("\\<", "<")
+                                    .replace("\\>", ">")
+                                    .replace("\\_", "_")
+                                    .replace("\\#", "#")
+                                )
+                                if _sim_norm != full_buf:
+                                    _sim_calls = extract_tool_calls(_sim_norm)
+                                    if _sim_calls:
+                                        full_buf = _sim_norm
                             if _sim_calls:
                                 # ── Filter against intent tool set ──
                                 # No-tool providers may hallucinate tool names
@@ -3463,11 +3514,23 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                                 for i, tc in enumerate(_sim_calls):
                                     _seen_names[tc.get("name", "")] = i
                                 if len(_seen_names) < len(_sim_calls):
-                                    _kept = [_sim_calls[i] for i in sorted(_seen_names.values())]
+                                    # Special case: create_html_dashboard often emits multiple
+                                    # chunked calls in one response (draft=true parts + finalize).
+                                    # Keep ALL of them in order; collapse only other duplicated tools.
+                                    _last_non_dash_idx: dict = {}
+                                    for i, tc in enumerate(_sim_calls):
+                                        _n = tc.get("name", "")
+                                        if _n != "create_html_dashboard":
+                                            _last_non_dash_idx[_n] = i
+                                    _kept = []
+                                    for i, tc in enumerate(_sim_calls):
+                                        _n = tc.get("name", "")
+                                        if _n == "create_html_dashboard" or _last_non_dash_idx.get(_n) == i:
+                                            _kept.append(tc)
                                     _removed_count = len(_sim_calls) - len(_kept)
                                     logger.info(
                                         f"ToolSimulator: collapsed {_removed_count} extra call(s) "
-                                        f"to same tool name — keeping last per name"
+                                        f"to same tool name — keeping dashboard chunks + last non-dashboard per name"
                                     )
                                     _sim_calls = _kept
 
@@ -3480,21 +3543,62 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                                     _is_read_only_call(tc)
                                     for tc in _sim_calls
                                 )
-                                if not _all_read_only:
+                                # For HTML dashboard flow, avoid echoing model prose/partial HTML.
+                                # We only show tool execution statuses and final save confirmation.
+                                if not _all_read_only and not _is_html_dash:
                                     cleaned = clean_response_text(full_buf)
                                     if cleaned:
                                         yield {"type": "token", "content": cleaned}
                                 _text_buffer = []
                                 # Do NOT yield done yet — let the tool loop continue
                                 break
-                            # No tool_calls found → plain text response, flush as-is
-                            # Strip any [TOOL RESULT] blocks the model may echo
-                            if full_buf:
-                                from providers.tool_simulator import clean_display_text
-                                _display = clean_display_text(full_buf)
-                                if _display:
+                        # No tool_calls found → plain text response.
+                        # For HTML dashboard intent, suppress raw HTML walls and
+                        # show a neutral status while auto-save runs later.
+                        if full_buf:
+                            from providers.tool_simulator import clean_display_text
+                            _display = clean_display_text(full_buf)
+                            if _is_html_dash:
+                                import re as _re_html_nt
+                                _has_html_nt = bool(_re_html_nt.search(
+                                    r'(?:<!DOCTYPE\s+html|<html[\s>])',
+                                    full_buf, _re_html_nt.IGNORECASE
+                                ))
+                                if _has_html_nt:
+                                    yield {"type": "status", "message": "💾 HTML ricevuto, provo a salvarlo..."}
+                                elif _display:
                                     yield {"type": "token", "content": _display}
+                                # Some models ask "Procedo?" instead of calling the tool.
+                                # Retry once with a strict instruction to execute immediately.
+                                if (
+                                    not _pending_tool_calls
+                                    and not _html_force_execute_retry_used
+                                    and _display
+                                    and any(k in _display.lower() for k in ("procedo", "proceed", "confermi", "confirm"))
+                                ):
+                                    _html_force_execute_retry_used = True
+                                    _cur_prompt = ((intent_info or {}).get("prompt") or "").strip()
+                                    _retry_rule = (
+                                        "HTML DASHBOARD EXECUTION RULE:\n"
+                                        "- Do NOT ask for confirmation.\n"
+                                        "- Call create_html_dashboard immediately now.\n"
+                                        "- Return only tool_call blocks (chunked draft if needed)."
+                                    )
+                                    if intent_info is not None:
+                                        intent_info["prompt"] = (_cur_prompt + "\n\n" + _retry_rule).strip() if _cur_prompt else _retry_rule
+                                    logger.info("HTML dashboard retry: model asked confirmation, forcing immediate tool execution")
+                                    _text_buffer = []
+                                    break
+                            elif _display:
+                                yield {"type": "token", "content": _display}
                             _text_buffer = []
+                        elif _is_html_dash and _finish_reason_done == "malformed_function_call":
+                            _msg_malformed = (
+                                "⚠️ Il modello ha restituito una tool-call malformata e non eseguibile. "
+                                "Nessuna dashboard è stata creata."
+                            )
+                            yield {"type": "token", "content": _msg_malformed}
+                            _streamed_text_parts.append(_msg_malformed)
 
                         # No-tool provider with _skip_tool_extraction: flush text
                         # as plain response, stripping any <tool_call> XML the model
@@ -3559,8 +3663,8 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                                 full_html_buf, _re_html.IGNORECASE
                             ))
                             if _is_no_tool_provider and _has_html:
-                                # Emit a short confirmation — the full HTML will be auto-saved
-                                yield {"type": "token", "content": "✨ Dashboard saved!"}
+                                # Do not claim success before the actual save result.
+                                yield {"type": "status", "message": "💾 HTML ricevuto, provo a salvarlo..."}
                             else:
                                 # No HTML found → clarifying question or tool-capable provider;
                                 # flush the buffer normally so the user sees the response.
@@ -3658,7 +3762,10 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                                     _streamed_text_parts.append(_warning_suffix)
                             except Exception as _val_err:
                                 logger.warning(f"Entity validation in stream failed: {_val_err}")
-                            yield event
+                            if intent_name == "create_html_dashboard":
+                                _deferred_done_event = event
+                            else:
+                                yield event
                     # If tool_calls present: do NOT yield done — execute tools and loop
                     break  # exit inner for-loop regardless
                 elif event.get("type") == "error":
@@ -4036,10 +4143,22 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
             # Execute each tool and append its result
             _round_has_rich_diff = False
             _any_successful_write_this_round = False
+            _stop_after_html_dashboard_success = False
+            _html_dashboard_success_message = ""
+            _stop_after_html_dashboard_error = False
+            _html_dashboard_error_message = ""
             for tc in _pending_tool_calls:
                 fn_name = tc.get("name", "")
                 try:
-                    tc_args = json.loads(tc.get("arguments", "{}") or "{}")
+                    _raw_args = tc.get("arguments", "{}") or "{}"
+                    if isinstance(_raw_args, dict):
+                        tc_args = _raw_args
+                    else:
+                        try:
+                            tc_args = json.loads(_raw_args)
+                        except Exception:
+                            from providers.enhanced import EnhancedProvider
+                            tc_args = json.loads(EnhancedProvider._repair_json(str(_raw_args)))
                 except Exception:
                     tc_args = {}
                 # Guard: json.loads may return None/list/int from malformed
@@ -4133,6 +4252,26 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                         elif _status == "success":
                             _html_dashboard_saved_this_turn = True
                             _html_draft_pending_name = ""
+                            _stop_after_html_dashboard_success = True
+                            _html_dashboard_success_message = (
+                                _result_obj.get("message")
+                                or f"✅ Dashboard HTML '{_result_obj.get('filename', _dash_name or 'dashboard')}' salvata."
+                            )
+                        elif bool(_result_obj.get("error")):
+                            # If finalize call failed, clear pending draft name to avoid
+                            # redundant auto-finalize attempts with empty payload.
+                            if not bool(tc_args.get("draft", False)):
+                                _html_draft_pending_name = ""
+                            _err_text = str(_result_obj.get("error", "") or "")
+                            if "INLINE_HTML_BLOCKED" in _err_text:
+                                _stop_after_html_dashboard_error = True
+                                _html_dashboard_error_message = (
+                                    "❌ Dashboard non creata: il provider continua a inviare HTML inline "
+                                    "non conforme al formato file-safe richiesto."
+                                )
+                                # Break current tool-call batch immediately to avoid looping
+                                # over the remaining duplicate create_html_dashboard calls.
+                                break
 
                 # Extract diff + modified filename for UI rendering (strip before feeding to model)
                 try:
@@ -4170,6 +4309,23 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                     "name": fn_name,
                     "content": result,
                 })
+
+            # Stop immediately after successful HTML dashboard save:
+            # avoids pointless extra rounds where no-tool models keep re-emitting
+            # the same tool_call and eventually fail on parser/network fallbacks.
+            if _stop_after_html_dashboard_success:
+                if _html_dashboard_success_message:
+                    yield {"type": "token", "content": _html_dashboard_success_message}
+                    # Persist final dashboard confirmation in conversation history.
+                    # Without this, the user sees it live in stream but loses it
+                    # after page reload because no final assistant text is saved.
+                    _streamed_text_parts = [_html_dashboard_success_message]
+                break
+            if _stop_after_html_dashboard_error:
+                if _html_dashboard_error_message:
+                    yield {"type": "token", "content": _html_dashboard_error_message}
+                    _streamed_text_parts = [_html_dashboard_error_message]
+                break
 
             # ── After executing a WRITE tool, disable ToolSimulator extraction
             # ── for the next round so the model MUST produce text (not another
@@ -4278,13 +4434,62 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                 if intent_name == "create_html_dashboard":
                     import re as _re
                     html_block: Optional[str] = None
+                    _fenced_blocks = []
+                    try:
+                        _fenced_blocks = [
+                            (m.group(1) or "").strip()
+                            for m in _re.finditer(
+                                r'```(?:html|htm|xml|javascript|js|css)?\s*\n([\s\S]*?)```',
+                                assembled,
+                                _re.IGNORECASE,
+                            )
+                        ]
+                    except Exception:
+                        _fenced_blocks = []
+
+                    def _score_html_candidate(_s: str) -> int:
+                        _l = (_s or "").lower()
+                        _score = 0
+                        if "<!doctype html" in _l or "<html" in _l:
+                            _score += 3
+                        if "</html>" in _l:
+                            _score += 2
+                        if "<head" in _l or "<body" in _l:
+                            _score += 1
+                        if "<script" in _l or "createapp(" in _l:
+                            _score += 1
+                        if "/api/websocket" in _l or "/api/states" in _l:
+                            _score += 1
+                        _score += min(len(_s) // 4000, 2)
+                        return _score
+
+                    if _fenced_blocks:
+                        _best_block = max(_fenced_blocks, key=_score_html_candidate)
+                        _joined_blocks = "\n".join(b for b in _fenced_blocks if b)
+                        if _score_html_candidate(_joined_blocks) > _score_html_candidate(_best_block):
+                            html_block = _joined_blocks.strip()
+                            logger.info(
+                                "HTML auto-save extractor: merged %s fenced blocks (%s chars)",
+                                len(_fenced_blocks),
+                                len(html_block),
+                            )
+                        else:
+                            html_block = _best_block.strip()
+                            if len(_fenced_blocks) > 1:
+                                logger.info(
+                                    "HTML auto-save extractor: selected best fenced block among %s blocks (%s chars)",
+                                    len(_fenced_blocks),
+                                    len(html_block),
+                                )
+
                     # 1. ```html ... ``` closed block (with or without DOCTYPE)
-                    m = _re.search(
-                        r'```(?:html)?\s*\n((?:<!DOCTYPE\s+html|<html)[\s\S]*?)```',
-                        assembled, _re.IGNORECASE
-                    )
-                    if m:
-                        html_block = m.group(1).strip()
+                    if not html_block:
+                        m = _re.search(
+                            r'```(?:html)?\s*\n((?:<!DOCTYPE\s+html|<html)[\s\S]*?)```',
+                            assembled, _re.IGNORECASE
+                        )
+                        if m:
+                            html_block = m.group(1).strip()
                     if not html_block:
                         # 2. Unclosed/truncated code block (hit token limit)
                         m = _re.search(
@@ -4366,30 +4571,84 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
 
                         try:
                             yield {"type": "status", "message": "💾 Salvo la dashboard HTML…"}
-                            _save_result = tools.execute_tool("create_html_dashboard", {
+                            _save_args = {
                                 "title": _title,
                                 "name": _slug,
                                 "entities": _entities,
-                                "html": html_block,
-                            })
+                            }
+                            # For no-tool providers (web/codex/coplay), avoid passing long
+                            # inline HTML through JSON: use base64 channel to prevent parse
+                            # corruption and satisfy raw-only mode guard.
+                            if _is_no_tool_provider and len(html_block or "") > 1800:
+                                import base64 as _b64
+                                _save_args["html_base64"] = _b64.b64encode(
+                                    (html_block or "").encode("utf-8", errors="ignore")
+                                ).decode("ascii")
+                                logger.info(
+                                    "HTML auto-save: using html_base64 for no-tool provider '%s' (%s chars)",
+                                    AI_PROVIDER,
+                                    len(html_block or ""),
+                                )
+                            else:
+                                _save_args["html"] = html_block
+                            _save_result = tools.execute_tool("create_html_dashboard", _save_args)
+                            _save_obj = {}
+                            try:
+                                _save_obj = json.loads(_save_result) if isinstance(_save_result, str) else (_save_result or {})
+                            except Exception:
+                                _save_obj = {"raw": str(_save_result)}
                             logger.info(
                                 f"Auto-saved HTML dashboard '{_slug}' "
                                 f"(entities={len(_entities)}): {str(_save_result)[:200]}"
                             )
-                            yield {"type": "status", "message": f"✅ Dashboard HTML '{_slug}.html' salvata!"}
-                            # Strip the raw HTML from conversation history so that
-                            # re-opening this chat shows only a short confirmation,
-                            # not walls of HTML code.
-                            _last_msg = (conversations.get(session_id) or [None])[-1]
-                            if (_last_msg and _last_msg.get("role") == "assistant"
-                                    and len(_last_msg.get("content", "")) > 500):
-                                conversations[session_id][-1]["content"] = (
+                            _save_ok = (
+                                isinstance(_save_obj, dict)
+                                and _save_obj.get("status") == "success"
+                                and bool(_save_obj.get("filename") or _save_obj.get("html_url"))
+                            )
+                            if _save_ok:
+                                _saved_filename = _save_obj.get("filename") or f"{_slug}.html"
+                                yield {"type": "status", "message": f"✅ Dashboard HTML '{_saved_filename}' salvata!"}
+                                _saved_url = _save_obj.get("html_url") or f"/local/dashboards/{_saved_filename}"
+                                _user_msg = (
                                     f"✨ Dashboard **{_title}** creata! "
-                                    f"Aprila qui: `/local/dashboards/{_slug}.html`"
+                                    f"Aprila qui: `{_saved_url}`"
                                 )
+                                # Emit a normal assistant token so it is visible in chat
+                                # (status events are transient and may not appear in history UI).
+                                yield {"type": "token", "content": _user_msg}
+                                # Strip the raw HTML from conversation history so that
+                                # re-opening this chat shows only a short confirmation,
+                                # not walls of HTML code.
+                                _last_msg = (conversations.get(session_id) or [None])[-1]
+                                if (_last_msg and _last_msg.get("role") == "assistant"
+                                        and len(_last_msg.get("content", "")) > 500):
+                                    conversations[session_id][-1]["content"] = _user_msg
+                            else:
+                                _err_msg = ""
+                                if isinstance(_save_obj, dict):
+                                    _err_msg = (
+                                        _save_obj.get("error")
+                                        or _save_obj.get("message")
+                                        or _save_obj.get("raw", "")
+                                    )
+                                _err_msg = str(_err_msg or "create_html_dashboard did not return success")
+                                logger.warning(
+                                    "Auto-save HTML dashboard failed for '%s': %s",
+                                    _slug,
+                                    _err_msg[:500],
+                                )
+                                yield {"type": "status", "message": f"⚠️ Salvataggio HTML fallito: {_err_msg}"}
+                                # Emit a persistent assistant message too (status is transient)
+                                yield {"type": "token", "content": f"⚠️ Salvataggio dashboard HTML fallito: {_err_msg}"}
                         except Exception as _e:
                             logger.warning(f"Auto-save HTML dashboard failed: {_e}")
                             yield {"type": "status", "message": f"⚠️ Salvataggio HTML fallito: {_e}"}
+                            # Emit a persistent assistant message too (status is transient)
+                            yield {"type": "token", "content": f"⚠️ Salvataggio dashboard HTML fallito: {_e}"}
+                    if _deferred_done_event is not None:
+                        yield _deferred_done_event
+                        _deferred_done_event = None
                 # ──────────────────────────────────────────────────────────
                 # NOTE: sentinel-based auto-execute blocks (CONFIRM_CREATE_AUTOMATION etc.)
                 # have been removed. No-tool providers now use the universal Tool Simulator
@@ -4406,6 +4665,9 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                 if len(trimmed) < 2 or trimmed[1].get("role") != "tool":
                     trimmed = trimmed[1:]
             conversations[session_id] = trimmed
+        if _deferred_done_event is not None:
+            yield _deferred_done_event
+            _deferred_done_event = None
         save_conversations()
         
         # Save to persistent memory if enabled

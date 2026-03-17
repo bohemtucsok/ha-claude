@@ -277,15 +277,17 @@ class OllamaProvider(EnhancedProvider):
                             idx = len(accumulated_tool_calls)
                             accumulated_tool_calls[idx] = {
                                 "id": f"ollama_{idx}",
-                                "type": "function",
-                                "function": {"name": name, "arguments": json.dumps(args)},
+                                "name": name,
+                                "arguments": json.dumps(args, ensure_ascii=False),
                             }
 
                     if event.get("done"):
                         done_event: Dict[str, Any] = {"type": "done", "finish_reason": "stop"}
                         if accumulated_tool_calls:
                             done_event["finish_reason"] = "tool_calls"
-                            done_event["tool_calls"] = list(accumulated_tool_calls.values())
+                            done_event["tool_calls"] = self._normalize_tool_calls(
+                                list(accumulated_tool_calls.values())
+                            )
                         yield done_event
 
                 except json.JSONDecodeError:

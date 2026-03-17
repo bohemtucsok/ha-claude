@@ -233,9 +233,9 @@ const{createApp,ref,reactive,onMounted,onUnmounted,nextTick}=Vue;
 const ENTITIES=__ENTITIES_JSON__;
 const SECTIONS=__SECTIONS_JSON__;
 const PAL=['#667eea','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#14b8a6'];
-const DICO={sensor:'\ud83d\udcca',binary_sensor:'\ud83d\udd14',switch:'\ud83d\udd0c',light:'\ud83d\udca1',climate:'\ud83c\udf21\ufe0f',cover:'\ud83e\ude9f',fan:'\ud83c\udf00',
-input_boolean:'\ud83d\udd18',input_number:'\ud83d\udd22',number:'\ud83d\udd22',automation:'\u2699\ufe0f',script:'\ud83d\udcdc',person:'\ud83d\udc64',weather:'\ud83c\udf24\ufe0f',
-media_player:'\ud83c\udfb5',camera:'\ud83d\udcf7',lock:'\ud83d\udd12',vacuum:'\ud83e\uddf9'};
+const DICO={sensor:'S',binary_sensor:'BS',switch:'SW',light:'LT',climate:'CL',cover:'CV',fan:'FN',
+input_boolean:'IB',input_number:'IN',number:'NM',automation:'AT',script:'SC',person:'PR',weather:'WE',
+media_player:'MP',camera:'CM',lock:'LK',vacuum:'VC'};
 // Token cache — populated once, reused for all requests
 let _cachedToken='';
 function getToken(){try{return JSON.parse(localStorage.getItem('hassTokens')||'{}').access_token||''}catch(e){return''}}
@@ -247,7 +247,7 @@ function getToken(){try{return JSON.parse(localStorage.getItem('hassTokens')||'{
 function getTokenAsync(){
   if(_cachedToken)return Promise.resolve(_cachedToken);
   return new Promise(resolve=>{
-    const done=t=>{_cachedToken=t||'';resolve(_cachedToken)};
+    const done=t=>{_cachedToken=t||'';try{if(typeof tok!=='undefined')tok=_cachedToken;}catch(e){}resolve(_cachedToken)};
     // Strategy 1: ask parent window (works when page is inside HA Lovelace iframe)
     if(window.parent&&window.parent!==window){
       const onMsg=ev=>{
@@ -285,7 +285,7 @@ function getTokenAsync(){
     }
   });
 }
-function haHeaders(){return _cachedToken?{'Authorization':'Bearer '+_cachedToken,'Content-Type':'application/json'}:{'Content-Type':'application/json'}}
+function haHeaders(){const _t=_cachedToken||(typeof tok!=='undefined'?tok:'');return _t?{'Authorization':'Bearer '+_t,'Content-Type':'application/json'}:{'Content-Type':'application/json'}}
 
 createApp({setup(){
 const connected=ref(false),error=ref(''),sections=ref(SECTIONS),states=reactive({});
@@ -301,7 +301,7 @@ if(u.toLowerCase()==='w'&&Math.abs(n)>=1000)return'kW';if(u.toLowerCase()==='wh'
 function isOn(e){const s=sv(e);return s==='on'}
 function numVal(e){return parseFloat(sv(e))||0}
 function gPct(e){return Math.min(100,Math.max(0,numVal(e)))}
-function dIco(e){return DICO[e.split('.')[0]]||'\ud83d\udce6'}
+function dIco(e){return DICO[e.split('.')[0]]||'*'}
 function togDom(e){const d=e.split('.')[0];return['switch','light','input_boolean'].includes(d)}
 function slDom(e){const d=e.split('.')[0];return['number','input_number'].includes(d)}
 function slMin(e){return states[e]?.attributes?.min??0}
@@ -688,9 +688,13 @@ def _ensure_vue_runtime_contract(html: str) -> str:
         app_div = '<div id="app"></div>\n'
         if "<body" in low:
             out = re.sub(r"<body([^>]*)>", r"<body\1>\n" + app_div, out, count=1, flags=re.IGNORECASE)
+        elif "</html>" in low:
+            out = re.sub(r"</html>", app_div + "</html>", out, count=1, flags=re.IGNORECASE)
+        elif "</head>" in low:
+            out = re.sub(r"</head>", r"</head>\n" + app_div, out, count=1, flags=re.IGNORECASE)
         else:
             # Fallback for malformed fragments
-            out = app_div + out
+            out = out + "\n" + app_div
         logger.info("create_html_dashboard: injected missing #app mount node")
 
     return out
@@ -1267,6 +1271,59 @@ def _inject_entity_filter_fallback(html: str, entities: list) -> str:
     logger.info(f"Injected pre-filtered entity list ({len(entities)} entities) as fallback filter")
     return html
 
+def _inject_live_data_bridge(html: str, entities: list) -> str:
+    """Inject a generic HA realtime bridge into raw custom HTML dashboards.
+
+    This keeps the model's custom design/layout while enforcing real sensor values.
+    The bridge binds values using:
+    1) existing [data-entity] elements
+    2) nearby HTML comments like <!-- sensor.epcube_solarpower -->
+    """
+    import re as _re
+
+    if not isinstance(html, str) or not html.strip() or not entities:
+        return html
+    _low = html.lower()
+    if "__amira_live_bridge__" in _low:
+        return html
+
+    # Already realtime-capable: don't inject duplicate runtime.
+    _already_live = any(k in _low for k in (
+        "/api/websocket", "/api/states", "subscribe_events", "state_changed", "createapp("
+    ))
+    if _already_live:
+        return html
+
+    _entities_json = json.dumps(list(dict.fromkeys(entities)), ensure_ascii=False)
+    _bridge = (
+        '<script id="__amira_live_bridge__">\n'
+        '(function(){\n'
+        'const ENTITIES=' + _entities_json + ';\n'
+        'const BINDS=new Map(); let TOK=""; let WS=null;\n'
+        'function addBind(eid,el){ if(!eid||!el) return; if(!BINDS.has(eid)) BINDS.set(eid,[]); if(!BINDS.get(eid).includes(el)) BINDS.get(eid).push(el); }\n'
+        'function scan(){\n'
+        '  document.querySelectorAll("[data-entity]").forEach(el=>{ const eid=(el.getAttribute("data-entity")||"").trim(); if(eid) addBind(eid,el); });\n'
+        '  try{ const w=document.createTreeWalker(document.body||document.documentElement, NodeFilter.SHOW_COMMENT); let c; const re=/^([a-z_][a-z0-9_]*\\.[a-z0-9_]+)$/;\n'
+        '    while((c=w.nextNode())){ const m=(c.nodeValue||"").trim().match(re); if(!m) continue; let t=c.previousSibling; while(t && t.nodeType!==1) t=t.previousSibling; if(!t && c.parentElement) t=c.parentElement.previousElementSibling; if(t && t.nodeType===1) addBind(m[1],t); }\n'
+        '  }catch(e){}\n'
+        '}\n'
+        'function fmt(s,u){ if(s==null) return "..."; const n=parseFloat(s); if(Number.isFinite(n)){ const ul=(u||"").toLowerCase(); if((ul==="w"||ul==="wh")&&Math.abs(n)>=1000) return (n/1000).toFixed(2); if(Math.abs(n)>=10000) return n.toFixed(0); if(Math.abs(n)>=100) return n.toFixed(1); if(Math.abs(n)>=1) return n.toFixed(2); return n.toFixed(3);} return String(s); }\n'
+        'function unitOf(s){ return (s&&s.attributes&&s.attributes.unit_of_measurement)||""; }\n'
+        'function applyState(eid,s){ const arr=BINDS.get(eid)||[]; if(!arr.length||!s) return; const v=fmt(s.state,unitOf(s)); arr.forEach(el=>{ try{ const role=(el.getAttribute&&el.getAttribute("data-role"))||""; if(role==="unit"){ el.textContent=unitOf(s)||""; } else { el.textContent=v; } }catch(e){} }); }\n'
+        'function authHeaders(){ return TOK?{"Authorization":"Bearer "+TOK,"Content-Type":"application/json"}:{"Content-Type":"application/json"}; }\n'
+        'function getToken(){ try{ const s=localStorage.getItem("hassTokens"); if(s){ const t=(JSON.parse(s||"{}")||{}).access_token; if(t) return t; } }catch(e){} return ""; }\n'
+        'function getTokenAsync(){ if(TOK) return Promise.resolve(TOK); return new Promise(res=>{ const done=t=>{ TOK=t||""; res(TOK); }; if(window.parent&&window.parent!==window){ const onMsg=ev=>{ if(ev.data&&ev.data.type==="auth/token"&&ev.data.token){ window.removeEventListener("message",onMsg); clearTimeout(t1); done(ev.data.token);} }; window.addEventListener("message",onMsg); const t1=setTimeout(()=>{ window.removeEventListener("message",onMsg); done(getToken()); },1500); try{ window.parent.postMessage({type:"auth/get_token"},"*"); }catch(e){ clearTimeout(t1); done(getToken()); } return; } done(getToken()); }); }\n'
+        'async function loadAll(){ try{ await getTokenAsync(); const r=await fetch("/api/states",{headers:authHeaders()}); if(!r.ok) throw new Error(String(r.status)); const data=await r.json(); if(Array.isArray(data)){ data.forEach(s=>{ if(s&&s.entity_id&&BINDS.has(s.entity_id)) applyState(s.entity_id,s); }); } }catch(e){ console.warn("Amira bridge loadAll:",e); } }\n'
+        'function connectWs(){ const p=(location.protocol==="https:"?"wss:":"ws:")+"//"+location.host+"/api/websocket"; try{ WS=new WebSocket(p); WS.onmessage=async ev=>{ let m={}; try{ m=JSON.parse(ev.data||"{}"); }catch(e){} if(m.type==="auth_required"){ await getTokenAsync(); WS.send(JSON.stringify({type:"auth",access_token:TOK})); } else if(m.type==="auth_ok"){ WS.send(JSON.stringify({id:1,type:"subscribe_events",event_type:"state_changed"})); loadAll(); } else if(m.type==="event"&&m.event&&m.event.data){ const d=m.event.data; if(d.entity_id&&BINDS.has(d.entity_id)&&d.new_state) applyState(d.entity_id,d.new_state); } }; WS.onclose=()=>setTimeout(connectWs,6000); }catch(e){ console.warn("Amira bridge ws:",e); setTimeout(connectWs,6000); } }\n'
+        'scan(); if(BINDS.size){ loadAll(); connectWs(); }\n'
+        '})();\n'
+        '</script>\n'
+    )
+
+    if "</body>" in _low:
+        return _re.sub(r"</body>", _bridge + "</body>", html, count=1, flags=_re.IGNORECASE)
+    return html + "\n" + _bridge
+
 def _stamp_description(description: str, action: str = "create") -> str:
     """Add Amira watermark to a description field.
 
@@ -1311,7 +1368,7 @@ TOOL_DESCRIPTIONS = {
     "update_dashboard": "Modifico dashboard",
     "create_dashboard": "Creo dashboard",
     "read_html_dashboard": "Leggo HTML dashboard",
-    "create_html_dashboard": "Creo dashboard HTML (sezioni strutturate)",
+    "create_html_dashboard": "Creo dashboard HTML custom (raw HTML completo)",
     "delete_dashboard": "Elimino dashboard",
     "get_frontend_resources": "Verifico card installate",
     "get_scenes": "Carico scene",
@@ -1904,24 +1961,28 @@ HA_TOOLS_DESCRIPTION = [
     },
     {
         "name": "create_html_dashboard",
-        "description": "Create a custom HTML dashboard with real-time entity monitoring.\n\nMULTI-PAGE STRATEGIES:\n- Option A (HTML tabs): Create a SINGLE HTML file with a JS tab router — use show/hide div sections with a top nav bar. Call this tool ONCE. Best for self-contained dashboards.\n- Option B (HA sidebar pages): Call this tool MULTIPLE TIMES, once per section, each with a unique name/title. Each call creates a separate entry in the HA sidebar. Best when the user wants independent navigation.\nAlways ask the user which option they prefer before generating HTML for multi-page requests.\n\nDESIGN MODES:\n- Raw HTML mode (use 'html' param): generate complete HTML/CSS/JS from scratch with your own creative design. Best for rich, custom dashboards.\n- Structured mode (use 'sections' param): use the built-in template with pre-defined section types (trend, gauge, chart, kpi, entities, etc.).\n\nDESIGN PHILOSOPHY — Every dashboard must look like it was designed by a professional UI designer:\n\n🎨 COLORS (mandatory): Use vibrant gradient backgrounds and colored cards. NEVER use plain white/grey. Each section/card type gets its own color identity. Define CSS variables (:root { --bg, --card, --accent, --text }) and use __ACCENT__ / __ACCENT_RGB__ for the user's theme.\n\n✨ WOW EFFECT: Add CSS animations — elements fade/slide in on page load (transform+opacity), live data indicators pulse, cards lift on hover (transform: translateY + box-shadow). Use glassmorphism cards (backdrop-filter: blur(12px) + semi-transparent background).\n\n📑 TABS (default for 3+ topics): Build a single-page tab router with a styled top navigation bar. Use JS show/hide (display:none → grid/block) for instant switching — no page reload. Active tab gets accent underline + background. Sections mode: use separate sections; Raw HTML: build tab nav in the HTML.\n\n🔍 POPUPS/MODALS (add when useful): Click-to-expand for detail views, historical charts on entity click, or info overlays. Use a backdrop-blur overlay + centered card with a close button (×). Good for: trend history, energy breakdown, device detail.\n\n📊 CHARTS (when data benefits from visualization): Include for historical trends, comparisons, energy flow, sensor history. Use Chart.js with gradient fills and smooth curves. Not required for pure control panels or status boards.\n\n🏗️ LAYOUT: Use CSS grid with card hierarchy — hero KPI banner → visual charts/gauges → detail cards. Avoid flat entity lists.\n\nCHUNKED MODE (for large HTML): If your HTML is longer than 6000 characters, split it into parts:\n- Call 1: create_html_dashboard(title, name, entities, html='<part1: head+CSS+start of body>', draft=true)\n- Call 2: create_html_dashboard(name='same-slug', html='<part2: rest of template>', draft=true)\n- Call 3: create_html_dashboard(name='same-slug', html='<part3: script+closing tags>') ← no draft = finalize and save\nEach chunk should be under 6000 chars. The tool concatenates all parts.\n\nRaw HTML placeholders (the tool replaces them):\n- __ENTITIES_JSON__ (JSON array of entity_ids — MANDATORY)\n- __TITLE__ (HTML-escaped), __TITLE_JSON__ (JSON string for JS)\n- __ACCENT__ (hex color e.g. #22c55e), __ACCENT_RGB__ (r,g,b for rgba())\n- __THEME_CSS__ (CSS properties WITHOUT :root wrapper, e.g. --bg:#0f172a;--text:#e2e8f0. Use as: :root{__THEME_CSS__})\n- __LANG__ (en/it/es/fr), __FOOTER__ (HTML-escaped footer)\n\nCRITICAL — ENTITIES: The pre-loaded context (## ENTITÀ TROVATE) already contains the correct entity_ids. You MUST:\n1. Copy ALL entity_ids from ## ENTITÀ TROVATE into the entities[] parameter of this tool call\n2. Use __ENTITIES_JSON__ placeholder in the HTML — the server replaces it with the validated list\n3. In JS, iterate over ENTITIES array (from __ENTITIES_JSON__) — NEVER filter /api/states by device_class or any attribute. The ENTITIES array IS the correct filtered list.\n4. NEVER hardcode entity_ids — use __ENTITIES_JSON__ so the server controls the list\n\nIMPORTANT: Do NOT use var(--primary-background-color) or HA frontend CSS vars — they don't exist in /local/ pages. Define your own colors.\nRaw HTML must include: Vue 3 CDN, WebSocket to /api/websocket, Bearer token via getTokenAsync() (supports both localStorage.hassTokens for browser and window.externalApp/webkit for HA Companion App). Never block on token — always fall back to polling if token unavailable.\n\nStructured section types: hero, pills, flow, gauge, gauges, kpi, chart, trend, entities, controls, stats, value.\nLayout: 'span' (1=third, 2=two-thirds, 3=full). Card styles: gradient, outlined, flat.",
+        "description": "Create and SAVE a custom HTML dashboard file (real .html on disk) with real-time entity monitoring.\n\nSAVE RULE (MANDATORY): this tool must produce a real saved file under /config/www/dashboards/ and sidebar entry. Do NOT just describe the dashboard in text.\n\nRAW-ONLY MODE (MANDATORY): built-in structured/template generation is disabled. You MUST provide full custom HTML via one of:\n1) html_url/file_url (download HTML from URL)\n2) html_base64/file_base64 (decode HTML from base64)\n3) html inline\nIf raw HTML is missing or malformed, the tool returns an error and DOES NOT create a dashboard.\n\nMULTI-PAGE STRATEGIES:\n- Option A (HTML tabs): Create a SINGLE HTML file with a JS tab router — use show/hide div sections with a top nav bar. Call this tool ONCE. Best for self-contained dashboards.\n- Option B (HA sidebar pages): Call this tool MULTIPLE TIMES, once per section, each with a unique name/title. Each call creates a separate entry in the HA sidebar. Best when the user wants independent navigation.\nAlways ask the user which option they prefer before generating HTML for multi-page requests.\n\nDESIGN MODE:\n- Raw HTML mode (use 'html' param): generate complete HTML/CSS/JS from scratch with your own creative design.\n\nDESIGN PHILOSOPHY — Every dashboard must look like it was designed by a professional UI designer:\n\n🎨 COLORS (mandatory): Use vibrant gradient backgrounds and colored cards. NEVER use plain white/grey. Define CSS variables (:root { --bg, --card, --accent, --text }) and use __ACCENT__ / __ACCENT_RGB__ for the user's theme.\n\n✨ WOW EFFECT: Add CSS animations — elements fade/slide in on page load (transform+opacity), live data indicators pulse, cards lift on hover (transform: translateY + box-shadow). Use glassmorphism cards (backdrop-filter: blur(12px) + semi-transparent background).\n\n📑 TABS (default for 3+ topics): Build a single-page tab router with a styled top navigation bar. Use JS show/hide (display:none → grid/block) for instant switching — no page reload. Active tab gets accent underline + background.\n\n🔍 POPUPS/MODALS (add when useful): Click-to-expand for detail views, historical charts on entity click, or info overlays. Use a backdrop-blur overlay + centered card with a close button (×). Good for: trend history, energy breakdown, device detail.\n\n📊 CHARTS (when data benefits from visualization): Include for historical trends, comparisons, energy flow, sensor history. Use Chart.js with gradient fills and smooth curves. Not required for pure control panels or status boards.\n\n🏗️ LAYOUT: Use CSS grid with card hierarchy — hero KPI banner → visual charts/gauges → detail cards. Avoid flat entity lists.\n\nCHUNKED MODE (for large HTML): If your HTML is longer than 6000 characters, split it into parts:\n- Call 1: create_html_dashboard(title, name, entities, html='<part1: head+CSS+start of body>', draft=true)\n- Call 2: create_html_dashboard(name='same-slug', html='<part2: rest of template>', draft=true)\n- Call 3: create_html_dashboard(name='same-slug', html='<part3: script+closing tags>') ← no draft = finalize and save\nEach chunk should be under 6000 chars. The tool concatenates all parts.\n\nRaw HTML placeholders (the tool replaces them):\n- __ENTITIES_JSON__ (JSON array of entity_ids — MANDATORY)\n- __TITLE__ (HTML-escaped), __TITLE_JSON__ (JSON string for JS)\n- __ACCENT__ (hex color e.g. #22c55e), __ACCENT_RGB__ (r,g,b for rgba())\n- __THEME_CSS__ (CSS properties WITHOUT :root wrapper, e.g. --bg:#0f172a;--text:#e2e8f0. Use as: :root{__THEME_CSS__})\n- __LANG__ (en/it/es/fr), __FOOTER__ (HTML-escaped footer)\n\nCRITICAL — ENTITIES: The pre-loaded context (## ENTITÀ TROVATE) already contains the correct entity_ids. You MUST:\n1. Copy ALL entity_ids from ## ENTITÀ TROVATE into the entities[] parameter of this tool call\n2. Use __ENTITIES_JSON__ placeholder in the HTML — the server replaces it with the validated list\n3. In JS, iterate over ENTITIES array (from __ENTITIES_JSON__) — NEVER filter /api/states by device_class or any attribute. The ENTITIES array IS the correct filtered list.\n4. NEVER hardcode entity_ids — use __ENTITIES_JSON__ so the server controls the list\n\nIMPORTANT: Do NOT use var(--primary-background-color) or HA frontend CSS vars — they don't exist in /local/ pages. Define your own colors.\nRaw HTML must include: Vue 3 CDN, WebSocket to /api/websocket, Bearer token via getTokenAsync() (supports both localStorage.hassTokens for browser and window.externalApp/webkit for HA Companion App). Never block on token — always fall back to polling if token unavailable.",
         "parameters": {
             "type": "object",
             "properties": {
                 "title": {"type": "string", "description": "Dashboard title shown in HA sidebar."},
                 "name": {"type": "string", "description": "URL-safe slug (lowercase, hyphens, e.g. 'energy-flow')."},
-                "icon": {"type": "string", "description": "MDI icon for sidebar (e.g. 'mdi:solar-power'). Default: mdi:web."},
+                "icon": {"type": "string", "description": "MDI icon for sidebar (e.g. 'mdi:solar-power'). Default: mdi:robot-outline (Amira signature)."},
                 "entities": {"type": "array", "items": {"type": "string"}, "description": "ALL entity_ids to monitor via WebSocket."},
                 "theme": {"type": "string", "enum": ["auto", "light", "dark"], "description": "Color theme. 'auto' follows OS."},
                 "accent_color": {"type": "string", "description": "Accent color hex (e.g. '#667eea')."},
                 "lang": {"type": "string", "enum": ["en", "it", "es", "fr"], "description": "HTML lang attribute. Default: add-on language."},
                 "footer_text": {"type": "string", "description": "Footer text. Default: configured html_dashboard_footer or 'Dashboard by <agent_name> · Real-time'."},
-                "html": {"type": "string", "description": "Raw HTML mode: full HTML/CSS/JS code. If provided, 'sections' is optional. For large HTML (>6000 chars), use draft=true and send in multiple calls."},
+                "html": {"type": "string", "description": "Raw HTML mode (required): full HTML/CSS/JS code. For large HTML (>6000 chars), use draft=true and send in multiple calls."},
+                "html_url": {"type": "string", "description": "Optional FILE-FIRST mode: direct URL to an .html file (or text endpoint containing full HTML). If provided, the tool downloads this first; if download fails, it falls back to 'html'."},
+                "file_url": {"type": "string", "description": "Alias of html_url for compatibility with web LLM tool simulators."},
+                "html_base64": {"type": "string", "description": "Optional FILE-FIRST mode: base64-encoded full HTML content (used when URL is not available). Preferred for large payloads to avoid malformed escaped HTML in JSON."},
+                "file_base64": {"type": "string", "description": "Alias of html_base64 for compatibility. Preferred over long inline html."},
                 "draft": {"type": "boolean", "description": "If true, buffer this HTML chunk without creating the dashboard. Call again with same 'name' to append more chunks. Omit draft (or false) on the last call to finalize."},
                 "return_html": {"type": "boolean", "description": "Leave false (default). The dashboard is always saved to a file. NEVER set true — do NOT echo HTML in chat."},
                 "sections": {
                     "type": "array",
-                    "description": "Array of dashboard sections. Each has a 'type' + type-specific props.",
+                    "description": "DEPRECATED / BLOCKED: structured sections mode is disabled. Pass full custom HTML in 'html' instead.",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -3518,13 +3579,45 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             return json.dumps({"status": "error", "message": f"Dashboard '{name}' not found. Use list: /custom_dashboards"})
 
         elif tool_name == "create_html_dashboard":
-            _raw_title = tool_input.get("title", "Custom Dashboard")
-            # Always prefix with "Amira — " so all HTML dashboards are clearly identified
-            # in the HA sidebar, regardless of what name the AI chose.
-            _PREFIX = "Amira \u2014 "  # em-dash
-            title = _raw_title if _raw_title.startswith(_PREFIX) else _PREFIX + _raw_title
             name = tool_input.get("name", "dashboard")
-            icon = tool_input.get("icon", "mdi:web")
+            _raw_title = tool_input.get("title", "Custom")
+            # Always prefix with "<Agent> — " so dashboards are clearly identified,
+            # but avoid duplicated agent/title suffix noise.
+            _agent_name = (AI_SIGNATURE or "Amira").strip()
+            _PREFIX = f"{_agent_name} \u2014 "
+            _generic_titles = {
+                "custom",
+                "custom dashboard",
+                "dashboard",
+                "amira - custom dashboard",
+                "amira — custom dashboard",
+            }
+            _raw_title_str = str(_raw_title or "").strip()
+            _title_norm = _raw_title_str.lower()
+            _name_words = [w for w in str(name or "dashboard").strip().replace("_", " ").replace("-", " ").split() if w]
+            _name_words = [w for w in _name_words if w.lower() not in {"dash", "dashboard", "html"}]
+            _nice_name = " ".join(w.capitalize() for w in _name_words) or "Custom"
+            if _title_norm in _generic_titles or not _raw_title_str:
+                _raw_title_str = _nice_name
+            else:
+                # If model already sent a title, normalize repeated agent/dash/html noise.
+                _t = _raw_title_str.replace("—", "-")
+                _t = " ".join(_t.split())
+                import re as _re_tit
+                _t = _re_tit.sub(
+                    rf"^\s*{_re_tit.escape(_agent_name)}\s*[-:|]\s*",
+                    "",
+                    _t,
+                    flags=_re_tit.IGNORECASE,
+                )
+                _t = _re_tit.sub(r"\b(?:dash|dashboard|html)\b", "", _t, flags=_re_tit.IGNORECASE)
+                _t = " ".join(_t.split(" ")).strip(" -")
+                if not _t:
+                    _t = _nice_name
+                _raw_title_str = _t
+            title = _raw_title_str if _raw_title_str.startswith(_PREFIX) else _PREFIX + _raw_title_str
+            _DEFAULT_AMIRA_DASH_ICON = "mdi:robot-outline"
+            icon = tool_input.get("icon", _DEFAULT_AMIRA_DASH_ICON)
             entities = tool_input.get("entities", [])
             if isinstance(entities, str):
                 _parsed_entities = None
@@ -3552,10 +3645,128 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             _FORCED_FOOTER = "Dashboard by Amira"
             footer_text = _FORCED_FOOTER
             raw_html = tool_input.get("html")
+            html_url = (
+                tool_input.get("html_url")
+                or tool_input.get("file_url")
+                or tool_input.get("url")
+            )
+            html_base64 = (
+                tool_input.get("html_base64")
+                or tool_input.get("file_base64")
+            )
+            _html_input_source = "inline"
+            _html_input_url = ""
+            _inline_policy_warning = ""
+            _force_structured_from_inline = False
+            _inject_live_bridge = False
+            _inject_live_bridge_reason = ""
+            _raw_html_reject_reason = ""
             return_html = bool(tool_input.get("return_html", False))
             is_draft = bool(tool_input.get("draft", False))
             _raw_html_original = None
             _html_debug_enabled = str(getattr(api, "LOG_LEVEL", "normal")).lower() in ("verbose", "debug")
+            _llm_dump_dir = os.path.join(api.HA_CONFIG_DIR, "amira", "llm_dashboards")
+            _incoming_dump_path = ""
+            _final_dump_path = ""
+
+            def _dump_html_snapshot(stage: str, content: str) -> str:
+                if not isinstance(content, str) or not content:
+                    return ""
+                try:
+                    import re as _re_dump
+                    os.makedirs(_llm_dump_dir, exist_ok=True)
+                    _stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+                    _safe_name = _re_dump.sub(r"[^a-z0-9_-]+", "_", str(name or "dashboard").lower())
+                    _safe_name = _re_dump.sub(r"_+", "_", _safe_name).strip("_-") or "dashboard"
+                    _safe_stage = _re_dump.sub(r"[^a-z0-9_-]+", "_", str(stage or "snapshot").lower())
+                    _file = f"{_stamp}-{_safe_name}-{_safe_stage}.html"
+                    _path = os.path.join(_llm_dump_dir, _file)
+                    with open(_path, "w", encoding="utf-8", errors="replace") as _f_dump:
+                        _f_dump.write(content)
+                    return _path
+                except Exception as _dump_err:
+                    logger.warning(f"create_html_dashboard: snapshot dump failed ({stage}): {_dump_err}")
+                    return ""
+
+            def _reject_non_raw_html(reason: str):
+                nonlocal raw_html, _raw_html_reject_reason
+                logger.warning(
+                    "create_html_dashboard: raw-only mode reject "
+                    f"({reason})"
+                )
+                raw_html = None
+                _raw_html_reject_reason = reason
+
+            # FILE-FIRST mode (requested): prefer file URL/base64 over inline html.
+            # If file retrieval fails, fallback to the provided `html` string.
+            def _extract_html_from_text(_txt: str) -> str:
+                _s = str(_txt or "").strip()
+                if not _s:
+                    return ""
+                try:
+                    import re as _re_html_extract
+                    _m = _re_html_extract.search(r"```(?:html)?\s*\n([\s\S]*?)```", _s, _re_html_extract.IGNORECASE)
+                    if _m:
+                        return _m.group(1).strip()
+                except Exception:
+                    pass
+                return _s
+
+            if html_base64:
+                try:
+                    import base64 as _b64
+                    _decoded = _b64.b64decode(str(html_base64), validate=False)
+                    _txt = _decoded.decode("utf-8", errors="ignore")
+                    _extracted = _extract_html_from_text(_txt)
+                    if _extracted:
+                        raw_html = _extracted
+                        _html_input_source = "base64"
+                        logger.info(f"create_html_dashboard: loaded HTML from base64 ({len(raw_html)} chars)")
+                except Exception as _b64_err:
+                    logger.warning(f"create_html_dashboard: html_base64 decode failed, fallback to inline html: {_b64_err}")
+
+            if html_url:
+                try:
+                    import urllib.request as _urlreq
+                    _req = _urlreq.Request(str(html_url), headers={"User-Agent": "Amira/1.0 (+create_html_dashboard)"})
+                    with _urlreq.urlopen(_req, timeout=20) as _resp:
+                        _raw_bytes = _resp.read(1_000_000)
+                    _txt = _raw_bytes.decode("utf-8", errors="ignore")
+                    _extracted = _extract_html_from_text(_txt)
+                    if _extracted:
+                        raw_html = _extracted
+                        _html_input_source = "url"
+                        _html_input_url = str(html_url)
+                        logger.info(
+                            f"create_html_dashboard: loaded HTML from URL {html_url} "
+                            f"({len(raw_html)} chars)"
+                        )
+                except Exception as _url_err:
+                    logger.warning(
+                        f"create_html_dashboard: html_url download failed ({html_url}), "
+                        f"fallback to inline html: {_url_err}"
+                    )
+
+            # Enforce file-safe payload for no-tool/web providers to reduce parse corruption:
+            # long inline HTML inside JSON is fragile (escaped quotes/chunk leaks).
+            _provider_now = str(getattr(api, "AI_PROVIDER", "") or "").lower()
+            _no_tool_like = {"gemini_web", "claude_web", "chatgpt_web", "github_copilot", "openai_codex"}
+            if (
+                _provider_now in _no_tool_like
+                and isinstance(raw_html, str)
+                and len(raw_html) > 2000
+                and not html_url
+                and not html_base64
+            ):
+                _inline_policy_warning = (
+                    "INLINE_HTML_SOFT: provider sent long inline html. "
+                    "Proceeding with sanitizer fallback; preferred input is html_base64/file_url."
+                )
+                _force_structured_from_inline = True
+                logger.warning(
+                    "create_html_dashboard: long inline HTML received from no-tool provider "
+                    f"({_provider_now}); continuing with sanitizer fallback"
+                )
 
             # --- Draft (chunked) mode ---
             if is_draft and raw_html:
@@ -3597,7 +3808,7 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
                     entities = draft["entities"]
                 if title == "Custom Dashboard" and draft.get("title"):
                     title = draft["title"]
-                if icon == "mdi:web" and draft.get("icon"):
+                if icon == _DEFAULT_AMIRA_DASH_ICON and draft.get("icon"):
                     icon = draft["icon"]
                 if theme == "auto" and draft.get("theme"):
                     theme = draft["theme"]
@@ -3608,6 +3819,20 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
                 footer_text = _FORCED_FOOTER
                 chunks = draft.get("chunks", 1) + (1 if tool_input.get("html") else 0)
                 logger.info(f"📝 Draft finalized for '{name}': {chunks} chunks, {len(raw_html)} chars total")
+            if (
+                raw_html is not None
+                and not is_draft
+                and _force_structured_from_inline
+                and _html_input_source == "inline"
+            ):
+                logger.warning(
+                    "create_html_dashboard: rejecting long inline HTML in raw-only mode "
+                    f"(provider='{_provider_now}')"
+                )
+                raw_html = None
+                _raw_html_reject_reason = (
+                    f"long inline html blocked in raw-only mode for provider '{_provider_now}'"
+                )
             if raw_html is not None and _html_debug_enabled:
                 _raw_html_original = str(raw_html)
                 try:
@@ -3621,6 +3846,15 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
                     logger.info(f"create_html_dashboard debug: incoming raw HTML saved: {_in_path} ({len(_raw_html_original)} chars)")
                 except Exception as _dbg_err:
                     logger.warning(f"create_html_dashboard debug: incoming raw HTML save failed: {_dbg_err}")
+            if raw_html is not None:
+                if _raw_html_original is None:
+                    _raw_html_original = str(raw_html)
+                _incoming_dump_path = _dump_html_snapshot("incoming", _raw_html_original)
+                if _incoming_dump_path:
+                    logger.info(
+                        f"create_html_dashboard: snapshot incoming saved: {_incoming_dump_path} "
+                        f"({len(_raw_html_original)} chars)"
+                    )
 
             if raw_html is not None:
                 if not isinstance(raw_html, str) or not raw_html.strip():
@@ -3648,98 +3882,260 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
                         if _decoded == raw_html:
                             break
                         raw_html = _decoded
+                # Common markdown/backslash escapes from no-tool providers.
+                raw_html = (
+                    raw_html
+                    .replace("\\<", "<")
+                    .replace("\\>", ">")
+                    .replace("\\_", "_")
+                    .replace("\\*", "*")
+                    .replace("\\#", "#")
+                    .replace("\\!", "!")
+                )
+                # Normalize alternative placeholder style used by some models.
+                raw_html = (
+                    raw_html
+                    .replace("**LANG**", "__LANG__")
+                    .replace("**TITLE**", "__TITLE__")
+                    .replace("**THEME_CSS**", "__THEME_CSS__")
+                    .replace("**FOOTER**", "__FOOTER__")
+                    .replace("**ENTITIES_JSON**", "__ENTITIES_JSON__")
+                )
+                try:
+                    import re as _re_raw
+                    # Remove JS/markdown line-continuation slashes:  "\n" prefixed by backslash.
+                    raw_html = _re_raw.sub(r"\\\s*\n", "\n", raw_html)
+                    # Decode common double-escaped unicode sequences safely.
+                    # Handles surrogate pairs (e.g. \\ud83d\\ude80) and drops orphan surrogates.
+                    raw_html = _re_raw.sub(
+                        r"\\u([0-9a-fA-F]{4})",
+                        lambda m: chr(int(m.group(1), 16)),
+                        raw_html,
+                    )
+                    def _repair_surrogates(_s: str) -> str:
+                        _out = []
+                        _i = 0
+                        _n = len(_s)
+                        while _i < _n:
+                            _o = ord(_s[_i])
+                            # High surrogate
+                            if 0xD800 <= _o <= 0xDBFF:
+                                if _i + 1 < _n:
+                                    _o2 = ord(_s[_i + 1])
+                                    if 0xDC00 <= _o2 <= 0xDFFF:
+                                        _cp = 0x10000 + ((_o - 0xD800) << 10) + (_o2 - 0xDC00)
+                                        _out.append(chr(_cp))
+                                        _i += 2
+                                        continue
+                                # Drop orphan high surrogate
+                                _i += 1
+                                continue
+                            # Orphan low surrogate
+                            if 0xDC00 <= _o <= 0xDFFF:
+                                _i += 1
+                                continue
+                            _out.append(_s[_i])
+                            _i += 1
+                        return "".join(_out)
+                    raw_html = _repair_surrogates(raw_html)
+                    # Fix markdown links mistakenly used inside src/href attributes:
+                    # src="[https://a](https://a)" -> src="https://a"
+                    raw_html = _re_raw.sub(
+                        r'(\b(?:src|href)\s*=\s*["\'])\[[^\]]+\]\((https?://[^)]+)\)(["\'])',
+                        r"\1\2\3",
+                        raw_html,
+                        flags=_re_raw.IGNORECASE,
+                    )
+                    # Remove leaked tool-call JSON fragments injected between HTML chunks:
+                    # e.g. </head>", "name":"tigo"}}<body>
+                    raw_html = _re_raw.sub(
+                        r'(</(?:head|body|div|footer|style|script|html)\s*>)"\s*,\s*"(?:name|title|draft|entities|html|accent_color|lang|theme)"[\s\S]*?\}\}\s*(?=<)',
+                        r"\1",
+                        raw_html,
+                        flags=_re_raw.IGNORECASE,
+                    )
+                    # Stronger variant: handles leaked JSON after multiple consecutive tags
+                    # (e.g. </head><body>", "name":"tigo", ...}}<div id="app">).
+                    raw_html = _re_raw.sub(
+                        r'((?:</[a-z0-9:_-]+\s*>)+)\s*"\s*,\s*"(?:name|title|draft|entities|html|accent_color|lang|theme)"\s*:\s*[\s\S]*?\}\}\s*(?=<)',
+                        r"\1",
+                        raw_html,
+                        flags=_re_raw.IGNORECASE,
+                    )
+                except Exception:
+                    pass
+                # If parser left trailing tool JSON after closing HTML, trim it.
+                _lhtml = raw_html.lower()
+                if "</html>" in _lhtml:
+                    _end = _lhtml.rfind("</html>") + len("</html>")
+                    if _end < len(raw_html) and raw_html[_end:].strip():
+                        raw_html = raw_html[:_end]
+                # If parser left junk BEFORE doctype/html, trim leading prefix too.
+                _lhtml = raw_html.lower()
+                _starts = []
+                for _tag in ("<!doctype html", "<html"):
+                    _p = _lhtml.find(_tag)
+                    if _p >= 0:
+                        _starts.append(_p)
+                if _starts:
+                    _min_start = min(_starts)
+                    if _min_start > 0:
+                        raw_html = raw_html[_min_start:]
+                        _lhtml = raw_html.lower()
                 if raw_html != _raw_before:
                     logger.info("create_html_dashboard: normalized escaped sequences in raw HTML")
 
-                # Repair frequent malformed head fragments from truncated chunks.
-                try:
-                    import re as _re_html_fix
-                    _fixed = _re_html_fix.sub(
-                        r"<meta\s+charset\s*=\s*<style>",
-                        '<meta charset="UTF-8">\n<style>',
-                        raw_html,
-                        flags=_re_html_fix.IGNORECASE,
+                # Enforce LIVE data dashboards only:
+                # reject static/mock HTML (common with generic LLM output) and fallback
+                # to our internal real-time structured template.
+                _lraw = raw_html.lower()
+                _static_markers = (
+                    "valori sono statici",
+                    "valori statici",
+                    "dati statici",
+                    "static values",
+                    "values are static",
+                    "for dati in tempo reale",
+                    "for real-time data",
+                    "would require an integration",
+                    "sarebbe necessaria un'integrazione",
+                )
+                _has_realtime_api = (
+                    "/api/websocket" in _lraw
+                    or "/api/states" in _lraw
+                    or "/api/history/period" in _lraw
+                    or "subscribe_events" in _lraw
+                    or "state_changed" in _lraw
+                )
+                _has_auth_path = (
+                    "hasstokens" in _lraw
+                    or "_gettokenasync" in _lraw
+                    or "gettokenasync" in _lraw
+                    or "authorization" in _lraw
+                )
+                if any(_m in _lraw for _m in _static_markers):
+                    _inject_live_bridge = True
+                    _inject_live_bridge_reason = "raw html contains static/demo disclaimer"
+                    logger.warning(
+                        "create_html_dashboard: raw custom HTML appears static/demo; "
+                        "injecting live HA bridge to preserve layout"
                     )
-                    _fixed = _re_html_fix.sub(
-                        r"<meta\s+charset\s*=\s*([^\s\">]+)",
-                        r'<meta charset="\1">',
-                        _fixed,
-                        flags=_re_html_fix.IGNORECASE,
+                elif not (_has_realtime_api and _has_auth_path):
+                    _inject_live_bridge = True
+                    _inject_live_bridge_reason = "raw html missing HA realtime hooks"
+                    logger.warning(
+                        "create_html_dashboard: raw custom HTML missing HA realtime hooks; "
+                        "injecting live HA bridge to preserve layout"
                     )
-                    raw_html = _fixed
-                except Exception:
-                    pass
-                # Auto-complete truncated HTML: GPT-5.2 often hits output token limit
-                # before writing the Vue.createApp script section
-                html_lower = raw_html.lower()
-                if "<html" not in html_lower and "<!doctype" not in html_lower:
-                    _css_like = (
-                        ":root" in html_lower
-                        or "body {" in html_lower
-                        or ".card {" in html_lower
+
+                # Detect unrecoverable inline corruption from no-tool providers and
+                # fallback to structured template generation (always valid HTML).
+                _is_corrupted_inline = False
+                if raw_html is not None:
+                    _corruption_markers = (
+                        '", "name":',
+                        '", "title":',
+                        '", "entities":',
+                        '", "html":',
+                        '</head></div>',
+                        '</body></div>',
+                        '<tool_call>',
+                        '</tool_call>',
                     )
-                    if _css_like:
-                        raw_html = (
-                            "<!DOCTYPE html>\n"
-                            "<html lang=\"__LANG__\">\n"
-                            "<head>\n"
-                            "<meta charset=\"UTF-8\">\n"
-                            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
-                            "<title>__TITLE__</title>\n"
-                            "<style>\n"
-                            f"{raw_html}\n"
-                            "</style>\n"
-                            "</head>\n"
-                            "<body>\n"
-                            "<div id=\"app\"></div>\n"
-                            "<footer style=\"margin-top:16px;color:rgba(255,255,255,.4);font-size:12px;text-align:center\">__FOOTER__</footer>\n"
-                            "</body>\n"
-                            "</html>"
+                    _is_corrupted_inline = any(m in raw_html for m in _corruption_markers)
+                    if _is_corrupted_inline:
+                        _reject_non_raw_html("unrecoverable inline JSON/markup corruption")
+
+                if raw_html is not None:
+                    # Repair frequent malformed head fragments from truncated chunks.
+                    try:
+                        import re as _re_html_fix
+                        _fixed = _re_html_fix.sub(
+                            r"<meta\s+charset\s*=\s*<style>",
+                            '<meta charset="UTF-8">\n<style>',
+                            raw_html,
+                            flags=_re_html_fix.IGNORECASE,
                         )
-                        logger.warning("create_html_dashboard: wrapped CSS-like fragment into full HTML")
-                    else:
-                        raw_html = (
-                            "<!DOCTYPE html>\n"
-                            "<html lang=\"__LANG__\">\n"
-                            "<head>\n"
-                            "<meta charset=\"UTF-8\">\n"
-                            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
-                            "<title>__TITLE__</title>\n"
-                            "</head>\n"
-                            "<body>\n"
-                            f"{raw_html}\n"
-                            "<footer style=\"margin-top:16px;color:rgba(255,255,255,.4);font-size:12px;text-align:center\">__FOOTER__</footer>\n"
-                            "</body>\n"
-                            "</html>"
+                        _fixed = _re_html_fix.sub(
+                            r"<meta\s+charset\s*=\s*([^\s\">]+)",
+                            r'<meta charset="\1">',
+                            _fixed,
+                            flags=_re_html_fix.IGNORECASE,
                         )
-                        logger.warning("create_html_dashboard: wrapped fragment into full HTML")
+                        raw_html = _fixed
+                    except Exception:
+                        pass
+                    # Auto-complete truncated HTML: GPT-5.2 often hits output token limit
+                    # before writing the Vue.createApp script section
                     html_lower = raw_html.lower()
-                if "createapp" not in html_lower:
-                    if _is_likely_truncated_html(raw_html):
-                        raw_html = _autocomplete_truncated_html(raw_html, entities)
-                        logger.info(f"Auto-completed truncated HTML (no createApp): repaired structure + injected runtime ({len(raw_html)} chars total)")
-                    else:
-                        logger.info("create_html_dashboard: raw HTML has no createApp but appears complete — skipping autocomplete")
-                elif ".mount(" not in raw_html:
-                    # createApp exists but script is truncated (no .mount call)
-                    # The HTML is too large for a single call — force chunked mode
-                    logger.warning(f"Truncated Vue app detected: createApp present but .mount() missing ({len(raw_html)} chars)")
-                    return json.dumps({"error": (
-                        "TRUNCATED HTML: Your script is incomplete (createApp exists but .mount() is missing — you hit the output token limit). "
-                        "You MUST use CHUNKED/DRAFT mode to send the HTML in 2-3 smaller parts:\n"
-                        "  Call 1: create_html_dashboard(title=..., name=..., entities=[...], html='<!DOCTYPE html>...<style>CSS</style></head><body>...template HTML...', draft=true)\n"
-                        "  Call 2: create_html_dashboard(name=..., html='<script>...complete Vue.createApp({...}).mount(\"#app\")</script></body></html>')\n"
-                        "Each chunk MUST be under 6000 chars. The tool concatenates all parts automatically. "
-                        "Do NOT omit draft=true on intermediate calls. The LAST call must NOT have draft."
-                    )}, default=str)
+                    if "<html" not in html_lower and "<!doctype" not in html_lower:
+                        _css_like = (
+                            ":root" in html_lower
+                            or "body {" in html_lower
+                            or ".card {" in html_lower
+                        )
+                        if _css_like:
+                            raw_html = (
+                                "<!DOCTYPE html>\n"
+                                "<html lang=\"__LANG__\">\n"
+                                "<head>\n"
+                                "<meta charset=\"UTF-8\">\n"
+                                "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
+                                "<title>__TITLE__</title>\n"
+                                "<style>\n"
+                                f"{raw_html}\n"
+                                "</style>\n"
+                                "</head>\n"
+                                "<body>\n"
+                                "<div id=\"app\"></div>\n"
+                                "<footer style=\"margin-top:16px;color:rgba(255,255,255,.4);font-size:12px;text-align:center\">__FOOTER__</footer>\n"
+                                "</body>\n"
+                                "</html>"
+                            )
+                            logger.warning("create_html_dashboard: wrapped CSS-like fragment into full HTML")
+                        else:
+                            raw_html = (
+                                "<!DOCTYPE html>\n"
+                                "<html lang=\"__LANG__\">\n"
+                                "<head>\n"
+                                "<meta charset=\"UTF-8\">\n"
+                                "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
+                                "<title>__TITLE__</title>\n"
+                                "</head>\n"
+                                "<body>\n"
+                                f"{raw_html}\n"
+                                "<footer style=\"margin-top:16px;color:rgba(255,255,255,.4);font-size:12px;text-align:center\">__FOOTER__</footer>\n"
+                                "</body>\n"
+                                "</html>"
+                            )
+                            logger.warning("create_html_dashboard: wrapped fragment into full HTML")
+                        html_lower = raw_html.lower()
+                    if "createapp" not in html_lower:
+                        if _is_likely_truncated_html(raw_html):
+                            raw_html = _autocomplete_truncated_html(raw_html, entities)
+                            logger.info(f"Auto-completed truncated HTML (no createApp): repaired structure + injected runtime ({len(raw_html)} chars total)")
+                        else:
+                            logger.info("create_html_dashboard: raw HTML has no createApp but appears complete — skipping autocomplete")
+                    elif ".mount(" not in raw_html:
+                        # createApp exists but script is truncated (no .mount call)
+                        # The HTML is too large for a single call — force chunked mode
+                        logger.warning(f"Truncated Vue app detected: createApp present but .mount() missing ({len(raw_html)} chars)")
+                        return json.dumps({"error": (
+                            "TRUNCATED HTML: Your script is incomplete (createApp exists but .mount() is missing — you hit the output token limit). "
+                            "You MUST use CHUNKED/DRAFT mode to send the HTML in 2-3 smaller parts:\n"
+                            "  Call 1: create_html_dashboard(title=..., name=..., entities=[...], html='<!DOCTYPE html>...<style>CSS</style></head><body>...template HTML...', draft=true)\n"
+                            "  Call 2: create_html_dashboard(name=..., html='<script>...complete Vue.createApp({...}).mount(\"#app\")</script></body></html>')\n"
+                            "Each chunk MUST be under 6000 chars. The tool concatenates all parts automatically. "
+                            "Do NOT omit draft=true on intermediate calls. The LAST call must NOT have draft."
+                        )}, default=str)
             else:
-                if not sections:
-                    return json.dumps({"error": (
-                        "MISSING CONTENT: You must pass your HTML code as the 'html' parameter in the tool call arguments. "
-                        "Do NOT write HTML as text — put it in the tool arguments JSON: "
-                        "{\"title\":\"...\",\"name\":\"...\",\"entities\":[...],\"html\":\"<!DOCTYPE html><html>...</html>\"} "
-                        "Include title, name, entities array, and the complete html string."
-                    )}, default=str)
+                _reason = _raw_html_reject_reason or "missing raw html payload"
+                return json.dumps({"error": (
+                    "RAW_HTML_REQUIRED: Standard/structured dashboard generation is disabled. "
+                    "The model must provide full custom HTML via one of: html, html_base64/file_base64, html_url/file_url. "
+                    f"Current request rejected: {_reason}. "
+                    "No dashboard was created."
+                )}, default=str)
             # In raw HTML mode, entities are optional metadata (the HTML is already complete).
             # In structured (sections) mode, entities are required to build the template.
             if not entities and raw_html is None:
@@ -3842,54 +4238,48 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             else:
                 entities = valid_entities
 
-            mode = "raw" if raw_html is not None else "structured"
+            mode = "raw"
             logger.info(
                 f"🎨 Creating HTML dashboard ({mode}): title='{title}', name='{name}', "
                 f"entities={len(entities)}/{original_count} valid, sections={len(sections) if isinstance(sections, list) else 0}"
             )
 
-            if raw_html is not None:
-                html_content = _fill_html_placeholders(
-                    raw_html,
-                    title=title,
-                    entities=entities,
-                    theme=theme,
-                    accent_color=accent_color,
-                    lang=lang,
-                    footer_text=footer_text,
+            if _inject_live_bridge:
+                raw_html = _inject_live_data_bridge(raw_html, entities)
+                logger.info(
+                    "create_html_dashboard: live bridge injected into raw HTML "
+                    f"({_inject_live_bridge_reason or 'missing hooks'})"
                 )
-                # Keep browser tab title aligned with the saved dashboard title.
-                try:
-                    import re as _re_title_fix
-                    import html as _html_mod
-                    _safe_title = _html_mod.escape(str(title))
-                    if _re_title_fix.search(r"<title\b[^>]*>[\s\S]*?</title>", html_content, flags=_re_title_fix.IGNORECASE):
-                        html_content = _re_title_fix.sub(
-                            f"<title>{_safe_title}</title>",
-                            html_content,
-                            count=1,
-                            flags=_re_title_fix.IGNORECASE,
-                        )
-                    elif _re_title_fix.search(r"</head>", html_content, flags=_re_title_fix.IGNORECASE):
-                        html_content = _re_title_fix.sub(
-                            f"<title>{_safe_title}</title>\n</head>",
-                            html_content,
-                            count=1,
-                            flags=_re_title_fix.IGNORECASE,
-                        )
-                except Exception:
-                    pass
-            else:
-                # Build HTML from structured sections spec
-                html_content = _build_dashboard_html(
-                    title,
-                    entities,
-                    theme,
-                    accent_color,
-                    sections,
-                    lang=lang,
-                    footer_text=footer_text,
-                )
+            html_content = _fill_html_placeholders(
+                raw_html,
+                title=title,
+                entities=entities,
+                theme=theme,
+                accent_color=accent_color,
+                lang=lang,
+                footer_text=footer_text,
+            )
+            # Keep browser tab title aligned with the saved dashboard title.
+            try:
+                import re as _re_title_fix
+                import html as _html_mod
+                _safe_title = _html_mod.escape(str(title))
+                if _re_title_fix.search(r"<title\b[^>]*>[\s\S]*?</title>", html_content, flags=_re_title_fix.IGNORECASE):
+                    html_content = _re_title_fix.sub(
+                        f"<title>{_safe_title}</title>",
+                        html_content,
+                        count=1,
+                        flags=_re_title_fix.IGNORECASE,
+                    )
+                elif _re_title_fix.search(r"</head>", html_content, flags=_re_title_fix.IGNORECASE):
+                    html_content = _re_title_fix.sub(
+                        f"<title>{_safe_title}</title>\n</head>",
+                        html_content,
+                        count=1,
+                        flags=_re_title_fix.IGNORECASE,
+                    )
+            except Exception:
+                pass
 
             # Sanitize: fix CSS var(), auth redirect patterns, and entity filters (common AI mistakes)
             html_content = _repair_malformed_html(html_content)
@@ -3924,6 +4314,12 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
                 pass
 
             logger.info(f"🎨 HTML generated: {len(html_content)} chars")
+            _final_dump_path = _dump_html_snapshot("final", html_content)
+            if _final_dump_path:
+                logger.info(
+                    f"create_html_dashboard: snapshot final saved: {_final_dump_path} "
+                    f"({len(html_content)} chars)"
+                )
 
 
             try:
@@ -3932,11 +4328,49 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
                 html_dashboards_dir = os.path.join(api.HA_CONFIG_DIR, "www", "dashboards")
                 os.makedirs(html_dashboards_dir, exist_ok=True)
 
-                # Save the agent-generated HTML file
-                safe_filename = name.lower().replace(" ", "-").replace("_", "-").replace(".", "-")
-                if not safe_filename.endswith(".html"):
-                    safe_filename += ".html"
+                # Save the agent-generated HTML file using a collision-safe stem.
+                # If the name is already used, append a random 4-digit suffix:
+                # e.g. tigo_1234.html (and matching sidebar slug tigo-1234[-dash]).
+                import re as _re_name
+                import random as _rnd_name
 
+                _base_stem = str(name or "dashboard").strip().lower()
+                _base_stem = _base_stem.replace(" ", "_")
+                _base_stem = _re_name.sub(r"[^a-z0-9_-]+", "_", _base_stem)
+                _base_stem = _re_name.sub(r"_+", "_", _base_stem).strip("_-") or "dashboard"
+
+                _existing_url_paths = set()
+                try:
+                    _db_list = api.call_ha_websocket("lovelace/dashboards/list")
+                    if isinstance(_db_list, dict):
+                        _db_items = _db_list.get("result") or []
+                        if isinstance(_db_items, list):
+                            for _d in _db_items:
+                                if isinstance(_d, dict):
+                                    _up = str(_d.get("url_path", "") or "").strip()
+                                    if _up:
+                                        _existing_url_paths.add(_up)
+                except Exception:
+                    pass
+
+                def _mk_names(stem: str):
+                    _fname = f"{stem}.html"
+                    _url = stem.replace("_", "-").replace(".", "-")
+                    if "-" not in _url:
+                        _url = _url + "-dash"
+                    return _fname, _url
+
+                _chosen_stem = _base_stem
+                for _ in range(30):
+                    _cand_file, _cand_url = _mk_names(_chosen_stem)
+                    _cand_path = os.path.join(html_dashboards_dir, _cand_file)
+                    _file_taken = os.path.exists(_cand_path)
+                    _url_taken = _cand_url in _existing_url_paths
+                    if not _file_taken and not _url_taken:
+                        break
+                    _chosen_stem = f"{_base_stem}_{_rnd_name.randint(1000, 9999)}"
+
+                safe_filename, safe_url_path = _mk_names(_chosen_stem)
                 file_path = os.path.join(html_dashboards_dir, safe_filename)
 
                 # Read old content for diff (if file already exists)
@@ -3978,10 +4412,6 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
                 logger.info(f"🔗 Dashboard iframe URL: {dashboard_url}")
 
                 # Create a Lovelace dashboard wrapper with iframe in sidebar
-                safe_url_path = name.lower().replace(" ", "-").replace("_", "-").replace(".", "-")
-                # HA requires url_path to contain at least one hyphen
-                if "-" not in safe_url_path:
-                    safe_url_path = safe_url_path + "-dash"
                 dashboard_created = False
                 
                 try:
@@ -3997,11 +4427,36 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
                     if ws_result.get("success") is not False:
                         dashboard_created = True
                     else:
-                        # If it already exists, treat as success (upsert)
+                        # If it already exists, retry with random suffix instead of
+                        # overwriting/updating the existing dashboard entry.
                         err_code = (ws_result.get("error") or {}).get("code", "")
                         if err_code in ("already_exists", "home_assistant_error"):
-                            logger.info(f"📊 Dashboard '{safe_url_path}' already exists — updating config")
-                            dashboard_created = True
+                            _retry_ok = False
+                            for _ in range(5):
+                                _chosen_stem = f"{_base_stem}_{_rnd_name.randint(1000, 9999)}"
+                                safe_filename, safe_url_path = _mk_names(_chosen_stem)
+                                file_path = os.path.join(html_dashboards_dir, safe_filename)
+                                with open(file_path, "w", encoding="utf-8") as f:
+                                    f.write(html_content)
+                                dashboard_url = f"/local/dashboards/{safe_filename}"
+                                _retry_ws = api.call_ha_websocket(
+                                    "lovelace/dashboards/create",
+                                    url_path=safe_url_path,
+                                    title=title,
+                                    icon=icon,
+                                    show_in_sidebar=True,
+                                    require_admin=False
+                                )
+                                logger.info(f"📊 Dashboard create retry WS response: {_retry_ws}")
+                                if _retry_ws.get("success") is not False:
+                                    _retry_ok = True
+                                    dashboard_created = True
+                                    break
+                            if not _retry_ok:
+                                logger.warning(
+                                    f"create_html_dashboard: could not allocate unique url_path after retries "
+                                    f"(base='{_base_stem}')"
+                                )
                 except Exception as e:
                     logger.error(f"❌ Exception creating Lovelace dashboard: {e}")
 
@@ -4030,6 +4485,8 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
                     "message": f"✨ {api.tr('dashboard_created_successfully')}'{title}'. {sidebar_message}",
                     "title": title,
                     "name": name,
+                    "source": _html_input_source,
+                    "source_url": _html_input_url,
                     "filename": safe_filename,
                     "html_url": dashboard_url,
                     "url_path": safe_url_path,
@@ -4037,6 +4494,8 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
                     "entities_count": len(entities),
                     "mode": mode,
                     "sections_count": len(sections) if isinstance(sections, list) else 0,
+                    "snapshot_incoming": _incoming_dump_path,
+                    "snapshot_final": _final_dump_path,
                     "IMPORTANT": f"✨ Dashboard '{title}' is ready! Reply with ONE short sentence confirming it was created. Do NOT include any HTML code in your reply.",
                 }
                 # Compute diff if we overwrote an existing file
@@ -4060,6 +4519,9 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
                 if invalid_entities:
                     result["filtered_entities"] = invalid_entities
                     result["warning"] = f"{len(invalid_entities)} entities were removed (not found or unknown/unavailable). The dashboard only monitors {len(entities)} valid entities."
+                if _inline_policy_warning:
+                    _prev_warn = result.get("warning", "")
+                    result["warning"] = ((_prev_warn + " | ") if _prev_warn else "") + _inline_policy_warning
                 return json.dumps(result, ensure_ascii=False, default=str)
 
             except Exception as e:

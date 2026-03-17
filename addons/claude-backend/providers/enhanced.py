@@ -10,6 +10,7 @@ This extends the basic BaseProvider with v3.17.11+ features:
 
 import json
 import logging
+import re
 import time
 from abc import abstractmethod
 from typing import Any, Dict, Optional, Generator, List
@@ -294,6 +295,145 @@ class EnhancedProvider(BaseProvider):
         return (intent_info or {}).get("tool_schemas") or []
 
     @staticmethod
+    def _escape_control_chars_in_strings(raw: str) -> str:
+        """Escape raw control chars that often break model-generated JSON."""
+        result: List[str] = []
+        in_string = False
+        i = 0
+        while i < len(raw):
+            c = raw[i]
+            if c == "\\" and in_string:
+                result.append(c)
+                i += 1
+                if i < len(raw):
+                    result.append(raw[i])
+                i += 1
+                continue
+            if c == '"':
+                in_string = not in_string
+                result.append(c)
+            elif in_string and c == "\n":
+                result.append("\\n")
+            elif in_string and c == "\r":
+                result.append("\\r")
+            elif in_string and c == "\t":
+                result.append("\\t")
+            else:
+                result.append(c)
+            i += 1
+        return "".join(result)
+
+    @staticmethod
+    def _repair_json(raw: str) -> str:
+        """Best-effort JSON repair for malformed function-call arguments."""
+        repaired = raw or ""
+        repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
+        repaired = repaired.replace("True", "true").replace("False", "false").replace("None", "null")
+        repaired = EnhancedProvider._escape_control_chars_in_strings(repaired)
+        return repaired
+
+    @staticmethod
+    def _allowed_tool_names(tools: Optional[List[Dict[str, Any]]]) -> set:
+        allowed = set()
+        for t in tools or []:
+            if not isinstance(t, dict):
+                continue
+            fn = t.get("function") if "function" in t else t
+            if isinstance(fn, dict):
+                name = str(fn.get("name") or "").strip()
+                if name:
+                    allowed.add(name)
+        return allowed
+
+    @staticmethod
+    def _normalize_tool_calls(
+        tool_calls: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Normalize tool calls to stable {id,name,arguments(JSON string)} dicts."""
+        allowed = EnhancedProvider._allowed_tool_names(tools)
+        normalized: List[Dict[str, Any]] = []
+        for i, tc in enumerate(tool_calls or []):
+            if not isinstance(tc, dict):
+                continue
+            name = str(tc.get("name") or "").strip()
+            if not name:
+                continue
+            if allowed and name not in allowed:
+                logger.warning("tool-call dropped: unknown tool '%s' (allowed=%s)", name, sorted(allowed))
+                continue
+
+            args_raw = tc.get("arguments", {})
+            args_obj: Any = {}
+            if isinstance(args_raw, dict):
+                args_obj = args_raw
+            elif isinstance(args_raw, str):
+                txt = args_raw.strip()
+                if not txt:
+                    args_obj = {}
+                else:
+                    try:
+                        args_obj = json.loads(txt)
+                    except Exception:
+                        try:
+                            args_obj = json.loads(EnhancedProvider._repair_json(txt))
+                        except Exception:
+                            logger.warning("tool-call args malformed for '%s' — using {}", name)
+                            args_obj = {}
+            else:
+                args_obj = {}
+
+            if not isinstance(args_obj, dict):
+                args_obj = {}
+
+            tc_id = str(tc.get("id") or "").strip() or f"call_{name}_{i}"
+            normalized.append({
+                "id": tc_id,
+                "name": name,
+                "arguments": json.dumps(args_obj, ensure_ascii=False),
+            })
+        return normalized
+
+    @staticmethod
+    def _recover_tool_calls_from_text(
+        text: str,
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Recover tool calls from textual artifacts (<tool_call> / JSON blocks)."""
+        txt = (text or "").strip()
+        if not txt:
+            return []
+
+        recovered: List[Dict[str, Any]] = []
+        try:
+            from providers.tool_simulator import extract_tool_calls
+            recovered = extract_tool_calls(txt) or []
+        except Exception:
+            recovered = []
+
+        if not recovered:
+            # Fallback: parse fenced ```json blocks that contain name+arguments.
+            for m in re.finditer(r"```json\s*([\s\S]*?)```", txt, re.IGNORECASE):
+                raw = (m.group(1) or "").strip()
+                if not raw:
+                    continue
+                try:
+                    obj = json.loads(raw)
+                except Exception:
+                    try:
+                        obj = json.loads(EnhancedProvider._repair_json(raw))
+                    except Exception:
+                        continue
+                if isinstance(obj, dict) and obj.get("name") and ("arguments" in obj):
+                    recovered.append({
+                        "id": f"call_recovered_{len(recovered)}",
+                        "name": str(obj.get("name")),
+                        "arguments": obj.get("arguments"),
+                    })
+
+        return EnhancedProvider._normalize_tool_calls(recovered, tools=tools)
+
+    @staticmethod
     def _openai_compat_stream(
         base_url: str,
         api_key: str,
@@ -348,6 +488,7 @@ class EnhancedProvider(BaseProvider):
         # before the usage-only chunk), so we can emit ONE done event
         # at [DONE] time with both usage and the correct finish_reason.
         final_finish_reason: Optional[str] = None
+        text_chunks: List[str] = []
         _done_emitted = False
         # connect=10s: fallisce subito se il server non risponde
         # read=120s: i modelli grandi (DeepSeek, Llama 405B) sono lenti ma streamano
@@ -376,7 +517,20 @@ class EnhancedProvider(BaseProvider):
                                 if not _tc.get("id"):
                                     _tc["id"] = f"call_{_tc.get('name', 'tool')}_{_idx}"
                                 _tc_list.append(_tc)
-                            done_event["tool_calls"] = _tc_list
+                            done_event["tool_calls"] = EnhancedProvider._normalize_tool_calls(_tc_list, tools=tools)
+                        if (
+                            not done_event.get("tool_calls")
+                            and tools
+                            and (final_finish_reason or "").lower() in {"malformed_function_call", "function_call"}
+                            and text_chunks
+                        ):
+                            recovered = EnhancedProvider._recover_tool_calls_from_text(
+                                "".join(text_chunks), tools=tools
+                            )
+                            if recovered:
+                                logger.info("Recovered %s tool_call(s) from malformed stream text", len(recovered))
+                                done_event["tool_calls"] = recovered
+                                done_event["finish_reason"] = "tool_calls"
                         _done_emitted = True
                         yield done_event
                     continue
@@ -423,6 +577,7 @@ class EnhancedProvider(BaseProvider):
 
                     content = delta.get("content")
                     if content:
+                        text_chunks.append(content)
                         yield {"type": "text", "text": content}
                     finish = choice.get("finish_reason")
                     if finish:
@@ -450,7 +605,20 @@ class EnhancedProvider(BaseProvider):
                         if not _tc.get("id"):
                             _tc["id"] = f"call_{_tc.get('name', 'tool')}_{_idx}"
                         _tc_list.append(_tc)
-                    done_event["tool_calls"] = _tc_list
+                    done_event["tool_calls"] = EnhancedProvider._normalize_tool_calls(_tc_list, tools=tools)
+                if (
+                    not done_event.get("tool_calls")
+                    and tools
+                    and (final_finish_reason or "").lower() in {"malformed_function_call", "function_call"}
+                    and text_chunks
+                ):
+                    recovered = EnhancedProvider._recover_tool_calls_from_text(
+                        "".join(text_chunks), tools=tools
+                    )
+                    if recovered:
+                        logger.info("Recovered %s tool_call(s) from malformed stream text", len(recovered))
+                        done_event["tool_calls"] = recovered
+                        done_event["finish_reason"] = "tool_calls"
                 yield done_event
 
     def _should_retry_error(self, error_msg: str) -> bool:
@@ -541,4 +709,3 @@ class EnhancedProvider(BaseProvider):
         self.last_error = ""
         self.last_error_time = 0.0
         logger.info(f"{self.name}: Statistics reset")
-
