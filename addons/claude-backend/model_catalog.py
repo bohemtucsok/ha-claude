@@ -176,6 +176,12 @@ _STATIC_CATALOG: List[ModelCatalogEntry] = [
         ThinkingLevel.HIGH, [], deprecated=True),
 
     # ========================  GOOGLE  ========================
+    ModelCatalogEntry("gemini-3-pro-preview", "google", "Gemini 3 Pro (Preview)",
+        _caps(_T, _V, _R, _D), 1_000_000, 65_536, True, PricingTier.PREMIUM,
+        ThinkingLevel.LOW, ["gemini-3"]),
+    ModelCatalogEntry("gemini-3-flash-preview", "google", "Gemini 3 Flash (Preview)",
+        _caps(_T, _V, _R, _D), 1_000_000, 65_536, True, PricingTier.STANDARD,
+        ThinkingLevel.LOW, ["gemini-3-flash"]),
     ModelCatalogEntry("gemini-2.0-flash", "google", "Gemini 2.0 Flash",
         _caps(_T, _V, _D), 1_000_000, 8_192, False, PricingTier.CHEAP,
         ThinkingLevel.OFF, ["flash-2.0"]),
@@ -347,6 +353,9 @@ _PROVIDER_MODELS: Dict[str, List[str]] = {
 
     # Gemini Web (browser session cookies, no API key)
     "gemini_web": [
+        "gemini-3.0-pro",
+        "gemini-3.0-flash",
+        "gemini-3.0-flash-thinking",
         "gemini-2.0-flash",
         "gemini-2.5-pro",
         "gemini-2.0-pro-exp",

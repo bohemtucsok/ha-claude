@@ -103,12 +103,27 @@ CONFIRMATION HANDLING — MANDATORY:
     3. If you are unsure which write call to make, call preview_automation_change to clarify first.
 
 OTHER rules:
+- EXCEPTION for create_html_dashboard:
+  - Do NOT ask for confirmation.
+  - Call create_html_dashboard immediately with complete arguments.
+  - The goal is to CREATE/SAVE a real .html file dashboard (not descriptive text).
+  - Use FILE-FIRST arguments (safer than inline JSON-escaped HTML):
+    1) html_url/file_url (download HTML file)
+    2) html_base64/file_base64
+    3) html inline fallback
+  - For payloads longer than ~2000 chars, DO NOT use inline html.
+    Use html_base64/file_base64 in a single final call.
+  - If you must use inline html and it's long, use chunked draft mode.
+  - If HTML is long, use chunked draft mode in consecutive tool calls.
+  - For create_html_dashboard only, multiple <tool_call> blocks in one message are allowed
+    (draft chunks + final call).
 - NEVER invent entity_ids — only use ids found in the CONTEXT or DATA sections.
 - ALWAYS respond in the user's language.
 - If the user asks for a counter helper, call manage_helpers with helper_type="counter".
   Do NOT answer that counter is unsupported; backend maps it to input_number automatically.
 - Emit exactly ONE <tool_call> block per message. Do NOT combine multiple tool calls.
   Wait for the result before deciding the next action.
+  (Exception: create_html_dashboard chunked draft mode may include multiple blocks.)
 """
 
 
@@ -179,11 +194,15 @@ def extract_tool_calls(text: str) -> List[Dict[str, Any]]:
                 repaired = _repair_json(raw)
                 payload = json.loads(repaired)
             except json.JSONDecodeError as _e1:
-                logger.warning(
-                    f"ToolSimulator: could not parse tool_call block #{i} "
-                    f"(orig_err={_e0}, repair_err={_e1}): {raw[:1000]}"
-                )
-                continue
+                payload = _parse_tool_call_relaxed(raw)
+                if payload is not None:
+                    logger.info(f"ToolSimulator: relaxed parse recovered tool_call block #{i}")
+                else:
+                    logger.warning(
+                        f"ToolSimulator: could not parse tool_call block #{i} "
+                        f"(orig_err={_e0}, repair_err={_e1}): {raw[:1000]}"
+                    )
+                    continue
 
         name = payload.get("name", "")
         arguments = payload.get("arguments", {})
@@ -348,3 +367,101 @@ def _escape_control_chars_in_strings(raw: str) -> str:
             result.append(c)
         i += 1
     return ''.join(result)
+
+
+def _parse_tool_call_relaxed(raw: str) -> Optional[Dict[str, Any]]:
+    """Best-effort parser for malformed tool_call JSON.
+
+    Focuses on create_html_dashboard where `arguments.html` often contains
+    unescaped quotes that break strict JSON parsing.
+    """
+    txt = (raw or "").strip()
+    if not txt:
+        return None
+
+    txt = (
+        txt.replace("\\<", "<")
+        .replace("\\>", ">")
+        .replace("\\_", "_")
+        .replace("\\#", "#")
+        .replace("\\!", "!")
+    )
+
+    m_name = re.search(r'"name"\s*:\s*"([^"]+)"', txt, re.IGNORECASE)
+    if not m_name:
+        return None
+    name = m_name.group(1).strip().replace("\\_", "_")
+    if not name:
+        return None
+
+    # Focus parsing on the "arguments" section only (top-level "name" belongs to tool call).
+    args_txt = txt
+    m_args_root = re.search(r'"arguments"\s*:\s*', txt, re.IGNORECASE)
+    if m_args_root:
+        args_txt = txt[m_args_root.end():]
+
+    # Generic relaxed path for non-dashboard tools: salvage plain arguments JSON object if possible.
+    if name != "create_html_dashboard":
+        m_args = re.search(r'({[\s\S]*})\s*$', args_txt, re.IGNORECASE)
+        if m_args:
+            repaired = _repair_json(m_args.group(1))
+            try:
+                args_obj = json.loads(repaired)
+                return {"name": name, "arguments": args_obj}
+            except Exception:
+                pass
+        return None
+
+    args: Dict[str, Any] = {}
+
+    # Boolean-ish fields
+    m_draft = re.search(r'"draft"\s*:\s*(true|false)', txt, re.IGNORECASE)
+    if m_draft:
+        args["draft"] = m_draft.group(1).lower() == "true"
+
+    # Simple string fields (outside html)
+    for key in (
+        "title", "name", "icon", "theme", "accent_color", "lang",
+        "html_url", "file_url", "html_base64", "file_base64"
+    ):
+        m = re.search(rf'"{key}"\s*:\s*"([^"\n\r]*)"', args_txt, re.IGNORECASE)
+        if m:
+            args[key] = m.group(1)
+
+    # Entities list
+    m_entities = re.search(r'"entities"\s*:\s*\[([\s\S]*?)\]', args_txt, re.IGNORECASE)
+    if m_entities:
+        ents = re.findall(r'"([a-z_][a-z0-9_]*\.[a-z0-9_]+)"', m_entities.group(1), re.IGNORECASE)
+        if ents:
+            args["entities"] = list(dict.fromkeys(ents))
+
+    # HTML field: take content after "html":" until end-of-block, then clean tail.
+    m_html = re.search(r'"html"\s*:\s*"', args_txt, re.IGNORECASE)
+    if m_html:
+        html_raw = args_txt[m_html.end():]
+        # Trim typical trailing closers from malformed JSON
+        html_raw = re.sub(r'"\s*}\s*$', "", html_raw)
+        html_raw = re.sub(r'"\s*}\s*,?\s*$', "", html_raw)
+        html_raw = html_raw.strip()
+        if html_raw.endswith("</tool_call>"):
+            html_raw = html_raw[: html_raw.rfind("</tool_call>")].rstrip()
+        html = (
+            html_raw.replace("\\r\\n", "\n")
+            .replace("\\n", "\n")
+            .replace("\\t", "\t")
+            .replace('\\"', '"')
+            .replace("\\'", "'")
+        )
+        # Keep only likely HTML/JS payload start when present.
+        starts = [p for p in ("<!DOCTYPE", "<html", "<head", "<body", "<div", "<script") if p in html]
+        if starts:
+            idx = min(html.find(p) for p in starts if html.find(p) >= 0)
+            html = html[idx:]
+        if html:
+            args["html"] = html
+
+    # Accept file-first payloads too (url/base64), not only inline html.
+    if not any(k in args for k in ("html", "html_url", "file_url", "html_base64", "file_base64")):
+        return None
+
+    return {"name": name, "arguments": args}

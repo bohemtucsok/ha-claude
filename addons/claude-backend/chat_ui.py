@@ -110,6 +110,7 @@ def get_chat_ui():
             "switched_to": "Switched to {provider} \u2192 {model}",
             "provider_label": "Provider",
             "model_label": "Model",
+            "web_html_warn": "⚠️ Unofficial web provider: HTML dashboard creation may be incomplete or malformed. Always verify the generated file.",
             # Suggestions
             "sug_lights": "Show all lights",
             "sug_sensors": "Sensor status",
@@ -393,6 +394,7 @@ def get_chat_ui():
             "switched_to": "Passato a {provider} \u2192 {model}",
             "provider_label": "Provider",
             "model_label": "Modello",
+            "web_html_warn": "⚠️ Provider web non ufficiale: la creazione di dashboard HTML può risultare incompleta o malformata. Verifica sempre il file generato.",
             # Suggestions
             "sug_lights": "Mostra tutte le luci",
             "sug_sensors": "Stato sensori",
@@ -676,6 +678,7 @@ def get_chat_ui():
             "switched_to": "Cambiado a {provider} \u2192 {model}",
             "provider_label": "Proveedor",
             "model_label": "Modelo",
+            "web_html_warn": "⚠️ Proveedor web no oficial: la creación de dashboards HTML puede ser incompleta o malformada. Verifica siempre el archivo generado.",
             # Suggestions
             "sug_lights": "Mostrar todas las luces",
             "sug_sensors": "Estado de sensores",
@@ -959,6 +962,7 @@ def get_chat_ui():
             "switched_to": "Passé à {provider} \u2192 {model}",
             "provider_label": "Fournisseur",
             "model_label": "Modèle",
+            "web_html_warn": "⚠️ Fournisseur web non officiel : la création de dashboards HTML peut être incomplète ou malformée. Vérifie toujours le fichier généré.",
             # Suggestions
             "sug_lights": "Afficher toutes les lumières",
             "sug_sensors": "État des capteurs",
@@ -1639,6 +1643,7 @@ def get_chat_ui():
         .message.assistant ul, .message.assistant ol {{ margin: 6px 0 6px 20px; }}
         .message.assistant p {{ margin: 4px 0; }}
         .message.system {{ background: #fff3cd; color: #856404; align-self: center; text-align: center; font-size: 13px; border-radius: 8px; max-width: 90%; }}
+        .message.system-error {{ background: #fee2e2; color: #991b1b; align-self: center; text-align: center; font-size: 13px; border-radius: 8px; max-width: 90%; border: 1px solid #fecaca; }}
         .message.thinking {{ background: #f8f9fa; color: #999; align-self: flex-start; border-bottom-left-radius: 4px; font-style: italic; }}
         .message.thinking .dots span {{ animation: blink 1.4s infinite both; }}
         .message.thinking .dots span:nth-child(2) {{ animation-delay: 0.2s; }}
@@ -2392,6 +2397,11 @@ def get_chat_ui():
         body.dark-mode .message.system {{
             background: #5d4037;
             color: #ffb74d;
+        }}
+        body.dark-mode .message.system-error {{
+            background: #4a1515;
+            color: #fca5a5;
+            border-color: #7f1d1d;
         }}
 
         body.dark-mode .message.assistant pre {{
@@ -3685,8 +3695,23 @@ def get_chat_ui():
         let darkMode = safeLocalStorageGet('darkMode') === 'true';
         let currentProviderId = '{ai_provider}' || 'anthropic';
         let currentModelDisplay = '{model_name}';  // Updated by loadModels() and changeModel()
+        const WEB_DASH_WARN_PROVIDERS = new Set(['claude_web', 'chatgpt_web', 'gemini_web', 'github_copilot']);
+        const _webDashWarnShown = {{}};
 
         const ANALYZING_MSG = {json.dumps(analyzing_msg)};
+
+        function maybeWarnWebDashboard(providerId) {{
+            try {{
+                const pid = String(providerId || '');
+                if (!WEB_DASH_WARN_PROVIDERS.has(pid)) return;
+                if (_webDashWarnShown[pid]) return;
+                _webDashWarnShown[pid] = true;
+                addMessage(
+                    (T.web_html_warn || '⚠️ Unofficial web provider: HTML dashboard creation may be incomplete or malformed. Always verify the generated file.'),
+                    'system-error'
+                );
+            }} catch (e) {{}}
+        }}
 
         function _appendSystemRaw(text) {{
             try {{
@@ -6519,7 +6544,7 @@ def get_chat_ui():
         function copyCode(button) {{
             const codeBlock = button.nextElementSibling;
             const codeElement = codeBlock.querySelector('code');
-            const code = codeElement ? (codeElement.innerText || codeElement.textContent) : codeBlock.textContent;
+            const code = codeElement ? (codeElement.textContent || codeElement.innerText || '') : (codeBlock.textContent || '');
 
             const showSuccess = () => {{
                 const originalText = button.textContent;
@@ -6531,16 +6556,32 @@ def get_chat_ui():
                 }}, 2000);
             }};
 
-            // Try modern clipboard API first (requires HTTPS)
-            if (navigator.clipboard && navigator.clipboard.writeText) {{
-                navigator.clipboard.writeText(code).then(showSuccess).catch(() => {{
-                    // Fallback to older method for HTTP
-                    fallbackCopy(code, showSuccess);
-                }});
-            }} else {{
-                // Fallback for older browsers or HTTP
-                fallbackCopy(code, showSuccess);
-            }}
+            // Try multiple clipboard contexts (iframe/HA shell can differ).
+            const clipboards = [];
+            if (navigator && navigator.clipboard && navigator.clipboard.writeText) clipboards.push(navigator.clipboard);
+            try {{
+                if (window.parent && window.parent.navigator && window.parent.navigator.clipboard && window.parent.navigator.clipboard.writeText) {{
+                    clipboards.push(window.parent.navigator.clipboard);
+                }}
+            }} catch(e) {{}}
+            try {{
+                if (window.top && window.top.navigator && window.top.navigator.clipboard && window.top.navigator.clipboard.writeText) {{
+                    clipboards.push(window.top.navigator.clipboard);
+                }}
+            }} catch(e) {{}}
+
+            const tryNextClipboard = (idx) => {{
+                if (idx >= clipboards.length) {{
+                    // Final fallback for HTTP / restricted webviews
+                    const ok = fallbackCopy(code, showSuccess);
+                    if (!ok) {{
+                        addMessage('⚠️ Copy failed in this browser context. Try selecting the code manually.', 'system');
+                    }}
+                    return;
+                }}
+                clipboards[idx].writeText(code).then(showSuccess).catch(() => tryNextClipboard(idx + 1));
+            }};
+            tryNextClipboard(0);
         }}
 
         function fallbackCopy(text, callback) {{
@@ -6548,15 +6589,24 @@ def get_chat_ui():
             textarea.value = text;
             textarea.style.position = 'fixed';
             textarea.style.opacity = '0';
+            textarea.style.left = '-9999px';
+            textarea.setAttribute('readonly', '');
             document.body.appendChild(textarea);
+            textarea.focus();
             textarea.select();
+            textarea.setSelectionRange(0, textarea.value.length);
             try {{
-                document.execCommand('copy');
-                callback();
+                const ok = document.execCommand('copy');
+                if (ok) {{
+                    callback();
+                    document.body.removeChild(textarea);
+                    return true;
+                }}
             }} catch (err) {{
                 console.error('Copy failed:', err);
             }}
             document.body.removeChild(textarea);
+            return false;
         }}
 
         function showThinking() {{
@@ -8027,6 +8077,7 @@ def get_chat_ui():
                     // Show notification
                     const providerName = PROVIDER_LABELS[parsed.provider] || parsed.provider;
                     addMessage('\U0001f504 ' + T.switched_to.replace('{{provider}}', providerName).replace('{{model}}', parsed.model), 'system');
+                    maybeWarnWebDashboard(parsed.provider);
                     const modelLower = String(parsed.model || '').toLowerCase();
                     if (parsed.provider === 'github' && modelLower.includes('o4-mini') && O4MINI_TOKENS_HINT) {{
                         addMessage(O4MINI_TOKENS_HINT, 'system');

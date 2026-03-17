@@ -71,44 +71,28 @@ class OpenAIProvider(EnhancedProvider):
         messages: List[Dict[str, Any]],
         intent_info: Optional[Dict[str, Any]] = None,
     ) -> Generator[Dict[str, Any], None, None]:
-        """Actual OpenAI API call via SDK."""
-        try:
-            from openai import OpenAI as _OpenAI
-        except ImportError:
-            raise RuntimeError("openai package not installed (pip install openai)")
+        """OpenAI API via the shared OpenAI-compatible streaming helper.
+
+        This path supports native tool calling (`tool_calls`) and usage capture
+        consistently with other API-key providers.
+        """
         model = (self.model or "gpt-4o").replace("openai/", "")
-        import httpx as _httpx
-        _timeout = _httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=5.0)
-        client = _OpenAI(api_key=self.api_key, timeout=_timeout, max_retries=0)
-        stream = client.chat.completions.create(
-            model=model, messages=messages, stream=True,
-            stream_options={"include_usage": True},
+        msgs = self._prepare_messages(messages, intent_info)
+        tool_schemas = self._get_intent_tools(intent_info) or None
+        _is_html_intent = bool(
+            isinstance(intent_info, dict)
+            and str(intent_info.get("intent", "")).lower() == "create_html_dashboard"
         )
-        captured_usage = None
-        for chunk in stream:
-            # Capture usage from the final chunk (empty choices, usage populated)
-            if getattr(chunk, "usage", None):
-                u = chunk.usage
-                captured_usage = {
-                    "input_tokens": getattr(u, "prompt_tokens", 0) or 0,
-                    "output_tokens": getattr(u, "completion_tokens", 0) or 0,
-                }
-                # OpenAI nests cache info in prompt_tokens_details
-                ptd = getattr(u, "prompt_tokens_details", None)
-                if ptd:
-                    captured_usage["cache_read_tokens"] = getattr(ptd, "cached_tokens", 0) or 0
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-            content = getattr(delta, "content", None)
-            if content:
-                yield {"type": "text", "text": content}
-            finish = chunk.choices[0].finish_reason
-            if finish:
-                done_event: dict = {"type": "done", "finish_reason": finish}
-                if captured_usage:
-                    done_event["usage"] = captured_usage
-                yield done_event
+        _max_tokens = 16384 if _is_html_intent else 8192
+        yield from self._openai_compat_stream(
+            "https://api.openai.com/v1",
+            self.api_key,
+            model,
+            msgs,
+            tools=tool_schemas,
+            include_usage=True,
+            max_tokens=_max_tokens,
+        )
 
     def get_available_models(self) -> List[str]:
         """Return list of available OpenAI models."""

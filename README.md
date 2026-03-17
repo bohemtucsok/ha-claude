@@ -223,7 +223,7 @@ Amira supports **Telegram** (long polling, no public IP) and **WhatsApp** (via T
 By default, **anyone who finds your bot link can send commands to your home**. It is strongly recommended to restrict access to known user IDs.
 
 **Setup:**
-1. Find your Telegram user ID: open Telegram → search `@userinfobot` → send `/start` → it replies with your numeric ID
+1. Find your Telegram user ID: open Telegram → search `@userinfobot` (alternative `@rawdatabot`) → send `/start` → it replies with your numeric ID
 2. In Amira: **Settings → Messaging → Allowed User IDs**
 3. Enter one or more IDs separated by commas: `123456789` or `123456789,987654321`
 4. Save — unauthorized users will immediately receive `⛔ Non sei autorizzato a usare questo bot.`

@@ -1085,6 +1085,15 @@ def _fix_auth_redirect(html: str) -> str:
         )
         body = body.replace("headers:{Authorization:'Bearer '+tok}", "headers:_authHeader()")
         body = body.replace('headers:{Authorization:\"Bearer \"+tok}', "headers:_authHeader()")
+        # Fix JS object-shorthand patterns like fetch(url,{headers}) where
+        # `headers` may be undefined after stale header var cleanup.
+        # Force dynamic auth headers for both fetch(...) and _authFetch(...).
+        body = re.sub(
+            r"(\b(?:fetch|_authFetch)\s*\([^,\n]+,\s*\{)\s*headers\s*(\})",
+            r"\1headers:_authHeader()\2",
+            body,
+            flags=re.IGNORECASE,
+        )
         # Route HA state/history calls through auth-aware fetch wrapper.
         # Pattern 1: fetch('/api/states/...') or fetch(`/api/...`)
         body = re.sub(

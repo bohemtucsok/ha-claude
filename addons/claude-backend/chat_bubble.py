@@ -1959,22 +1959,62 @@ def get_chat_bubble_js(ingress_url: str, language: str = "en", show_bubble: bool
     }} catch(e) {{ return null; }}
   }}
 
-  // Global copy helper — clipboard API needs HTTPS; fallback with textarea for HTTP
+  // Global copy helper — robust across iframe/shadow contexts.
   window.__amiraCopyCode = function(btn) {{
-    var code = btn.parentElement.querySelector('code');
+    var wrap = btn && btn.parentElement ? btn.parentElement : null;
+    var code = wrap ? wrap.querySelector('code') : null;
     if (!code) return;
-    var txt = code.textContent;
-    function ok() {{ btn.textContent = T.copied || 'Copied!'; setTimeout(function(){{ btn.textContent = T.copy_btn || 'Copy'; }}, 1500); }}
+    var txt = String(code.textContent || code.innerText || '');
+
+    function ok() {{
+      btn.textContent = T.copied || 'Copied!';
+      setTimeout(function() {{ btn.textContent = T.copy_btn || 'Copy'; }}, 1500);
+    }}
+    function fail() {{
+      btn.textContent = 'Error';
+      setTimeout(function() {{ btn.textContent = T.copy_btn || 'Copy'; }}, 1500);
+    }}
     function fallback() {{
       var ta = document.createElement('textarea');
-      ta.value = txt; ta.style.cssText = 'position:fixed;left:-9999px;';
-      document.body.appendChild(ta); ta.select();
-      try {{ document.execCommand('copy'); ok(); }} catch(e) {{ btn.textContent = 'Error'; }}
+      ta.value = txt;
+      ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;';
+      ta.setAttribute('readonly', '');
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      if (ta.setSelectionRange) ta.setSelectionRange(0, ta.value.length);
+      try {{
+        if (document.execCommand('copy')) ok();
+        else fail();
+      }} catch(e) {{
+        fail();
+      }}
       document.body.removeChild(ta);
     }}
-    if (navigator.clipboard && navigator.clipboard.writeText) {{
-      navigator.clipboard.writeText(txt).then(ok).catch(fallback);
-    }} else {{ fallback(); }}
+
+    var clipboards = [];
+    try {{
+      if (navigator && navigator.clipboard && navigator.clipboard.writeText) clipboards.push(navigator.clipboard);
+    }} catch(e) {{}}
+    try {{
+      if (window.parent && window.parent.navigator && window.parent.navigator.clipboard && window.parent.navigator.clipboard.writeText) {{
+        clipboards.push(window.parent.navigator.clipboard);
+      }}
+    }} catch(e) {{}}
+    try {{
+      if (window.top && window.top.navigator && window.top.navigator.clipboard && window.top.navigator.clipboard.writeText) {{
+        clipboards.push(window.top.navigator.clipboard);
+      }}
+    }} catch(e) {{}}
+
+    function tryClipboard(i) {{
+      if (i >= clipboards.length) {{
+        fallback();
+        return;
+      }}
+      clipboards[i].writeText(txt).then(ok).catch(function() {{ tryClipboard(i + 1); }});
+    }}
+    tryClipboard(0);
   }};
 
   // Event delegation for copy buttons (inline onclick blocked by HA CSP).
