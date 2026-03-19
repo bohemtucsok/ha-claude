@@ -46,6 +46,7 @@ Supports **23+ AI providers** and **60+ models**: Anthropic Claude, OpenAI, Goog
 | 🛠️ **Dashboard Creation** | Built-in | Lovelace cards + AI-generated HTML dashboards (Vue 3) |
 | 📱 **Telegram Bot** | ⚙️ OFF | Long polling — no public IP needed |
 | 📱 **WhatsApp** | ⚙️ OFF | Twilio integration with webhook |
+| 🕹️ **Discord Bot** | ⚙️ OFF | Discord bot integration (gateway, token-based) |
 | ⏰ **Scheduled Tasks** | Built-in | Cron-based task scheduler |
 | 🌍 **4 Languages** | Built-in | EN / IT / ES / FR — UI + AI responses |
 
@@ -404,6 +405,9 @@ For stdio servers (if node/python available on the host):
 | `twilio_account_sid` | Twilio SID for WhatsApp |
 | `twilio_auth_token` | Twilio auth token |
 | `twilio_whatsapp_from` | Your Twilio WhatsApp number |
+| `discord_bot_token` | Discord bot token from Discord Developer Portal |
+| `discord_allowed_channel_ids` | Optional comma-separated allow-list of Discord channel IDs |
+| `discord_allowed_user_ids` | Optional comma-separated allow-list of Discord user IDs |
 
 → Setup guide: [MESSAGING.md](../../../docs/MESSAGING.md)
 

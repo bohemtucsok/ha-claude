@@ -14,6 +14,7 @@ import logging
 import os
 import uuid
 from typing import Optional
+from core.translations import tr
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +173,11 @@ def _exec_tool(name: str, inputs: dict) -> str:
         import scheduled_tasks as st
         scheduler = st.get_scheduler()
     except Exception as e:
-        return json.dumps({"error": f"Scheduler non disponibile: {e}"}, ensure_ascii=False)
+        return json.dumps({"error": tr(
+            "scheduler_unavailable_detail",
+            "Scheduler unavailable: {error}",
+            error=e,
+        )}, ensure_ascii=False)
 
     if name == "list_tasks":
         tasks = [
@@ -220,10 +225,18 @@ def _exec_tool(name: str, inputs: dict) -> str:
         task_id = inputs.get("task_id", "")
         t = scheduler.tasks.get(task_id)
         if not t:
-            return json.dumps({"error": f"Task '{task_id}' non trovato"}, ensure_ascii=False)
+            return json.dumps({"error": tr(
+                "scheduler_task_not_found",
+                "Task '{task_id}' not found",
+                task_id=task_id,
+            )}, ensure_ascii=False)
         if getattr(t, "builtin", False):
             return json.dumps(
-                {"error": f"Il task '{task_id}' è di sistema e non può essere eliminato"},
+                {"error": tr(
+                    "scheduler_task_system_delete_forbidden",
+                    "Task '{task_id}' is a system task and cannot be deleted",
+                    task_id=task_id,
+                )},
                 ensure_ascii=False,
             )
         ok = scheduler.remove_task(task_id)
@@ -232,7 +245,11 @@ def _exec_tool(name: str, inputs: dict) -> str:
     if name == "toggle_task":
         task_id = inputs.get("task_id", "")
         if task_id not in scheduler.tasks:
-            return json.dumps({"error": f"Task '{task_id}' non trovato"}, ensure_ascii=False)
+            return json.dumps({"error": tr(
+                "scheduler_task_not_found",
+                "Task '{task_id}' not found",
+                task_id=task_id,
+            )}, ensure_ascii=False)
         scheduler.tasks[task_id].enabled = inputs["enabled"]
         scheduler.save_tasks()
         return json.dumps(
@@ -240,7 +257,7 @@ def _exec_tool(name: str, inputs: dict) -> str:
             ensure_ascii=False,
         )
 
-    return json.dumps({"error": f"Tool '{name}' sconosciuto"}, ensure_ascii=False)
+    return json.dumps({"error": tr("tool_unknown", "Unknown tool '{name}'", name=name)}, ensure_ascii=False)
 
 
 # ── LLM helpers ────────────────────────────────────────────────────────────────
@@ -324,7 +341,7 @@ def chat(user_message: str, session_id: str = "default") -> str:
             )
         except Exception as e:
             logger.error(f"SchedulerAgent LLM call failed (iteration {iteration}): {e}")
-            return f"Errore chiamata LLM: {e}"
+            return tr("scheduler_llm_call_error", "LLM call error: {error}", error=e)
 
         content_dicts = _content_to_dicts(response.content)
 
@@ -335,7 +352,7 @@ def chat(user_message: str, session_id: str = "default") -> str:
             ).strip()
             messages.append({"role": "assistant", "content": content_dicts})
             _sessions[session_id] = messages
-            return text or "(nessuna risposta)"
+            return text or tr("scheduler_no_response", "(no response)")
 
         if response.stop_reason == "tool_use":
             # Esegui i tool richiesti e continua il loop
@@ -362,4 +379,7 @@ def chat(user_message: str, session_id: str = "default") -> str:
         break
 
     _sessions[session_id] = messages
-    return "Limite di iterazioni raggiunto — riprova con una richiesta più semplice."
+    return tr(
+        "scheduler_iteration_limit",
+        "Iteration limit reached — try again with a simpler request.",
+    )

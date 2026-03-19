@@ -31,7 +31,7 @@ def _check_optional_packages() -> dict[str, bool]:
     """Quick import-check for every optional dependency."""
     pkgs = [
         "anthropic", "openai", "google.genai", "httpx",
-        "mcp", "telegram", "twilio",
+        "mcp", "telegram", "twilio", "discord",
         "PyPDF2", "docx",
     ]
     status: dict[str, bool] = {}
@@ -145,7 +145,7 @@ def main() -> None:
     # Register floating chat bubble (if enabled)
     api.setup_chat_bubble()
 
-    # Start Telegram / WhatsApp bots if configured
+    # Start Telegram / WhatsApp / Discord bots if configured
     api.start_messaging_bots()
 
     # Initialize MCP servers if configured

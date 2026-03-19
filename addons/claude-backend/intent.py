@@ -35,6 +35,7 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
     "update_script": "Modify an existing script",
     "get_areas": "Get all areas/rooms and their entities",
     "send_notification": "Send a notification (persistent or mobile)",
+    "send_channel_message": "Send direct message to Telegram/WhatsApp/Discord by recipient/channel ID",
     "get_dashboards": "List all Lovelace dashboards",
     "create_dashboard": "Create a new Lovelace YAML dashboard",
     "create_script": "Create a new script with a sequence of actions",
@@ -140,7 +141,9 @@ TOOL USAGE GUIDE:
 — HELPERS: manage_helpers (create/update/delete input_boolean, input_number, input_select, etc.; "counter" is auto-mapped to input_number on this API channel)
   • If user asks to create/update/delete a counter helper, DO NOT refuse. Call manage_helpers with helper_type="counter" and let backend compatibility mapping handle it.
 — AREAS/ROOMS: manage_areas, manage_entity, get_areas, get_devices
-— NOTIFICATIONS: send_notification + search_entities
+— NOTIFICATIONS:
+  • send_notification for Home Assistant notify services (mobile_app, persistent_notification, etc.)
+  • send_channel_message for direct Telegram chat_id / WhatsApp number / Discord channel_id delivery
 — SCENES: get_scenes, activate_scene
 — SHOPPING LIST: shopping_list
 — SYSTEM DIAGNOSTICS:

@@ -120,6 +120,7 @@ try:
     import messaging
     import telegram_bot
     import whatsapp_bot
+    import discord_bot
     MESSAGING_AVAILABLE = True
 except ImportError:
     MESSAGING_AVAILABLE = False
@@ -264,13 +265,25 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
 TWILIO_WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "")
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
+DISCORD_ALLOWED_CHANNEL_IDS = os.getenv("DISCORD_ALLOWED_CHANNEL_IDS", "")
+DISCORD_ALLOWED_USER_IDS = os.getenv("DISCORD_ALLOWED_USER_IDS", "")
 # Clean bashio 'null' values for messaging tokens
-for _msg_key in ("TELEGRAM_BOT_TOKEN", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM"):
+for _msg_key in (
+    "TELEGRAM_BOT_TOKEN",
+    "TWILIO_ACCOUNT_SID",
+    "TWILIO_AUTH_TOKEN",
+    "TWILIO_WHATSAPP_FROM",
+    "DISCORD_BOT_TOKEN",
+    "DISCORD_ALLOWED_CHANNEL_IDS",
+    "DISCORD_ALLOWED_USER_IDS",
+):
     if globals()[_msg_key] in ("null", "None", "none", "NULL"):
         globals()[_msg_key] = ""
-# Per-channel enable/disable toggle (config.yaml: enable_telegram / enable_whatsapp)
+# Per-channel enable/disable toggle (Telegram / WhatsApp / Discord)
 ENABLE_TELEGRAM = os.getenv("ENABLE_TELEGRAM", "true").lower() not in ("false", "0", "no")
 ENABLE_WHATSAPP = os.getenv("ENABLE_WHATSAPP", "true").lower() not in ("false", "0", "no")
+ENABLE_DISCORD = os.getenv("ENABLE_DISCORD", "true").lower() not in ("false", "0", "no")
 
 def _parse_allowed_ids(raw: str) -> set:
     """Parse a comma-separated string of Telegram user IDs into a set of ints."""
@@ -285,6 +298,8 @@ def _parse_allowed_ids(raw: str) -> set:
 
 _raw_allowed = os.getenv("TELEGRAM_ALLOWED_IDS", "")
 TELEGRAM_ALLOWED_IDS: set = _parse_allowed_ids(_raw_allowed)
+DISCORD_ALLOWED_CHANNELS: set = _parse_allowed_ids(DISCORD_ALLOWED_CHANNEL_IDS)
+DISCORD_ALLOWED_USERS: set = _parse_allowed_ids(DISCORD_ALLOWED_USER_IDS)
 ENABLE_MCP = os.getenv("ENABLE_MCP", "true").lower() not in ("false", "0", "")
 MCP_CONFIG_FILE = os.getenv("MCP_CONFIG_FILE", "/config/amira/mcp_config.json")
 FALLBACK_ENABLED = os.getenv("FALLBACK_ENABLED", "true").lower() not in ("false", "0", "no")
@@ -332,6 +347,15 @@ def _apply_settings(settings: dict) -> None:
             raw_str = str(value)
             _g[gvar] = _parse_allowed_ids(raw_str)
             os.environ[gvar] = raw_str
+            continue
+        elif key in ("discord_allowed_channel_ids", "discord_allowed_user_ids"):
+            raw_str = str(value)
+            _g[gvar] = raw_str
+            os.environ[gvar] = raw_str
+            if key == "discord_allowed_channel_ids":
+                _g["DISCORD_ALLOWED_CHANNELS"] = _parse_allowed_ids(raw_str)
+            else:
+                _g["DISCORD_ALLOWED_USERS"] = _parse_allowed_ids(raw_str)
             continue
         # Set Python global
         _g[gvar] = value
@@ -660,6 +684,9 @@ def load_runtime_selection() -> bool:
     global AI_PROVIDER, AI_MODEL, SELECTED_MODEL, SELECTED_PROVIDER
     provider, model = settings_service.load_runtime_selection()
     if provider and model:
+        # Backward compatibility: runtime_selection may contain display labels
+        # (e.g. "NVIDIA: Llama 3.3 70B Instruct"). Normalize to technical IDs.
+        model = normalize_model_name(model)
         if provider == "grok_web":
             provider = "xai"
             if not model:
@@ -2963,7 +2990,7 @@ def _collect_from_stream(user_message: str, session_id: str) -> str:
             if event.get("usage"):
                 _last_sync_usage = event["usage"]
         elif event_type == "error":
-            return "❌ " + event.get("message", "Errore sconosciuto")
+            return "❌ " + event.get("message", tr("err_unknown_error", "Unknown error"))
     result = "".join(parts).strip()
     result = _clean_unnecessary_comments(result)
     result = _validate_entity_ids_in_response(result)
@@ -3768,11 +3795,20 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
         _deferred_done_event = None      # postpone done for HTML autosave flows
         _skip_tool_extraction = False    # after dedup, skip ToolSimulator next round
         _last_write_result = None        # last WRITE tool result (for fallback display)
+        _last_success_read_tool = None   # last successful read tool snapshot for loop fallback
         _preview_round_done = False      # True after preview_automation_change executes
         _html_draft_pending_name = ""    # create_html_dashboard draft name pending finalize
         _html_dashboard_saved_this_turn = False
         _write_tools_executed: list = []  # names of write tools actually called this turn
         _html_force_execute_retry_used = False
+        _successful_read_tools_count = 0
+        _successful_channel_deliveries: set[str] = set()
+        _delivery_request_needs_data = bool(
+            re.search(
+                r"\b(report|riepilogo|summary|produzione|consumo|fotovoltaic|solar|kwh|kw)\b",
+                (user_message or "").lower(),
+            )
+        )
 
         def _pending_call_signature(_tc: dict) -> str:
             """Build a stable signature for loop detection (name + canonical args)."""
@@ -3787,6 +3823,60 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
             else:
                 _args_sig = str(_raw_args)
             return f"{_name}:{_args_sig}"
+
+        def _build_readonly_loop_fallback(snapshot: dict | None) -> str:
+            """Create a deterministic final answer when model loops on read-only tools."""
+            if not snapshot:
+                return ""
+            name = str(snapshot.get("name", "") or "")
+            args = snapshot.get("args", {}) or {}
+            raw = snapshot.get("result")
+            parsed = raw
+            try:
+                if isinstance(raw, str):
+                    parsed = json.loads(raw)
+            except Exception:
+                parsed = raw
+
+            if name == "get_entities" and isinstance(parsed, list):
+                query = str((args or {}).get("query", "") or "").lower()
+                want_temp = ("temp" in query) or ("temperat" in query)
+                lines = []
+                for item in parsed:
+                    if not isinstance(item, dict):
+                        continue
+                    attrs = item.get("attributes") if isinstance(item.get("attributes"), dict) else {}
+                    device_class = str(attrs.get("device_class", "") or "").lower()
+                    if want_temp and device_class != "temperature":
+                        continue
+                    state = str(item.get("state", "") or "").strip()
+                    if state in ("", "unknown", "unavailable", "none", "null"):
+                        continue
+                    friendly = str(item.get("friendly_name") or item.get("entity_id") or "").strip()
+                    unit = str(attrs.get("unit_of_measurement") or "")
+                    lines.append(f"- {friendly}: {state}{unit}")
+                if lines:
+                    return tr(
+                        "read_loop_fallback_notice",
+                        "⚠️ I collected the data, but the model got stuck in a tool loop. Here are the results found:",
+                    ) + "\n" + "\n".join(lines[:12])
+
+            if name == "get_entity_state" and isinstance(parsed, dict):
+                eid = str(parsed.get("entity_id") or "")
+                friendly = str(parsed.get("friendly_name") or eid)
+                state = str(parsed.get("state", "") or "").strip()
+                attrs = parsed.get("attributes") if isinstance(parsed.get("attributes"), dict) else {}
+                unit = str(attrs.get("unit_of_measurement") or "")
+                if state and state not in ("unknown", "unavailable", "none", "null"):
+                    return tr(
+                        "read_loop_fallback_notice",
+                        "⚠️ I collected the data, but the model got stuck in a tool loop. Here are the results found:",
+                    ) + "\n" + f"- {friendly}: {state}{unit}"
+
+            return tr(
+                "read_loop_fallback_empty",
+                "⚠️ I collected data, but there are no usable results to show.",
+            )
 
         # Build read-only tool set: from registry (categories) or static fallback
         if _tool_registry is not None:
@@ -4090,9 +4180,9 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                                 yield {"type": "token", "content": _display}
                             _text_buffer = []
                         elif _is_html_dash and _finish_reason_done == "malformed_function_call":
-                            _msg_malformed = (
-                                "⚠️ Il modello ha restituito una tool-call malformata e non eseguibile. "
-                                "Nessuna dashboard è stata creata."
+                            _msg_malformed = tr(
+                                "html_malformed_tool_call",
+                                "⚠️ The model returned a malformed, non-executable tool call. No dashboard was created.",
                             )
                             yield {"type": "token", "content": _msg_malformed}
                             _streamed_text_parts.append(_msg_malformed)
@@ -4433,6 +4523,10 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                 # text_so_far was already streamed to the client — don't re-yield it.
                 elif _duplicate_count >= 2:
                     logger.warning("Native provider: 2nd duplicate → breaking loop")
+                    _fallback_text = _build_readonly_loop_fallback(_last_success_read_tool)
+                    if _fallback_text:
+                        yield {"type": "token", "content": _fallback_text}
+                        _streamed_text_parts = [_fallback_text]
                     yield {"type": "done"}
                     break
 
@@ -4641,6 +4735,7 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
             _round_has_rich_diff = False
             _any_successful_write_this_round = False
             _round_write_confirms: list[str] = []
+            _round_success_write_tools: list[str] = []
             _stop_after_html_dashboard_success = False
             _html_dashboard_success_message = ""
             _stop_after_html_dashboard_error = False
@@ -4664,6 +4759,48 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                 if not isinstance(tc_args, dict):
                     tc_args = {}
 
+                _sig = f"{fn_name}:{json.dumps(tc_args, sort_keys=True)}"
+
+                # Guardrail for direct channel messages:
+                # - For "report-like" requests, require at least one successful data-read tool
+                #   before allowing delivery (prevents sending placeholder prompts as final message).
+                # - Prevent duplicate delivery to the same channel/recipient within the same turn.
+                if fn_name == "send_channel_message":
+                    _channel = str(tc_args.get("channel", "") or "").strip().lower()
+                    _recipient = str(tc_args.get("recipient", "") or "").strip()
+                    _delivery_key = f"{_channel}:{_recipient}"
+                    _block_reason = ""
+                    if _delivery_request_needs_data and _successful_read_tools_count == 0:
+                        _block_reason = (
+                            "send_channel_message blocked: this looks like a report request, "
+                            "but no data was collected yet. First call read tools (for example "
+                            "search_entities/get_entity_state/get_entities), then send exactly one "
+                            "final message."
+                        )
+                    elif _delivery_key in _successful_channel_deliveries:
+                        _block_reason = (
+                            "send_channel_message blocked: duplicate delivery to the same "
+                            "channel/recipient in this request. Do not send again."
+                        )
+                    if _block_reason:
+                        result = json.dumps({
+                            "status": "error",
+                            "channel": _channel,
+                            "recipient": _recipient,
+                            "error": _block_reason,
+                        }, ensure_ascii=False)
+                        logger.warning(f"Tool guard: {_block_reason} ({_delivery_key})")
+                        _tool_call_history.add(_sig)
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc["id"],
+                            "name": fn_name,
+                            "content": result,
+                        })
+                        _log_result = result[:300] + ('...' if len(result) > 300 else '')
+                        logger.info(f"Tool result [{fn_name}]: {_log_result}")
+                        continue
+
                 # Show status to user (registry provides Italian labels)
                 if _tool_registry is not None:
                     _status_label = _tool_registry.get_user_description(fn_name)
@@ -4672,7 +4809,6 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                 yield {"type": "status", "message": f"🔧 {_status_label}..."}
                 logger.info(f"Tool (round {_tool_round}): {fn_name} {list(tc_args.keys())}")
 
-                _sig = f"{fn_name}:{json.dumps(tc_args, sort_keys=True)}"
                 if fn_name in _read_only_tools and _sig in _tool_cache:
                     logger.debug(f"Tool cache hit: {fn_name}")
                     result = _tool_cache[_sig]
@@ -4711,13 +4847,29 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                 # DuplicateCallHook won't block the very first invocation.
                 _tool_call_history.add(_sig)
 
+                _parsed_result = None
                 _result_obj = None
                 try:
-                    _parsed = json.loads(result) if isinstance(result, str) else result
-                    if isinstance(_parsed, dict):
-                        _result_obj = _parsed
+                    _parsed_result = json.loads(result) if isinstance(result, str) else result
+                    if isinstance(_parsed_result, dict):
+                        _result_obj = _parsed_result
                 except Exception:
+                    _parsed_result = result
                     _result_obj = None
+
+                _read_tool_ok = False
+                if _is_read_only_call(tc):
+                    if isinstance(_parsed_result, dict):
+                        _r_status = str(_parsed_result.get("status", "")).lower().strip()
+                        _read_tool_ok = not (
+                            _r_status in {"error", "failed", "invalid"}
+                            or bool(_parsed_result.get("error"))
+                        )
+                    elif isinstance(_parsed_result, list):
+                        _read_tool_ok = True
+                    elif isinstance(_parsed_result, str):
+                        _s = _parsed_result.strip().lower()
+                        _read_tool_ok = bool(_s) and not _s.startswith('{"error"')
 
                 if _result_obj is not None:
                     _status = str(_result_obj.get("status", "")).lower().strip()
@@ -4729,7 +4881,13 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
 
                     if not _is_read_only_call(tc) and _is_ok:
                         _any_successful_write_this_round = True
+                        _round_success_write_tools.append(fn_name)
                         _write_tools_executed.append(fn_name)
+                        if fn_name == "send_channel_message":
+                            _ch = str(tc_args.get("channel", "") or "").strip().lower()
+                            _rcp = str(tc_args.get("recipient", "") or "").strip()
+                            if _ch and _rcp:
+                                _successful_channel_deliveries.add(f"{_ch}:{_rcp}")
                         # Deterministic confirmation for no-tool providers:
                         # avoid extra model round that may contradict executed actions.
                         if fn_name == "call_service":
@@ -4771,7 +4929,11 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                             _stop_after_html_dashboard_success = True
                             _html_dashboard_success_message = (
                                 _result_obj.get("message")
-                                or f"✅ Dashboard HTML '{_result_obj.get('filename', _dash_name or 'dashboard')}' salvata."
+                                or tr(
+                                    "html_dashboard_saved_file",
+                                    "✅ HTML dashboard '{filename}' saved.",
+                                    filename=_result_obj.get("filename", _dash_name or "dashboard"),
+                                )
                             )
                         elif bool(_result_obj.get("error")):
                             # If finalize call failed, clear pending draft name to avoid
@@ -4781,13 +4943,21 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                             _err_text = str(_result_obj.get("error", "") or "")
                             if "INLINE_HTML_BLOCKED" in _err_text:
                                 _stop_after_html_dashboard_error = True
-                                _html_dashboard_error_message = (
-                                    "❌ Dashboard non creata: il provider continua a inviare HTML inline "
-                                    "non conforme al formato file-safe richiesto."
+                                _html_dashboard_error_message = tr(
+                                    "html_dashboard_not_created_inline_blocked",
+                                    "❌ Dashboard not created: provider keeps sending inline HTML not compliant with file-safe format.",
                                 )
                                 # Break current tool-call batch immediately to avoid looping
                                 # over the remaining duplicate create_html_dashboard calls.
                                 break
+
+                if _read_tool_ok:
+                    _successful_read_tools_count += 1
+                    _last_success_read_tool = {
+                        "name": fn_name,
+                        "args": dict(tc_args or {}),
+                        "result": result,
+                    }
 
                 # Extract diff + modified filename for UI rendering (strip before feeding to model)
                 try:
@@ -4841,6 +5011,28 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                 if _html_dashboard_error_message:
                     yield {"type": "token", "content": _html_dashboard_error_message}
                     _streamed_text_parts = [_html_dashboard_error_message]
+                break
+
+            # Fast-path for direct action tools:
+            # avoid an extra LLM round that often loops/duplicates after a successful action.
+            _FAST_CONFIRM_WRITE_TOOLS = {
+                "call_service",
+                "trigger_automation",
+                "activate_scene",
+                "run_script",
+                "send_notification",
+                "send_channel_message",
+            }
+            if (
+                _round_write_confirms
+                and _round_success_write_tools
+                and set(_round_success_write_tools).issubset(_FAST_CONFIRM_WRITE_TOOLS)
+                and intent_name != "create_html_dashboard"
+            ):
+                _final_conf = "\n".join(dict.fromkeys([c for c in _round_write_confirms if c]))
+                if _final_conf:
+                    yield {"type": "token", "content": _final_conf}
+                    _streamed_text_parts = [_final_conf]
                 break
 
             # For no-tool providers: if a write action was executed, finish here
@@ -5012,9 +5204,9 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                 and (_looks_like_fake_success or _user_asked_action)
             ):
                 _warn = get_lang_text("warn_no_tool_called") or (
-                    "⚠️ Azione NON eseguita: questo provider ha risposto in testo senza chiamare tool di Home Assistant. "
-                    "Nessuna modifica è stata applicata. "
-                    "Riprova con un provider che supporta tool-calling oppure conferma l'esecuzione guidata."
+                    "⚠️ Action NOT executed: this provider replied in text without calling Home Assistant tools. "
+                    "No changes were applied. "
+                    "Try a provider with tool-calling support or confirm guided execution."
                 )
                 logger.warning(
                     "No-tool provider attempted action-like reply without write tool execution "
@@ -5216,11 +5408,17 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                             )
                             if _save_ok:
                                 _saved_filename = _save_obj.get("filename") or f"{_slug}.html"
-                                yield {"type": "status", "message": f"✅ Dashboard HTML '{_saved_filename}' salvata!"}
+                                yield {"type": "status", "message": tr(
+                                    "html_dashboard_saved_status",
+                                    "✅ HTML dashboard '{filename}' saved!",
+                                    filename=_saved_filename,
+                                )}
                                 _saved_url = _save_obj.get("html_url") or f"/local/dashboards/{_saved_filename}"
-                                _user_msg = (
-                                    f"✨ Dashboard **{_title}** creata! "
-                                    f"Aprila qui: `{_saved_url}`"
+                                _user_msg = tr(
+                                    "html_dashboard_created_open_here",
+                                    "✨ Dashboard **{title}** created! Open it here: `{url}`",
+                                    title=_title,
+                                    url=_saved_url,
                                 )
                                 # Emit a normal assistant token so it is visible in chat
                                 # (status events are transient and may not appear in history UI).
@@ -5246,14 +5444,30 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                                     _slug,
                                     _err_msg[:500],
                                 )
-                                yield {"type": "status", "message": f"⚠️ Salvataggio HTML fallito: {_err_msg}"}
+                                yield {"type": "status", "message": tr(
+                                    "html_dashboard_save_failed",
+                                    "⚠️ HTML save failed: {error}",
+                                    error=_err_msg,
+                                )}
                                 # Emit a persistent assistant message too (status is transient)
-                                yield {"type": "token", "content": f"⚠️ Salvataggio dashboard HTML fallito: {_err_msg}"}
+                                yield {"type": "token", "content": tr(
+                                    "html_dashboard_save_failed",
+                                    "⚠️ HTML save failed: {error}",
+                                    error=_err_msg,
+                                )}
                         except Exception as _e:
                             logger.warning(f"Auto-save HTML dashboard failed: {_e}")
-                            yield {"type": "status", "message": f"⚠️ Salvataggio HTML fallito: {_e}"}
+                            yield {"type": "status", "message": tr(
+                                "html_dashboard_save_failed",
+                                "⚠️ HTML save failed: {error}",
+                                error=_e,
+                            )}
                             # Emit a persistent assistant message too (status is transient)
-                            yield {"type": "token", "content": f"⚠️ Salvataggio dashboard HTML fallito: {_e}"}
+                            yield {"type": "token", "content": tr(
+                                "html_dashboard_save_failed",
+                                "⚠️ HTML save failed: {error}",
+                                error=_e,
+                            )}
                     if _deferred_done_event is not None:
                         yield _deferred_done_event
                         _deferred_done_event = None
@@ -5491,7 +5705,7 @@ _PROVIDER_SDK_MAP = {
 
 def _check_optional_sdks() -> dict:
     """Quick import-check for every optional dependency. Returns {name: bool}."""
-    pkgs = ["anthropic", "openai", "google.genai", "mcp", "telegram", "twilio", "PyPDF2", "docx"]
+    pkgs = ["anthropic", "openai", "google.genai", "mcp", "telegram", "twilio", "discord", "PyPDF2", "docx"]
     out = {}
     for name in pkgs:
         try:
@@ -6584,17 +6798,29 @@ def api_scheduled_tasks_create():
         cron = data.get("cron", "").strip()
         message = data.get("message", "").strip()
         if not name or not cron or not message:
-            return jsonify({"status": "error", "message": "name, cron e message sono obbligatori"}), 400
+            return jsonify({"status": "error", "message": tr(
+                "scheduler_create_required_fields",
+                "name, cron and message are required",
+            )}), 400
         task_id = data.get("task_id") or f"task_{uuid.uuid4().hex[:8]}"
         scheduler = scheduled_tasks.get_scheduler()
         if task_id in scheduler.tasks:
-            return jsonify({"status": "error", "message": f"Task '{task_id}' esiste già"}), 409
+            return jsonify({"status": "error", "message": tr(
+                "scheduler_task_already_exists",
+                "Task '{task_id}' already exists",
+                task_id=task_id,
+            )}), 409
         task = scheduler.add_message_task(
             task_id=task_id, name=name, cron_expression=cron, message=message,
             description=data.get("description", ""), enabled=data.get("enabled", True),
         )
         return jsonify({"status": "success", "task_id": task.task_id,
-                        "message": f"Task '{name}' creato ({cron})"}), 201
+                        "message": tr(
+                            "scheduler_task_created",
+                            "Task '{name}' created ({cron})",
+                            name=name,
+                            cron=cron,
+                        )}), 201
     except ValueError as e:
         return jsonify({"status": "error", "message": str(e)}), 400
     except Exception as e:
@@ -6611,11 +6837,22 @@ def api_scheduled_task_delete(task_id):
         scheduler = scheduled_tasks.get_scheduler()
         t = scheduler.tasks.get(task_id)
         if t and t.builtin:
-            return jsonify({"status": "error", "message": "Impossibile eliminare un task built-in"}), 403
+            return jsonify({"status": "error", "message": tr(
+                "scheduler_task_delete_builtin_forbidden",
+                "Cannot delete a built-in task",
+            )}), 403
         ok = scheduler.remove_task(task_id)
         if not ok:
-            return jsonify({"status": "error", "message": f"Task '{task_id}' non trovato"}), 404
-        return jsonify({"status": "success", "message": f"Task '{task_id}' eliminato"}), 200
+            return jsonify({"status": "error", "message": tr(
+                "scheduler_task_not_found",
+                "Task '{task_id}' not found",
+                task_id=task_id,
+            )}), 404
+        return jsonify({"status": "success", "message": tr(
+            "scheduler_task_deleted",
+            "Task '{task_id}' deleted",
+            task_id=task_id,
+        )}), 200
     except Exception as e:
         logger.error(f"Scheduled task delete error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -6651,11 +6888,17 @@ def api_scheduler_agent_chat():
     """
     try:
         if not SCHEDULER_AGENT_AVAILABLE:
-            return jsonify({"status": "error", "message": "SchedulerAgent non disponibile"}), 501
+            return jsonify({"status": "error", "message": tr(
+                "scheduler_agent_not_available",
+                "SchedulerAgent not available",
+            )}), 501
         data = request.json or {}
         user_message = (data.get("message") or "").strip()
         if not user_message:
-            return jsonify({"status": "error", "message": "Campo 'message' obbligatorio"}), 400
+            return jsonify({"status": "error", "message": tr(
+                "scheduler_message_required",
+                "Field 'message' is required",
+            )}), 400
         session_id = data.get("session_id") or "default"
         reply = scheduler_agent.chat(user_message, session_id=session_id)
         history = scheduler_agent.get_session_history(session_id)
@@ -6680,7 +6923,10 @@ def api_scheduler_agent_sessions():
     """Elenca tutte le sessioni attive dello SchedulerAgent."""
     try:
         if not SCHEDULER_AGENT_AVAILABLE:
-            return jsonify({"status": "error", "message": "SchedulerAgent non disponibile"}), 501
+            return jsonify({"status": "error", "message": tr(
+                "scheduler_agent_not_available",
+                "SchedulerAgent not available",
+            )}), 501
         sessions = scheduler_agent.list_sessions()
         return jsonify({"status": "success", "sessions": sessions, "count": len(sessions)}), 200
     except Exception as e:
@@ -6692,9 +6938,16 @@ def api_scheduler_agent_clear_session(session_id):
     """Cancella la cronologia di una sessione SchedulerAgent."""
     try:
         if not SCHEDULER_AGENT_AVAILABLE:
-            return jsonify({"status": "error", "message": "SchedulerAgent non disponibile"}), 501
+            return jsonify({"status": "error", "message": tr(
+                "scheduler_agent_not_available",
+                "SchedulerAgent not available",
+            )}), 501
         scheduler_agent.clear_session(session_id)
-        return jsonify({"status": "success", "message": f"Sessione '{session_id}' cancellata"}), 200
+        return jsonify({"status": "success", "message": tr(
+            "scheduler_session_deleted",
+            "Session '{session_id}' deleted",
+            session_id=session_id,
+        )}), 200
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
@@ -6824,7 +7077,11 @@ def api_telegram_message():
                 response_text = chat_with_ai(text, f"telegram_{user_id}")
         except Exception as e:
             logger.error(f"Telegram AI response error: {e}")
-            response_text = f"⚠️ Errore: {str(e)[:100]}"
+            response_text = tr(
+                "telegram_error_prefix",
+                "⚠️ Error: {error}",
+                error=str(e)[:100],
+            )
 
         # Strip Markdown so Telegram can send plain text without parse errors
         response_text = _strip_markdown_for_telegram(response_text)
@@ -6838,6 +7095,37 @@ def api_telegram_message():
         }), 200
     except Exception as e:
         logger.error(f"Telegram message error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/discord/message', methods=['POST'])
+def api_discord_message():
+    """Process incoming Discord message and return AI response."""
+    if not ENABLE_DISCORD:
+        return jsonify({"status": "error", "message": "Discord is disabled"}), 503
+    try:
+        data = request.get_json() or {}
+        user_id = data.get("user_id")
+        channel_id = data.get("channel_id")
+        text = str(data.get("text", "")).strip()
+        logger.chat(f"📩 Discord from user {user_id} in channel {channel_id}: {text[:60]}")
+
+        if not text:
+            return jsonify({"status": "error", "message": "Empty message"}), 400
+
+        response_text = ""
+        try:
+            with _apply_channel_agent("discord"):
+                response_text = chat_with_ai(text, f"discord_{user_id}")
+        except Exception as e:
+            logger.error(f"Discord AI response error: {e}")
+            response_text = f"⚠️ Error: {str(e)[:120]}"
+
+        # Discord max message size: 2000 chars
+        response_text = response_text[:2000]
+        return jsonify({"status": "success", "response": response_text}), 200
+    except Exception as e:
+        logger.error(f"Discord message error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
@@ -7101,14 +7389,24 @@ def api_alexa_webhook():
                     logger.chat(f"📤 [Alexa] Response ({len(response_text)} chars): {response_text[:200]}")
                 except Exception as e:
                     logger.error(f"[Alexa] AI error: {e}")
-                    response_text = "Mi dispiace, non sono riuscita a elaborare la risposta."
+                    response_text = tr(
+                        "alexa_ai_error",
+                        "Sorry, I couldn't process the response.",
+                    )
 
-                return jsonify(_alexa_response(response_text, end_session=False, reprompt="Vuoi chiedermi altro?")), 200
+                return jsonify(_alexa_response(
+                    response_text,
+                    end_session=False,
+                    reprompt=tr("alexa_reprompt_anything_else", "Would you like to ask anything else?"),
+                )), 200
 
             else:
                 # Unknown intent — try to handle as free-form
                 logger.warning(f"[Alexa] Unknown intent: {intent_name}")
-                return jsonify(_alexa_response("Non ho capito la richiesta.", end_session=False)), 200
+                return jsonify(_alexa_response(
+                    tr("alexa_unknown_intent", "I didn't understand the request."),
+                    end_session=False,
+                )), 200
 
         elif req_type == "SessionEndedRequest":
             logger.info(f"[Alexa] Session ended: {req.get('reason', 'unknown')}")
@@ -7119,7 +7417,10 @@ def api_alexa_webhook():
 
     except Exception as e:
         logger.error(f"[Alexa] Webhook error: {e}")
-        return jsonify(_alexa_response("Si è verificato un errore. Riprova tra poco.", end_session=False)), 200
+        return jsonify(_alexa_response(
+            tr("alexa_generic_error_retry", "An error occurred. Please try again shortly."),
+            end_session=False,
+        )), 200
 
 
 # moved to routes/system_routes.py: api_system_features
@@ -8267,7 +8568,7 @@ def session_perplexity_web_clear():
 
 
 def start_messaging_bots() -> None:
-    """Initialize and start Telegram and WhatsApp bots if configured.
+    """Initialize and start Telegram, WhatsApp and Discord bots if configured.
     Called from server.py so it runs regardless of __name__.
     """
     # bashio::config returns the string "null" for unset optional fields
@@ -8305,6 +8606,27 @@ def start_messaging_bots() -> None:
                     logger.info("WhatsApp bot not configured (no Twilio credentials)")
         except Exception as e:
             logger.warning(f"⚠️ WhatsApp bot initialization error: {e}")
+
+        try:
+            if not ENABLE_DISCORD:
+                logger.info("Discord bot disabled via configuration (enable_discord: false)")
+            else:
+                d_token = _env("DISCORD_BOT_TOKEN")
+                d_channels = _env("DISCORD_ALLOWED_CHANNEL_IDS")
+                d_users = _env("DISCORD_ALLOWED_USER_IDS")
+                if d_token:
+                    bot = discord_bot.get_discord_bot(
+                        d_token,
+                        allowed_channel_ids=d_channels,
+                        allowed_user_ids=d_users,
+                    )
+                    if bot:
+                        bot.start()
+                        logger.info("✅ Discord bot started")
+                else:
+                    logger.info("Discord bot not configured (no token)")
+        except Exception as e:
+            logger.warning(f"⚠️ Discord bot initialization error: {e}")
 
 
 @app.errorhandler(404)
@@ -8507,7 +8829,15 @@ def api_fallback_config_get():
             custom_priority = data.get("priority", [])
             pm = data.get("provider_models", {})
             if isinstance(pm, dict):
-                provider_models = {str(k): str(v) for k, v in pm.items() if isinstance(k, str) and isinstance(v, str) and v.strip()}
+                provider_models = {}
+                for k, v in pm.items():
+                    if not isinstance(k, str) or not isinstance(v, str):
+                        continue
+                    prov = str(k).strip().lower()
+                    mdl_raw = str(v).strip()
+                    if not prov or not mdl_raw:
+                        continue
+                    provider_models[prov] = normalize_model_name(mdl_raw)
             # Backward compatibility with old experimental shape:
             # model_priority: [{"provider":"anthropic","model":"claude-opus-4-6"}, ...]
             if not provider_models:
@@ -8519,7 +8849,7 @@ def api_fallback_config_get():
                         prov = str(item.get("provider") or "").strip().lower()
                         mdl = str(item.get("model") or "").strip()
                         if prov and mdl:
-                            provider_models[prov] = mdl
+                            provider_models[prov] = normalize_model_name(mdl)
             if "enabled" in data:
                 enabled = bool(data["enabled"])
     except Exception:
@@ -8594,7 +8924,7 @@ def api_fallback_config_post():
             continue
         if v is None:
             continue
-        mdl = str(v).strip()
+        mdl = normalize_model_name(str(v).strip())
         if mdl:
             clean_provider_models[prov] = mdl
 
@@ -8691,6 +9021,10 @@ def api_settings_get():
                 {"key": "twilio_account_sid", "type": "text"},
                 {"key": "twilio_auth_token", "type": "password"},
                 {"key": "twilio_whatsapp_from", "type": "text"},
+                {"key": "enable_discord", "type": "toggle"},
+                {"key": "discord_bot_token", "type": "password"},
+                {"key": "discord_allowed_channel_ids", "type": "text"},
+                {"key": "discord_allowed_user_ids", "type": "text"},
             ],
         },
         {

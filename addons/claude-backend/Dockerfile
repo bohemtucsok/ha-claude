@@ -54,6 +54,7 @@ COPY chat_bubble.py .
 COPY messaging.py .
 COPY telegram_bot.py .
 COPY whatsapp_bot.py .
+COPY discord_bot.py .
 COPY fallback.py .
 COPY quality_metrics.py .
 COPY tool_optimizer.py .

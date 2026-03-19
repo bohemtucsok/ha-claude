@@ -38,6 +38,41 @@ MODEL_BLOCKLIST_FILE = "/config/amira/model_blocklist.json"
 _NVIDIA_MODELS_CACHE: dict[str, object] = {"ts": 0.0, "models": []}
 _NVIDIA_MODELS_CACHE_TTL_SECONDS = 10 * 60
 
+_DISPLAY_PREFIXES = (
+    "Claude:", "OpenAI:", "Google:", "NVIDIA:", "GitHub:", "GitHub Copilot:",
+    "OpenAI Codex:", "Groq:", "Mistral:", "OpenRouter:", "DeepSeek:", "xAI:",
+    "Ollama:", "MiniMax:", "AiHubMix:", "SiliconFlow:", "VolcEngine:",
+    "DashScope:", "Moonshot:", "Zhipu:", "Claude Web:", "ChatGPT Web:",
+    "Gemini Web:", "Perplexity Web:",
+)
+
+
+def _sanitize_model_id(provider: str, model_id: str) -> str:
+    """Return a safe technical model id, or empty string if input looks like a UI label.
+
+    Guardrail: never persist display labels (e.g. "NVIDIA: Llama 3.3 70B Instruct")
+    into blocklist/tested caches.
+    """
+    if not isinstance(model_id, str):
+        return ""
+    mid = model_id.strip()
+    if not mid:
+        return ""
+
+    # Drop known provider display prefixes.
+    if mid.startswith(_DISPLAY_PREFIXES):
+        return ""
+
+    # Technical IDs should not contain spaces (display labels usually do).
+    if " " in mid:
+        return ""
+
+    # Extremely defensive: reject accidental "Provider: Label" patterns.
+    if ":" in mid and "/" not in mid:
+        return ""
+
+    return mid
+
 
 def load_model_blocklists() -> None:
     """Load persistent NVIDIA model blocklist from disk."""
@@ -66,15 +101,23 @@ def load_model_blocklists() -> None:
                 elif isinstance(payload, list):
                     blocked = [m for m in payload if isinstance(m, str) and m.strip()]
 
-                if provider == "nvidia":
-                    NVIDIA_MODEL_BLOCKLIST.update(blocked)
-                    NVIDIA_MODEL_TESTED_OK.update(tested_ok)
-                    NVIDIA_MODEL_UNCERTAIN.update(uncertain)
+                provider_norm = (provider or "").strip().lower()
+                blocked_clean = [_sanitize_model_id(provider_norm, m) for m in blocked]
+                blocked_clean = [m for m in blocked_clean if m]
+                tested_clean = [_sanitize_model_id(provider_norm, m) for m in tested_ok]
+                tested_clean = [m for m in tested_clean if m]
+                uncertain_clean = [_sanitize_model_id(provider_norm, m) for m in uncertain]
+                uncertain_clean = [m for m in uncertain_clean if m]
+
+                if provider_norm == "nvidia":
+                    NVIDIA_MODEL_BLOCKLIST.update(blocked_clean)
+                    NVIDIA_MODEL_TESTED_OK.update(tested_clean)
+                    NVIDIA_MODEL_UNCERTAIN.update(uncertain_clean)
                 else:
-                    if tested_ok:
-                        PROVIDER_MODEL_TESTED_OK.setdefault(provider, set()).update(tested_ok)
-                    if uncertain:
-                        PROVIDER_MODEL_UNCERTAIN.setdefault(provider, set()).update(uncertain)
+                    if tested_clean:
+                        PROVIDER_MODEL_TESTED_OK.setdefault(provider_norm, set()).update(tested_clean)
+                    if uncertain_clean:
+                        PROVIDER_MODEL_UNCERTAIN.setdefault(provider_norm, set()).update(uncertain_clean)
 
             if NVIDIA_MODEL_BLOCKLIST or NVIDIA_MODEL_TESTED_OK or NVIDIA_MODEL_UNCERTAIN or PROVIDER_MODEL_TESTED_OK or PROVIDER_MODEL_UNCERTAIN:
                 logger.debug(
@@ -123,6 +166,9 @@ def save_model_blocklists() -> None:
                     blocked_prev = [m for m in b if isinstance(m, str) and m.strip()]
             elif isinstance(prev, list):
                 blocked_prev = [m for m in prev if isinstance(m, str) and m.strip()]
+            blocked_prev = [
+                m for m in (_sanitize_model_id(provider, m) for m in blocked_prev) if m
+            ]
             payload[provider] = {
                 "blocked": sorted(set(blocked_prev)),
                 "tested_ok": sorted(set(tested_set)),
@@ -139,7 +185,10 @@ def mark_nvidia_model_tested_ok(model_id: str) -> None:
     """Mark a NVIDIA model as successfully tested and persist it."""
     if not isinstance(model_id, str) or not model_id.strip():
         return
-    model_id = model_id.strip()
+    model_id = _sanitize_model_id("nvidia", model_id)
+    if not model_id:
+        logger.warning("Ignoring non-technical NVIDIA model label in tested_ok")
+        return
     if model_id in NVIDIA_MODEL_BLOCKLIST:
         return
     NVIDIA_MODEL_TESTED_OK.add(model_id)
@@ -152,7 +201,10 @@ def blocklist_nvidia_model(model_id: str) -> None:
     """Add a model to NVIDIA blocklist, persist it, and drop it from cache."""
     if not isinstance(model_id, str) or not model_id.strip():
         return
-    model_id = model_id.strip()
+    model_id = _sanitize_model_id("nvidia", model_id)
+    if not model_id:
+        logger.warning("Ignoring non-technical NVIDIA model label in blocklist")
+        return
     NVIDIA_MODEL_BLOCKLIST.add(model_id)
     if model_id in NVIDIA_MODEL_TESTED_OK:
         NVIDIA_MODEL_TESTED_OK.discard(model_id)
@@ -176,7 +228,11 @@ def blocklist_model(provider: str, model_id: str) -> None:
     """
     if not isinstance(model_id, str) or not model_id.strip():
         return
-    model_id = model_id.strip()
+    provider = (provider or "").strip().lower()
+    model_id = _sanitize_model_id(provider, model_id)
+    if not model_id:
+        logger.warning(f"Ignoring non-technical model label for provider '{provider}' in blocklist")
+        return
     if provider == "nvidia":
         blocklist_nvidia_model(model_id)
     else:
@@ -204,7 +260,10 @@ def mark_provider_model_tested_ok(provider: str, model_id: str) -> None:
     if not isinstance(model_id, str) or not model_id.strip():
         return
     provider = provider.strip().lower()
-    model_id = model_id.strip()
+    model_id = _sanitize_model_id(provider, model_id)
+    if not model_id:
+        logger.warning(f"Ignoring non-technical model label for provider '{provider}' in tested_ok")
+        return
     if provider == "nvidia":
         mark_nvidia_model_tested_ok(model_id)
         return
@@ -218,7 +277,10 @@ def mark_nvidia_model_uncertain(model_id: str) -> None:
     """Mark a NVIDIA model as uncertain test result and persist."""
     if not isinstance(model_id, str) or not model_id.strip():
         return
-    model_id = model_id.strip()
+    model_id = _sanitize_model_id("nvidia", model_id)
+    if not model_id:
+        logger.warning("Ignoring non-technical NVIDIA model label in uncertain")
+        return
     if model_id in NVIDIA_MODEL_BLOCKLIST:
         return
     if model_id in NVIDIA_MODEL_TESTED_OK:
@@ -234,7 +296,10 @@ def mark_provider_model_uncertain(provider: str, model_id: str) -> None:
     if not isinstance(model_id, str) or not model_id.strip():
         return
     provider = provider.strip().lower()
-    model_id = model_id.strip()
+    model_id = _sanitize_model_id(provider, model_id)
+    if not model_id:
+        logger.warning(f"Ignoring non-technical model label for provider '{provider}' in uncertain")
+        return
     if provider == "nvidia":
         mark_nvidia_model_uncertain(model_id)
         return

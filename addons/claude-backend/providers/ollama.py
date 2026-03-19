@@ -173,50 +173,69 @@ class OllamaProvider(EnhancedProvider):
         _timeout = httpx.Timeout(connect=15.0, read=300.0, write=10.0, pool=5.0)
 
         # ── Build lightweight message list directly (bypass _prepare_messages) ──
-        # Local models on weak CPUs can't handle the full HA system prompt
-        # (~7000 tokens with 48 tool descriptions). We replace it entirely.
+        # Keep a short persona prompt, but also preserve the active intent prompt
+        # so the model receives the execution policy for the current request.
+        _intent_prompt = ((intent_info or {}).get("prompt") or "").strip()
+        _system_prompt = self._ollama_system_prompt()
+        if _intent_prompt:
+            _system_prompt = f"{_intent_prompt}\n\n{_system_prompt}"
         msgs: List[Dict[str, Any]] = [
-            {"role": "system", "content": self._ollama_system_prompt()}
+            {"role": "system", "content": _system_prompt}
         ]
         for msg in messages:
             role = msg.get("role", "")
-            # Skip system messages (the big HA prompt), tool calls and tool results
-            if role in ("system", "tool"):
-                continue
-            if role == "assistant" and msg.get("tool_calls"):
+            # Skip system messages (already replaced above)
+            if role == "system":
                 continue
             content = msg.get("content", "")
             if content:
                 # Truncate very long user messages (smart-context can be huge)
                 if len(content) > 1000:
                     content = content[:1000] + "\n[...troncato per Ollama]"
-                msgs.append({"role": role, "content": content})
+                msg_out: Dict[str, Any] = {"role": role, "content": content}
+                if role == "assistant" and msg.get("tool_calls"):
+                    msg_out["tool_calls"] = msg.get("tool_calls")
+                if role == "tool":
+                    if msg.get("tool_call_id"):
+                        msg_out["tool_call_id"] = msg.get("tool_call_id")
+                    if msg.get("name"):
+                        msg_out["name"] = msg.get("name")
+                msgs.append(msg_out)
         # Keep last 6 turns max to stay within small context window
         if len(msgs) > 7:  # 1 system + 6 turns
             msgs = [msgs[0]] + msgs[-6:]
 
         # ---- Sanitise messages for Ollama's template engine ----
         msgs = self._sanitize_messages(msgs)
+        tools = self._sanitize_tool_schemas(self._get_intent_tools(intent_info) or [])
 
         # Log what we're sending for debugging
         total_chars = sum(len(m.get("content", "")) for m in msgs)
-        logger.info("Ollama request: model=%s, messages=%d, ~%d chars, url=%s",
-                    model, len(msgs), total_chars, base_url)
+        logger.info(
+            "Ollama request: model=%s, messages=%d, ~%d chars, tools=%d, url=%s",
+            model,
+            len(msgs),
+            total_chars,
+            len(tools),
+            base_url,
+        )
 
-        # No tool schemas for Ollama on weak hardware — tools cause template errors
-        # and bloat the prompt. Ollama acts as a conversational-only assistant.
+        # Enable native tool-calling for Ollama (/api/chat with tools array).
+        # Use a larger context window when tool schemas are present.
+        _num_ctx = 8192 if tools else 2048
         body: Dict[str, Any] = {
             "model": model,
             "messages": msgs,
             "stream": True,
-            # Reduce context window for faster prefill on weak CPUs
-            "options": {"num_ctx": 2048},
+            "options": {"num_ctx": _num_ctx},
         }
+        if tools:
+            body["tools"] = tools
 
         accumulated_tool_calls: Dict[int, Dict] = {}
 
         try:
-            yield from self._ollama_stream(base_url, body, _timeout, accumulated_tool_calls)
+            yield from self._ollama_stream(base_url, body, _timeout, accumulated_tool_calls, tools=tools)
         except RuntimeError as exc:
             raise
 
@@ -280,6 +299,7 @@ class OllamaProvider(EnhancedProvider):
         body: Dict[str, Any],
         _timeout: Any,
         accumulated_tool_calls: Dict[int, Dict],
+        tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Generator[Dict[str, Any], None, None]:
         """Low-level httpx streaming call to Ollama /api/chat."""
         import json
@@ -329,7 +349,8 @@ class OllamaProvider(EnhancedProvider):
                         if accumulated_tool_calls:
                             done_event["finish_reason"] = "tool_calls"
                             done_event["tool_calls"] = self._normalize_tool_calls(
-                                list(accumulated_tool_calls.values())
+                                list(accumulated_tool_calls.values()),
+                                tools=tools,
                             )
                         yield done_event
 

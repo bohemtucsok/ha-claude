@@ -2,7 +2,7 @@
 
 ## Overview
 
-**Amira** is an AI-powered smart home assistant add-on for Home Assistant. It provides a web-based chat interface with multi-provider AI support (40+ models), real-time cost tracking, multi-agent system, HTML custom dashboard generation, MCP tool integration, Telegram & WhatsApp messaging, file access, voice input, and more.
+**Amira** is an AI-powered smart home assistant add-on for Home Assistant. It provides a web-based chat interface with multi-provider AI support (40+ models), real-time cost tracking, multi-agent system, HTML custom dashboard generation, MCP tool integration, Telegram/WhatsApp/Discord messaging, file access, voice input, and more.
 
 No long-lived tokens required — Amira integrates directly with Home Assistant's Supervisor API.
 
@@ -204,10 +204,11 @@ Edit directly via SSH:
 nano /config/amira/memory/MEMORY.md
 ```
 
-### Telegram & WhatsApp
+### Telegram, WhatsApp & Discord
 
 - **Telegram**: long-polling bot — no public IP required. Configure bot token in Settings UI.
 - **WhatsApp**: Twilio integration with webhook on port 5010. Configure in Settings UI.
+- **Discord**: bot token + optional channel/user allow-lists. Configure in Settings UI.
 
 ### Cost Tracking
 
@@ -305,7 +306,8 @@ The add-on exposes a REST API on port 5010 (also via HA Ingress).
 | `/api/mcp/servers` | GET | List MCP servers and status |
 | `/api/mcp/server/<name>/start` | POST | Start a MCP server |
 | `/api/mcp/server/<name>/stop` | POST | Stop a MCP server |
-| `/api/messaging/stats` | GET | Telegram & WhatsApp statistics |
+| `/api/messaging/stats` | GET | Telegram/WhatsApp/Discord statistics |
+| `/api/discord/message` | POST | Receive/process Discord messages |
 | `/api/usage_stats` | GET | Usage summary |
 | `/api/usage_stats/today` | GET | Today's token and cost totals |
 | `/api/usage_stats/reset` | POST | Reset all usage data |

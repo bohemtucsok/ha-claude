@@ -29,6 +29,7 @@ Enable these in the **Configuration** tab:
 |---------|---------|-------|
 | Telegram bot | `telegram_bot_token` | [MESSAGING.md](MESSAGING.md) |
 | WhatsApp (Twilio) | `twilio_account_sid` + others | [MESSAGING.md](MESSAGING.md) → [WHATSAPP.md](WHATSAPP.md) |
+| Discord bot | `discord_bot_token` (+ optional allow-lists) | [MESSAGING.md](MESSAGING.md) |
 | MCP custom tools | create `/config/amira/mcp_config.json` | [MCP.md](MCP.md) |
 | File read/write | `enable_file_access: true` | — |
 | Persistent memory | `enable_memory: true` | — |

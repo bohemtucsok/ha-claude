@@ -7,17 +7,44 @@ import api  # Import api module to access global variables
 def normalize_model_name(model_name: str) -> str:
     """Convert user-friendly model name to technical name.
     Handles legacy names with emoji badges (🆓, 🧪) for backward compatibility."""
-    # Direct lookup
-    if model_name in api.MODEL_NAME_MAPPING:
-        return api.MODEL_NAME_MAPPING[model_name]
+    raw = str(model_name or "").strip()
+    if not raw:
+        return raw
 
-    # Try stripping emoji badges (🆓, 🧪) for backward compat with old configs
-    cleaned = re.sub(r'[\s]*[🆓🧪]+[\s]*$', '', model_name).strip()
-    if cleaned and cleaned in api.MODEL_NAME_MAPPING:
-        return api.MODEL_NAME_MAPPING[cleaned]
+    def _strip_badges(name: str) -> str:
+        return re.sub(r'[\s]*[🆓🧪]+[\s]*$', '', name).strip()
+
+    candidate = _strip_badges(raw)
+
+    # Direct lookup
+    if candidate in api.MODEL_NAME_MAPPING:
+        return api.MODEL_NAME_MAPPING[candidate]
+
+    # Reverse lookup from provider display maps (supports dynamic labels such as:
+    # "NVIDIA: Llama 3.3 70B Instruct" -> "meta/llama-3.3-70b-instruct").
+    # This prevents sending display labels directly to provider APIs.
+    try:
+        for _prov_map in (api.PROVIDER_DISPLAY or {}).values():
+            if not isinstance(_prov_map, dict):
+                continue
+            for tech_name, display_name in _prov_map.items():
+                if candidate == str(display_name).strip():
+                    return str(tech_name)
+    except Exception:
+        pass
+
+    # Loose fallback: "Provider: Label" exact text matching (case-insensitive).
+    # Useful when display maps are stale but MODEL_DISPLAY_MAPPING contains it.
+    try:
+        c_low = candidate.lower()
+        for tech_name, display_name in (api.MODEL_DISPLAY_MAPPING or {}).items():
+            if c_low == str(display_name).strip().lower():
+                return str(tech_name)
+    except Exception:
+        pass
 
     # Not found, return as-is (assume it's already a technical name)
-    return model_name
+    return candidate
 
 
 def get_model_provider(model_name: str) -> str:

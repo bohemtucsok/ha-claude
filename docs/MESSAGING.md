@@ -1,14 +1,15 @@
 # 📱 Messaging Integration Guide
 
-This Amira addon supports **Telegram** and **WhatsApp** messaging integrations, allowing you to chat with Claude from your favorite messaging apps.
+This Amira addon supports **Telegram**, **WhatsApp**, and **Discord** messaging integrations, allowing you to chat with Amira from your favorite messaging apps.
 
 ## ✨ Features
 
 - **Telegram Bot**: Long polling support with background thread
 - **WhatsApp**: Twilio integration with webhook support
+- **Discord Bot**: Token-based bot integration with optional channel/user allow-lists
 - **Persistent History**: Automatic chat history storage (last 50 messages per user)
 - **Context Aware**: AI responses include conversation context
-- **Multi-channel**: Use both Telegram & WhatsApp simultaneously
+- **Multi-channel**: Use Telegram, WhatsApp, and Discord simultaneously
 - **Token Efficient**: Device control uses minimal tokens (interpretation only)
 
 ---
@@ -133,6 +134,54 @@ Claude: I'll create a reminder for tomorrow at 9 AM.
 
 ---
 
+## 🟣 Discord Setup
+
+### Step 1: Create a Discord Application + Bot
+
+1. Open the [Discord Developer Portal](https://discord.com/developers/applications)
+2. Click **New Application** and choose a name
+3. Open **Bot** in the left menu, then click **Add Bot**
+4. Copy the **Bot Token** (keep it private)
+5. In **Privileged Gateway Intents**, enable:
+   - **Message Content Intent**
+
+### Step 2: Invite the Bot to Your Server
+
+1. In the Developer Portal, open **OAuth2** → **URL Generator**
+2. Select scopes:
+   - `bot`
+3. Select bot permissions:
+   - `View Channels`
+   - `Read Message History`
+   - `Send Messages`
+4. Open the generated URL and invite the bot to your server
+
+### Step 3: Configure in Home Assistant
+
+1. Open Home Assistant **Settings** → **Add-ons** → **Amira**
+2. Open Amira, then go to **Settings** (gear icon) → **Messaging**
+3. Enable **Discord**
+4. Fill in:
+   - **Discord Bot Token**
+   - **Allowed Channel IDs** (optional, comma-separated)
+   - **Allowed User IDs** (optional, comma-separated)
+5. Save settings
+
+### Step 4: Get Channel/User IDs (Optional but Recommended)
+
+1. In Discord, open **User Settings** → **Advanced** → enable **Developer Mode**
+2. Right-click a channel → **Copy Channel ID**
+3. Right-click a user → **Copy User ID**
+4. Paste IDs in Amira settings (comma-separated)
+
+### Step 5: Start Chatting
+
+1. Open one allowed channel
+2. Mention the bot or send a direct message (based on your server setup)
+3. Amira replies in Discord with full context
+
+---
+
 ## 🔐 Security & Privacy
 
 ### Telegram
@@ -143,6 +192,10 @@ Claude: I'll create a reminder for tomorrow at 9 AM.
 ### WhatsApp (Twilio)
 - **Webhook Signature**: Twilio signs all webhooks with HMAC-SHA1 — Amira verifies every request automatically
 - **Auth Token**: Keep it private — equivalent to a password
+
+### Discord
+- **Bot Token**: Keep it private — equivalent to full bot account access
+- **Allow-lists**: Restrict channels/users with `DISCORD_ALLOWED_CHANNEL_IDS` and `DISCORD_ALLOWED_USER_IDS`
 
 ### Best Practices
 - Don't share tokens or credentials
@@ -174,6 +227,11 @@ GET /api/messaging/stats
       "enabled": true,
       "chats": 4,
       "messages": 162
+    },
+    "discord": {
+      "enabled": true,
+      "chats": 3,
+      "messages": 91
     }
   }
 }
@@ -199,6 +257,12 @@ POST /api/telegram/message
 Twilio will POST to: `POST /api/whatsapp/webhook`
 
 Your addon handles this automatically.
+
+### Send Discord Message
+
+```bash
+POST /api/discord/message
+```
 
 ---
 
@@ -234,6 +298,17 @@ Your addon handles this automatically.
    - Check message logs in Twilio Console
    - Look for webhook delivery errors
 
+### Discord Not Working
+
+1. **Check Token**:
+   - Confirm the bot token is valid and not regenerated
+2. **Check Intents**:
+   - Ensure **Message Content Intent** is enabled in Discord Developer Portal
+3. **Check Allow-lists**:
+   - If allow-lists are set, verify channel/user IDs are correct
+4. **Check Bot Permissions**:
+   - Bot needs `View Channels`, `Read Message History`, and `Send Messages`
+
 ---
 
 ## 💬 Device Control via Messaging
@@ -246,6 +321,9 @@ Claude: Turns on bedroom light via Home Assistant
 
 WhatsApp: "Get temperature"
 Claude: Reads temperature sensor and responds
+
+Discord: "Set living room light to 30%"
+Claude: Calls Home Assistant service and confirms result
 
 Telegram: "Create automation"
 Claude: Helps you set up automations via natural language
@@ -285,4 +363,3 @@ Having issues? Check:
 2. **Health Status**: `/api/messaging/stats`
 3. **Credentials**: Verify tokens are correct and active
 4. **Network**: Ensure connectivity to external APIs
-

@@ -19,6 +19,7 @@ import logging
 import time
 from datetime import datetime
 from flask import Blueprint, request, jsonify
+from core.translations import tr
 
 logger = logging.getLogger(__name__)
 
@@ -182,10 +183,19 @@ def api_mcp_server_start(server_name):
                 "running": True,
                 "autostart": True,
                 "tools_count": len(server.tools),
-                "message": f"Server '{server_name}' avviato con {len(server.tools)} tool"
+                "message": tr(
+                    "mcp_server_started_with_tools",
+                    "Server '{server_name}' started with {tools_count} tools",
+                    server_name=server_name,
+                    tools_count=len(server.tools),
+                )
             }), 200
         else:
-            return jsonify({"status": "error", "message": f"Impossibile connettersi a '{server_name}'"}), 500
+            return jsonify({"status": "error", "message": tr(
+                "mcp_server_connect_failed",
+                "Unable to connect to '{server_name}'",
+                server_name=server_name,
+            )}), 500
     except Exception as e:
         logger.error(f"MCP server start error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -208,7 +218,11 @@ def api_mcp_server_stop(server_name):
                 "status": "success",
                 "running": False,
                 "autostart": False,
-                "message": f"Server '{server_name}' fermato"
+                "message": tr(
+                    "mcp_server_stopped",
+                    "Server '{server_name}' stopped",
+                    server_name=server_name,
+                )
             }), 200
 
         # Not running is still a valid "stopped" target state.
@@ -216,7 +230,11 @@ def api_mcp_server_stop(server_name):
             "status": "success",
             "running": False,
             "autostart": False,
-            "message": f"Server '{server_name}' era gia' fermo"
+            "message": tr(
+                "mcp_server_already_stopped",
+                "Server '{server_name}' was already stopped",
+                server_name=server_name,
+            )
         }), 200
     except Exception as e:
         logger.error(f"MCP server stop error: {e}")
@@ -368,11 +386,18 @@ def api_mcp_install():
         data = request.get_json() or {}
         packages = data.get("packages", [])
         if not packages:
-            return jsonify({"success": False, "output": "Nessun pacchetto specificato."}), 400
+            return jsonify({"success": False, "output": tr(
+                "mcp_no_packages_specified",
+                "No packages specified.",
+            )}), 400
         result = _api.mcp.pip_install_packages(packages)
         return jsonify(result), 200
     except Exception as e:
-        return jsonify({"success": False, "output": f"Errore: {e}"}), 500
+        return jsonify({"success": False, "output": tr(
+            "mcp_error_prefix",
+            "Error: {error}",
+            error=e,
+        )}), 500
 
 
 @mcp_bp.route('/api/mcp/server/<server_name>/tools', methods=['GET'])

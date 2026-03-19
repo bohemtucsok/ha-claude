@@ -950,7 +950,7 @@ class ToolRegistry:
                 return ToolCategory.CONTROL
             if name in ("read_config_file", "write_config_file", "list_config_files", "check_config"):
                 return ToolCategory.CONFIG
-            if name in ("send_notification",):
+            if name in ("send_notification", "send_channel_message"):
                 return ToolCategory.NOTIFICATION
             if name in ("manage_helpers", "manage_areas", "manage_entity"):
                 return ToolCategory.HELPER

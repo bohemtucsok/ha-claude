@@ -54,7 +54,7 @@
 
 **Smart home AI assistant addon** with multi-provider support — control your home, create automations, and manage configurations using natural language.
 
-Supports **23+ AI providers** and **60+ models**: Anthropic Claude, OpenAI, Google Gemini, NVIDIA NIM, GitHub Models, GitHub Copilot (OAuth), OpenAI Codex (OAuth), Claude Web, Gemini Web, Groq, Mistral, DeepSeek, Ollama and more. Chat via **Telegram** or **WhatsApp** in addition to the built-in web UI.
+Supports **23+ AI providers** and **60+ models**: Anthropic Claude, OpenAI, Google Gemini, NVIDIA NIM, GitHub Models, GitHub Copilot (OAuth), OpenAI Codex (OAuth), Claude Web, Gemini Web, Groq, Mistral, DeepSeek, Ollama and more. Chat via **Telegram**, **WhatsApp**, or **Discord** in addition to the built-in web UI.
 
 [![GitHub Release](https://img.shields.io/github/v/release/Bobsilvio/ha-claude)](https://github.com/Bobsilvio/ha-claude/releases)
 [![License: PolyForm NC](https://img.shields.io/badge/License-PolyForm%20NC%201.0-blue)](LICENSE)
@@ -158,8 +158,9 @@ Supports **23+ AI providers** and **60+ models**: Anthropic Claude, OpenAI, Goog
 ### 📱 Messaging Integration
 - **Telegram Bot**: Long polling — no public IP needed, works out of the box
 - **WhatsApp**: Twilio integration with webhook support
+- **Discord Bot**: Bot token + allowed channels/users support
 - **Context Aware**: Full conversation history per user per channel
-- **Enable/Disable**: Toggle Telegram and WhatsApp independently from **Settings → Messaging** in the chat UI
+- **Enable/Disable**: Toggle Telegram, WhatsApp, and Discord independently from **Settings → Messaging** in the chat UI
 - **Telegram Whitelist**: Restrict bot access to specific Telegram user IDs — anyone not on the list is blocked
 
 ### ⏰ Scheduled Tasks
@@ -215,9 +216,9 @@ Supports **23+ AI providers** and **60+ models**: Anthropic Claude, OpenAI, Goog
 
 ---
 
-## 📱 Telegram & WhatsApp
+## 📱 Telegram, WhatsApp & Discord
 
-Amira supports **Telegram** (long polling, no public IP) and **WhatsApp** (via Twilio webhook).
+Amira supports **Telegram** (long polling, no public IP), **WhatsApp** (via Twilio webhook), and **Discord** (bot token + channel/user allow-lists).
 
 ### 🔒 Telegram Security — User Whitelist
 
@@ -232,6 +233,18 @@ By default, **anyone who finds your bot link can send commands to your home**. I
 > **Tip:** To add a family member, ask them to send `/start` to `@userinfobot` and share their ID with you.
 
 > **Leave empty** only if you intentionally want the bot to be publicly accessible.
+
+### 💬 Discord Setup (Quick)
+
+1. Create a bot in the [Discord Developer Portal](https://discord.com/developers/applications) and copy the bot token.
+2. In Amira go to **Settings → Messaging** and enable **Discord**.
+3. Paste `DISCORD_BOT_TOKEN`.
+4. Set allowed IDs:
+   - `DISCORD_ALLOWED_CHANNEL_IDS` → comma-separated channel IDs where the bot can respond
+   - `DISCORD_ALLOWED_USER_IDS` → optional comma-separated user IDs allowed to interact
+5. Invite the bot to your server with permissions to read/send messages in selected channels.
+
+> Recommended: always set at least `DISCORD_ALLOWED_CHANNEL_IDS` to prevent unwanted access.
 
 → Full setup guide: [docs/MESSAGING.md](docs/MESSAGING.md) · WhatsApp details: [docs/WHATSAPP.md](docs/WHATSAPP.md)
 
@@ -367,7 +380,8 @@ Assign a specific agent per messaging channel. Each channel can have one agent:
 ```json
 "channel_agents": {
   "telegram": "home",
-  "whatsapp": "coder"
+  "whatsapp": "coder",
+  "discord": "quick"
 }
 ```
 

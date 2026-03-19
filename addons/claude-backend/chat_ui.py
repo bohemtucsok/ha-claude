@@ -268,6 +268,10 @@ def get_chat_ui():
             "settings_twilio_sid": "Twilio Account SID",
             "settings_twilio_token": "Twilio Auth Token",
             "settings_twilio_from": "WhatsApp From Number",
+            "settings_enable_discord": "Discord",
+            "settings_discord_token": "Discord Bot Token",
+            "settings_discord_allowed_channels": "Allowed Channel IDs",
+            "settings_discord_allowed_users": "Allowed User IDs",
             "settings_timeout": "Timeout (s)",
             "settings_max_retries": "Max Retries",
             "settings_max_conversations": "Max Conversations",
@@ -306,6 +310,10 @@ def get_chat_ui():
             "settings_desc_twilio_account_sid": "Your Twilio Account SID for WhatsApp integration \u2013 get from console.twilio.com",
             "settings_desc_twilio_auth_token": "Your Twilio Auth Token for WhatsApp integration \u2013 get from console.twilio.com",
             "settings_desc_twilio_whatsapp_from": "Your Twilio WhatsApp number (e.g. +1234567890) \u2013 leave empty to disable",
+            "settings_desc_enable_discord": "Enable or disable the Discord bot entirely. When disabled, incoming Discord messages are ignored.",
+            "settings_desc_discord_bot_token": "Discord Bot token from Discord Developer Portal \u2013 leave empty to disable",
+            "settings_desc_discord_allowed_channel_ids": "Comma-separated Discord channel IDs allowed to use the bot. Leave empty to allow all channels.",
+            "settings_desc_discord_allowed_user_ids": "Comma-separated Discord user IDs allowed to use the bot. Leave empty to allow all users.",
             "settings_desc_timeout": "API request timeout in seconds (default 30, increase if responses are slow)",
             "settings_desc_max_retries": "Maximum retry attempts for failed API calls (default 3)",
             "settings_desc_max_conversations": "Maximum number of chat conversations to keep in history (1\u2013100)",
@@ -371,6 +379,7 @@ def get_chat_ui():
             "agent_channels": "Channel Assignment",
             "agent_channel_telegram": "Telegram",
             "agent_channel_whatsapp": "WhatsApp",
+            "agent_channel_discord": "Discord",
             "agent_channel_taken": "Already assigned to",
             "tip_agent_channels": "Assign this agent to a messaging channel. Each channel can have one agent.",
         },
@@ -573,6 +582,10 @@ def get_chat_ui():
             "settings_twilio_sid": "Twilio Account SID",
             "settings_twilio_token": "Twilio Auth Token",
             "settings_twilio_from": "Numero WhatsApp",
+            "settings_enable_discord": "Discord",
+            "settings_discord_token": "Token Bot Discord",
+            "settings_discord_allowed_channels": "ID Canali Autorizzati",
+            "settings_discord_allowed_users": "ID Utenti Autorizzati",
             "settings_timeout": "Timeout (s)",
             "settings_max_retries": "Tentativi Max",
             "settings_max_conversations": "Conversazioni Max",
@@ -612,6 +625,10 @@ def get_chat_ui():
             "settings_desc_twilio_account_sid": "Tuo SID Account Twilio per l'integrazione WhatsApp \u2013 ottieni da console.twilio.com",
             "settings_desc_twilio_auth_token": "Tuo Token Auth Twilio per l'integrazione WhatsApp \u2013 ottieni da console.twilio.com",
             "settings_desc_twilio_whatsapp_from": "Tuo numero WhatsApp Twilio (es. +1234567890) \u2013 lascia vuoto per disabilitare",
+            "settings_desc_enable_discord": "Abilita o disabilita completamente il bot Discord. Se disabilitato, i messaggi Discord in arrivo vengono ignorati.",
+            "settings_desc_discord_bot_token": "Token bot Discord dal Discord Developer Portal \u2013 lascia vuoto per disabilitare",
+            "settings_desc_discord_allowed_channel_ids": "Lista ID canali Discord autorizzati separati da virgola. Lascia vuoto per permettere tutti i canali.",
+            "settings_desc_discord_allowed_user_ids": "Lista ID utenti Discord autorizzati separati da virgola. Lascia vuoto per permettere tutti gli utenti.",
             "settings_desc_timeout": "Timeout richieste API in secondi (predefinito 30, aumenta se le risposte sono lente)",
             "settings_desc_max_retries": "Numero massimo di tentativi per chiamate API fallite (predefinito 3)",
             "settings_desc_max_conversations": "Numero massimo di conversazioni da mantenere nello storico (1\u2013100)",
@@ -677,6 +694,7 @@ def get_chat_ui():
             "agent_channels": "Associazione Canali",
             "agent_channel_telegram": "Telegram",
             "agent_channel_whatsapp": "WhatsApp",
+            "agent_channel_discord": "Discord",
             "agent_channel_taken": "Già assegnato a",
             "tip_agent_channels": "Associa questo agent a un canale di messaggistica. Ogni canale pu\u00f2 avere un solo agent.",
         },
@@ -878,6 +896,10 @@ def get_chat_ui():
             "settings_twilio_sid": "Twilio Account SID",
             "settings_twilio_token": "Twilio Auth Token",
             "settings_twilio_from": "Numero WhatsApp",
+            "settings_enable_discord": "Discord",
+            "settings_discord_token": "Token Bot Discord",
+            "settings_discord_allowed_channels": "IDs Canales Autorizados",
+            "settings_discord_allowed_users": "IDs Usuarios Autorizados",
             "settings_timeout": "Timeout (s)",
             "settings_max_retries": "Reintentos Max",
             "settings_max_conversations": "Conversaciones Max",
@@ -916,6 +938,10 @@ def get_chat_ui():
             "settings_desc_twilio_account_sid": "Tu SID de Cuenta Twilio para la integraci\u00f3n WhatsApp \u2013 obt\u00e9n de console.twilio.com",
             "settings_desc_twilio_auth_token": "Tu Auth Token de Twilio para la integraci\u00f3n WhatsApp \u2013 obt\u00e9n de console.twilio.com",
             "settings_desc_twilio_whatsapp_from": "Tu n\u00famero WhatsApp Twilio (ej. +1234567890) \u2013 dejar vac\u00edo para desactivar",
+            "settings_desc_enable_discord": "Habilitar o deshabilitar completamente el bot de Discord. Cuando est\u00e1 desactivado, los mensajes entrantes de Discord se ignoran.",
+            "settings_desc_discord_bot_token": "Token del bot de Discord desde Discord Developer Portal \u2013 dejar vac\u00edo para desactivar",
+            "settings_desc_discord_allowed_channel_ids": "Lista de IDs de canales de Discord permitidos, separados por coma. Dejar vac\u00edo para permitir todos los canales.",
+            "settings_desc_discord_allowed_user_ids": "Lista de IDs de usuarios de Discord permitidos, separados por coma. Dejar vac\u00edo para permitir todos los usuarios.",
             "settings_desc_timeout": "Tiempo de espera de solicitudes API en segundos (predeterminado 30, aumentar si las respuestas son lentas)",
             "settings_desc_max_retries": "N\u00famero m\u00e1ximo de intentos para llamadas API fallidas (predeterminado 3)",
             "settings_desc_max_conversations": "N\u00famero m\u00e1ximo de conversaciones en el historial (1\u2013100)",
@@ -981,6 +1007,7 @@ def get_chat_ui():
             "agent_channels": "Asignación de Canal",
             "agent_channel_telegram": "Telegram",
             "agent_channel_whatsapp": "WhatsApp",
+            "agent_channel_discord": "Discord",
             "agent_channel_taken": "Ya asignado a",
             "tip_agent_channels": "Asigna este agente a un canal de mensajería. Cada canal puede tener un único agente.",
         },
@@ -1182,6 +1209,10 @@ def get_chat_ui():
             "settings_twilio_sid": "Twilio Account SID",
             "settings_twilio_token": "Twilio Auth Token",
             "settings_twilio_from": "Numero WhatsApp",
+            "settings_enable_discord": "Discord",
+            "settings_discord_token": "Token Bot Discord",
+            "settings_discord_allowed_channels": "IDs Canaux Autorisés",
+            "settings_discord_allowed_users": "IDs Utilisateurs Autorisés",
             "settings_timeout": "Timeout (s)",
             "settings_max_retries": "Tentatives Max",
             "settings_max_conversations": "Conversations Max",
@@ -1218,6 +1249,10 @@ def get_chat_ui():
             "settings_desc_twilio_account_sid": "Votre SID de Compte Twilio pour l'int\u00e9gration WhatsApp \u2013 obtenez de console.twilio.com",
             "settings_desc_twilio_auth_token": "Votre Auth Token Twilio pour l'int\u00e9gration WhatsApp \u2013 obtenez de console.twilio.com",
             "settings_desc_twilio_whatsapp_from": "Votre num\u00e9ro WhatsApp Twilio (ex. +1234567890) \u2013 laisser vide pour d\u00e9sactiver",
+            "settings_desc_enable_discord": "Activer ou d\u00e9sactiver enti\u00e8rement le bot Discord. Quand d\u00e9sactiv\u00e9, les messages Discord entrants sont ignor\u00e9s.",
+            "settings_desc_discord_bot_token": "Token du bot Discord depuis Discord Developer Portal \u2013 laisser vide pour d\u00e9sactiver",
+            "settings_desc_discord_allowed_channel_ids": "Liste d'IDs de canaux Discord autoris\u00e9s, s\u00e9par\u00e9s par virgule. Laisser vide pour autoriser tous les canaux.",
+            "settings_desc_discord_allowed_user_ids": "Liste d'IDs d'utilisateurs Discord autoris\u00e9s, s\u00e9par\u00e9s par virgule. Laisser vide pour autoriser tous les utilisateurs.",
             "settings_desc_timeout": "D\u00e9lai d'attente des requ\u00eates API en secondes (par d\u00e9faut 30, augmenter si les r\u00e9ponses sont lentes)",
             "settings_desc_max_retries": "Nombre maximal de tentatives pour les appels API \u00e9chou\u00e9s (par d\u00e9faut 3)",
             "settings_desc_max_conversations": "Nombre maximal de conversations dans l'historique (1\u2013100)",
@@ -1283,6 +1318,7 @@ def get_chat_ui():
             "agent_channels": "Attribution de Canal",
             "agent_channel_telegram": "Telegram",
             "agent_channel_whatsapp": "WhatsApp",
+            "agent_channel_discord": "Discord",
             "agent_channel_taken": "Déjà assigné à",
             "tip_agent_channels": "Attribuez cet agent à un canal de messagerie. Chaque canal ne peut avoir qu'un seul agent.",
         },
@@ -1696,6 +1732,7 @@ def get_chat_ui():
         .messaging-card-badge {{ display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:700; padding:3px 8px; border-radius:20px; letter-spacing:0.3px; }}
         .messaging-card-badge.telegram {{ background:#e3f2fd; color:#1565c0; }}
         .messaging-card-badge.whatsapp {{ background:#e8f5e9; color:#2e7d32; }}
+        .messaging-card-badge.discord {{ background:#ecebff; color:#4b57d6; }}
         .messaging-card-uid {{ font-size:11px; color:#999; font-family:monospace; }}
         .messaging-card-delete {{ background:none; border:none; cursor:pointer; color:#bbb; font-size:14px; padding:2px 6px; border-radius:6px; line-height:1; transition:color 0.15s,background 0.15s; }}
         .messaging-card-delete:hover {{ color:#e53935; background:#fde8e8; }}
@@ -1711,6 +1748,7 @@ def get_chat_ui():
         .theme-dark .messaging-card-time {{ color:#555; }}
         .theme-dark .messaging-card-badge.telegram {{ background:#1a2a3a; color:#64b5f6; }}
         .theme-dark .messaging-card-badge.whatsapp {{ background:#1a2e1a; color:#81c784; }}
+        .theme-dark .messaging-card-badge.discord {{ background:#25233c; color:#a8b2ff; }}
         .theme-dark .messaging-card-delete {{ color:#555; }}
         .theme-dark .messaging-card-delete:hover {{ color:#ef9a9a; background:#3c1e1e; }}
         .chat-container {{ flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }}
@@ -2033,6 +2071,22 @@ def get_chat_ui():
         .settings-section-header:hover {{ background: #eef0f4; }}
         .settings-section-arrow {{ font-size: 10px; color: #999; }}
         .settings-section-body {{ padding: 6px 0; }}
+        .settings-subsection {{
+            margin: 8px 10px 12px;
+            border: 1px solid #e8e8e8;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #fff;
+        }}
+        .settings-subsection-title {{
+            padding: 8px 12px;
+            font-size: 12px;
+            font-weight: 700;
+            color: #555;
+            background: #f8f9fb;
+            border-bottom: 1px solid #ececec;
+            letter-spacing: 0.2px;
+        }}
         .settings-row {{
             display: flex; align-items: center; justify-content: space-between;
             padding: 8px 14px; min-height: 36px;
@@ -2814,6 +2868,8 @@ def get_chat_ui():
         body.dark-mode .settings-section-header {{ background: #252535; color: #aaa; border-bottom-color: #3a3a4a; }}
         body.dark-mode .settings-section-header:hover {{ background: #2e2e40; }}
         body.dark-mode .settings-section-arrow {{ color: #777; }}
+        body.dark-mode .settings-subsection {{ background:#232334; border-color:#3a3a4a; }}
+        body.dark-mode .settings-subsection-title {{ background:#2a2a3a; border-bottom-color:#3a3a4a; color:#bfc6d6; }}
         body.dark-mode .settings-row:hover {{ background: #2a2a3a; }}
         body.dark-mode .settings-label {{ color: #ccc; }}
         body.dark-mode .settings-desc {{ color: #777; }}
@@ -4598,7 +4654,7 @@ def get_chat_ui():
                     // Channel badges
                     Object.keys(channelAgents).forEach(ch => {{
                         if (channelAgents[ch] === a.id) {{
-                            const icon = ch === 'telegram' ? '\U0001f4e9' : ch === 'whatsapp' ? '\U0001f4f1' : '\U0001f4ac';
+                            const icon = ch === 'telegram' ? '\U0001f4e9' : ch === 'whatsapp' ? '\U0001f4f1' : ch === 'discord' ? '\U0001f579\ufe0f' : '\U0001f4ac';
                             badges.push('<span class="agent-badge channel">' + icon + ' ' + ch + '</span>');
                         }}
                     }});
@@ -4753,15 +4809,18 @@ def get_chat_ui():
             // Channel assignment (Telegram / WhatsApp)
             const chMap = window._channelAgents || {{}};
             const agentId = agentData ? agentData.id : null;
-            const CHANNELS = ['telegram', 'whatsapp'];
+            const CHANNELS = ['telegram', 'whatsapp', 'discord'];
             let chHtml = '<div class="agent-form-group"><label>' + _lbl(T.agent_channels || 'Channel Assignment', 'tip_agent_channels') + '</label>'
                 + '<div class="agent-form-row">';
             CHANNELS.forEach(ch => {{
                 const isAssigned = agentId && chMap[ch] === agentId;
                 const otherAgent = chMap[ch] && chMap[ch] !== agentId ? chMap[ch] : null;
-                const label = ch === 'telegram' ? (T.agent_channel_telegram || 'Telegram')
-                    : (T.agent_channel_whatsapp || 'WhatsApp');
-                const icon = ch === 'telegram' ? '\U0001f4e9' : '\U0001f4f1';
+                const label = ch === 'telegram'
+                    ? (T.agent_channel_telegram || 'Telegram')
+                    : ch === 'whatsapp'
+                        ? (T.agent_channel_whatsapp || 'WhatsApp')
+                        : (T.agent_channel_discord || 'Discord');
+                const icon = ch === 'telegram' ? '\U0001f4e9' : ch === 'whatsapp' ? '\U0001f4f1' : '\U0001f579\ufe0f';
                 const chDisabled = !!otherAgent;
                 chHtml += '<div class="agent-form-group" style="flex:1;">'
                     + '<label style="display:flex;align-items:center;gap:6px;font-size:12px;'
@@ -6003,6 +6062,10 @@ def get_chat_ui():
                 twilio_account_sid: T.settings_twilio_sid || 'Twilio Account SID',
                 twilio_auth_token: T.settings_twilio_token || 'Twilio Auth Token',
                 twilio_whatsapp_from: T.settings_twilio_from || 'WhatsApp From Number',
+                enable_discord: T.settings_enable_discord || 'Discord',
+                discord_bot_token: T.settings_discord_token || 'Discord Bot Token',
+                discord_allowed_channel_ids: T.settings_discord_allowed_channels || 'Allowed Channel IDs',
+                discord_allowed_user_ids: T.settings_discord_allowed_users || 'Allowed User IDs',
                 timeout: T.settings_timeout || 'Timeout (s)',
                 max_retries: T.settings_max_retries || 'Max Retries',
                 max_conversations: T.settings_max_conversations || 'Max Conversations',
@@ -6051,7 +6114,7 @@ def get_chat_ui():
                     arrow.textContent = isOpen ? '\u25B6' : '\u25BC';
                 }});
 
-                (section.fields || []).forEach(field => {{
+                function appendField(field, targetBody) {{
                     const row = document.createElement('div');
                     row.className = 'settings-row';
                     const lbl = document.createElement('label');
@@ -6121,14 +6184,51 @@ def get_chat_ui():
                         row.appendChild(inp);
                     }}
 
-                    secBody.appendChild(row);
+                    targetBody.appendChild(row);
                     if (DESCS[field.key]) {{
                         const desc = document.createElement('div');
                         desc.className = 'settings-desc';
                         desc.textContent = DESCS[field.key];
-                        secBody.appendChild(desc);
+                        targetBody.appendChild(desc);
                     }}
-                }});
+                }}
+
+                const sectionFields = section.fields || [];
+                if (section.id === 'messaging') {{
+                    const groups = [
+                        {{
+                            title: '\U0001f916 Telegram',
+                            keys: ['enable_telegram', 'telegram_bot_token', 'telegram_allowed_ids']
+                        }},
+                        {{
+                            title: '\U0001f4ac WhatsApp',
+                            keys: ['enable_whatsapp', 'twilio_account_sid', 'twilio_auth_token', 'twilio_whatsapp_from']
+                        }},
+                        {{
+                            title: '\U0001f579\ufe0f Discord',
+                            keys: ['enable_discord', 'discord_bot_token', 'discord_allowed_channel_ids', 'discord_allowed_user_ids']
+                        }},
+                    ];
+
+                    groups.forEach(group => {{
+                        const available = group.keys
+                            .map(key => sectionFields.find(f => f.key === key))
+                            .filter(Boolean);
+                        if (!available.length) return;
+
+                        const sub = document.createElement('div');
+                        sub.className = 'settings-subsection';
+                        const subTitle = document.createElement('div');
+                        subTitle.className = 'settings-subsection-title';
+                        subTitle.textContent = group.title;
+                        sub.appendChild(subTitle);
+
+                        available.forEach(field => appendField(field, sub));
+                        secBody.appendChild(sub);
+                    }});
+                }} else {{
+                    sectionFields.forEach(field => appendField(field, secBody));
+                }}
 
                 sec.appendChild(secHeader);
                 sec.appendChild(secBody);
@@ -8253,7 +8353,8 @@ def get_chat_ui():
                 const chats = data.chats || {{}};
                 const allChats = [
                     ...(chats.telegram || []).map(c => ({{...c, channel: 'telegram'}})),
-                    ...(chats.whatsapp || []).map(c => ({{...c, channel: 'whatsapp'}}))
+                    ...(chats.whatsapp || []).map(c => ({{...c, channel: 'whatsapp'}})),
+                    ...(chats.discord || []).map(c => ({{...c, channel: 'discord'}}))
                 ];
                 // Sort by most recent message first
                 allChats.sort((a, b) => {{
@@ -8269,8 +8370,9 @@ def get_chat_ui():
                 
                 allChats.forEach(chat => {{
                     const isTg = chat.channel === 'telegram';
-                    const badgeLabel = isTg ? '✈️ Telegram' : '💬 WhatsApp';
-                    const badgeCls   = isTg ? 'telegram' : 'whatsapp';
+                    const isWa = chat.channel === 'whatsapp';
+                    const badgeLabel = isTg ? '✈️ Telegram' : isWa ? '💬 WhatsApp' : '🕹️ Discord';
+                    const badgeCls   = isTg ? 'telegram' : isWa ? 'whatsapp' : 'discord';
                     const timeStr    = chat.last_timestamp
                         ? new Date(chat.last_timestamp).toLocaleString([], {{dateStyle:'short', timeStyle:'short'}})
                         : '';
@@ -8313,7 +8415,7 @@ def get_chat_ui():
                 const data = await resp.json();
                 const messages = data.messages || [];
 
-                const channelLabel = channel === 'telegram' ? '🤖 Telegram' : '💬 WhatsApp';
+                const channelLabel = channel === 'telegram' ? '🤖 Telegram' : channel === 'whatsapp' ? '💬 WhatsApp' : '🕹️ Discord';
                 document.getElementById('msgModalTitle').textContent = `${{channelLabel}} · ${{userId}}`;
 
                 const body = document.getElementById('msgModalBody');

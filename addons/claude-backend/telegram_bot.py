@@ -10,6 +10,7 @@ import json
 from typing import Optional, Dict, Any
 from threading import Thread
 import time
+from core.translations import tr
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +185,7 @@ class TelegramBot:
                 response_data = resp.json()
                 response_text = response_data.get("response", "I couldn't process that.").strip()
                 if not response_text:
-                    response_text = "(nessuna risposta)"
+                    response_text = tr("telegram_no_response", "(no response)")
                 mgr.add_message("telegram", str(user_id), response_text, role="assistant")
                 sent = self.send_message(chat_id, response_text)
                 if sent:

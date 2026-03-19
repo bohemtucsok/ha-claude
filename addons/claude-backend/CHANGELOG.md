@@ -2,6 +2,52 @@
 
 > **⚠️ After updating, rebuild the add-on** (Settings → Add-ons → Amira → Rebuild) to apply new dependencies.
 
+## 4.6.23 — Messaging UI split + Discord listener compatibility + docs alignment
+
+### Settings UI (Messaging)
+- Split **Settings → Messaging** into 3 clear subsections:
+  - **Telegram**
+  - **WhatsApp**
+  - **Discord**
+- Kept existing fields and save behavior unchanged, with better visual grouping.
+
+### Discord runtime fix
+- Fixed Discord listener registration compatibility across `discord.py` variants:
+  - replaced non-portable listener registration with canonical `@client.event` handlers (`on_ready`, `on_message`)
+- Added diagnostic startup/event logs in `discord_bot.py` to simplify troubleshooting:
+  - listener registration/intents summary
+  - inbound Discord event trace (`user/channel/guild/content_len`)
+
+### Documentation updates
+- Updated messaging docs to include Discord setup and troubleshooting:
+  - `docs/MESSAGING.md`
+  - `addons/claude-backend/DOCS.md`
+  - `docs/SETUP_HA.md`
+- Added Discord in messaging overview, security notes, API examples, and endpoint references.
+
+---
+
+## 4.6.22 — Discord messaging channel
+
+### New: Discord bot integration
+- Added Discord messaging channel (like Telegram/WhatsApp) with dedicated bot listener (`discord.py`)
+- New settings:
+  - `enable_discord`
+  - `discord_bot_token`
+  - `discord_allowed_channel_ids`
+  - `discord_allowed_user_ids`
+- Added Discord API endpoint: `POST /api/discord/message`
+- Added Discord startup lifecycle in bot bootstrap (`start_messaging_bots`)
+- Added Discord support in chat history panel (`Messaging` tab) and channel badges
+- Added Discord as assignable channel in Agent Channel Assignment
+
+### Runtime and dependencies
+- Added optional dependency `discord.py>=2.4.0`
+- Included `discord_bot.py` in Docker image build
+- Messaging stats/chats now include Discord channel
+
+---
+
 ## 4.6.21 — xAI API, fallback/agent reliability, Ollama Cloud key support
 
 ### New provider: xAI (Grok)

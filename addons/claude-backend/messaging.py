@@ -1,8 +1,9 @@
-"""Messaging Integration - WhatsApp & Telegram Bot Support.
+"""Messaging Integration - Telegram, WhatsApp, Discord support.
 
 Nanobot-inspired: Minimal, practical multi-channel messaging support.
-- Telegram: Real-time polling or webhook
-- WhatsApp: Twilio-based integration
+- Telegram: Real-time polling
+- WhatsApp: Twilio-based integration (webhook)
+- Discord: Bot gateway integration
 - Unified interface for all channels
 """
 
@@ -21,7 +22,7 @@ CHATS_DB.parent.mkdir(parents=True, exist_ok=True)
 
 
 class MessagingManager:
-    """Unified messaging interface for Telegram and WhatsApp."""
+    """Unified messaging interface for Telegram, WhatsApp and Discord."""
 
     def __init__(self):
         """Initialize messaging manager."""
@@ -30,11 +31,17 @@ class MessagingManager:
         self.whatsapp_account = os.getenv("TWILIO_ACCOUNT_SID", "")
         self.whatsapp_from = os.getenv("TWILIO_WHATSAPP_FROM", "")
         
+        self.discord_token = os.getenv("DISCORD_BOT_TOKEN", "")
         self.telegram_running = False
         self.telegram_offset = 0
         self.chats = self._load_chats()
         
-        logger.info(f"MessagingManager initialized. Telegram: {bool(self.telegram_token)}, WhatsApp: {bool(self.whatsapp_token)}")
+        logger.info(
+            "MessagingManager initialized. Telegram: %s, WhatsApp: %s, Discord: %s",
+            bool(self.telegram_token),
+            bool(self.whatsapp_token),
+            bool(self.discord_token),
+        )
 
     @staticmethod
     def _normalize_message_text(text: Any) -> str:
@@ -100,7 +107,7 @@ class MessagingManager:
         """Add message to chat history.
         
         Args:
-            channel: 'telegram' or 'whatsapp'
+            channel: 'telegram', 'whatsapp' or 'discord'
             user_id: User identifier (Telegram ID or WhatsApp number)
             text: Message content
             role: 'user' or 'assistant'
@@ -123,7 +130,7 @@ class MessagingManager:
         """Get recent chat history for a user.
         
         Args:
-            channel: 'telegram' or 'whatsapp'
+            channel: 'telegram', 'whatsapp' or 'discord'
             user_id: User identifier
             limit: Max messages to return
             
@@ -152,9 +159,10 @@ class MessagingManager:
         total_chats = len(self.chats)
         total_messages = sum(len(msgs) for msgs in self.chats.values())
         
-        channels = {"telegram": 0, "whatsapp": 0}
+        channels = {"telegram": 0, "whatsapp": 0, "discord": 0}
         for key in self.chats:
             channel = key.split(":")[0]
+            channels.setdefault(channel, 0)
             channels[channel] += 1
         
         return {
@@ -163,7 +171,8 @@ class MessagingManager:
             "channels": channels,
             "services_enabled": {
                 "telegram": bool(self.telegram_token),
-                "whatsapp": bool(self.whatsapp_token)
+                "whatsapp": bool(self.whatsapp_token),
+                "discord": bool(self.discord_token),
             }
         }
 
@@ -171,15 +180,16 @@ class MessagingManager:
         """Get all chats grouped by channel.
         
         Returns:
-            Dict: {'telegram': [...], 'whatsapp': [...]}
+            Dict: {'telegram': [...], 'whatsapp': [...], 'discord': [...]}
         """
-        result = {"telegram": [], "whatsapp": []}
+        result = {"telegram": [], "whatsapp": [], "discord": []}
         
         for key, messages in self.chats.items():
             channel = key.split(":")[0]
             user_id = key.split(":", 1)[1]
             
             if messages:
+                result.setdefault(channel, [])
                 result[channel].append({
                     "user_id": user_id,
                     "channel": channel,
@@ -194,7 +204,7 @@ class MessagingManager:
         """Get all chats for a specific channel.
         
         Args:
-            channel: 'telegram' or 'whatsapp'
+            channel: 'telegram', 'whatsapp' or 'discord'
             
         Returns:
             List of chat summaries

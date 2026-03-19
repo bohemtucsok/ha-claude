@@ -1388,6 +1388,7 @@ TOOL_DESCRIPTIONS = {
     "get_statistics": "Carico statistiche",
     "manage_statistics": "Gestisco statistiche",
     "send_notification": "Invio notifica",
+    "send_channel_message": "Invio messaggio canale",
     "read_config_file": "Leggo file config",
     "write_config_file": "Salvo file config",
     "list_config_files": "Elenco file config",
@@ -1658,9 +1659,22 @@ HA_TOOLS_DESCRIPTION = [
             "properties": {
                 "message": {"type": "string", "description": "The notification message."},
                 "title": {"type": "string", "description": "Optional notification title."},
-                "target": {"type": "string", "description": "Notify service target (e.g. 'mobile_app_phone'). If empty, creates a persistent notification in HA."}
+                "target": {"type": "string", "description": "Notify service name only (e.g. 'mobile_app_phone', 'telegram'). Do NOT pass a chat_id/user_id. If empty, creates a persistent notification in HA."}
             },
             "required": ["message"]
+        }
+    },
+    {
+        "name": "send_channel_message",
+        "description": "Send a direct outbound message to Telegram, WhatsApp, or Discord using recipient/channel IDs. Use this when the user provides a Telegram chat_id, WhatsApp number, or Discord channel_id.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "channel": {"type": "string", "enum": ["telegram", "whatsapp", "discord"], "description": "Destination channel."},
+                "recipient": {"type": "string", "description": "Telegram chat_id, WhatsApp phone (+E164), or Discord channel_id."},
+                "message": {"type": "string", "description": "Message text to send."}
+            },
+            "required": ["channel", "recipient", "message"]
         }
     },
     {
@@ -2305,7 +2319,7 @@ WRITE_TOOLS = {
     "create_automation", "update_automation", "delete_automation",
     "create_script", "update_script", "delete_script",
     "create_dashboard", "update_dashboard", "delete_dashboard",
-    "call_service", "write_config_file", "send_notification",
+    "call_service", "write_config_file", "send_notification", "send_channel_message",
     "manage_entity", "create_backup", "manage_helpers",
     "dismiss_repair",
     "fire_event",
@@ -2417,17 +2431,48 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             domain = tool_input.get("domain", "")
             query = tool_input.get("query", "").strip().lower()
             states = api.get_all_states()
-            if domain:
+            # Semantic query handling for temperature requests:
+            # - Ignore generic location tokens (e.g. "casa/home") as hard filters.
+            # - Include temperature-capable climate entities as well.
+            _temp_tokens = {"temperature", "temperatura", "temp"}
+            _location_tokens = {"casa", "casa.", "home", "house", "maison", "hogar"}
+            _query_tokens = [t for t in query.split() if t]
+            _is_temperature_query = any(t in _temp_tokens for t in _query_tokens)
+
+            # If model passed domain="sensor" for a global temperature query,
+            # do not hard-limit to sensors: we also want climate entities.
+            _apply_domain_filter = bool(domain)
+            if _is_temperature_query and str(domain).strip().lower() == "sensor":
+                _apply_domain_filter = False
+
+            if _apply_domain_filter:
                 states = [s for s in states if s.get("entity_id", "").startswith(f"{domain}.")]
             # Keyword search: filter by query in entity_id or friendly_name
             if query:
                 keywords = query.split()
+                if _is_temperature_query:
+                    keywords = [kw for kw in keywords if kw not in _location_tokens]
                 filtered = []
                 for s in states:
                     eid = s.get("entity_id", "").lower()
-                    fname = (s.get("attributes") or {}).get("friendly_name", "").lower()
-                    if all(kw in eid or kw in fname for kw in keywords):
+                    attrs = s.get("attributes") or {}
+                    fname = attrs.get("friendly_name", "").lower()
+                    if _is_temperature_query:
+                        _device_class = str(attrs.get("device_class", "") or "").lower()
+                        _has_temp_attr = ("current_temperature" in attrs) or ("temperature" in attrs)
+                        _is_temp_entity = (
+                            _device_class == "temperature"
+                            or eid.startswith("climate.")
+                            or _has_temp_attr
+                        )
+                        if not _is_temp_entity:
+                            continue
+                        if keywords and not any(kw in eid or kw in fname for kw in keywords if kw not in _temp_tokens):
+                            continue
                         filtered.append(s)
+                    else:
+                        if all(kw in eid or kw in fname for kw in keywords):
+                            filtered.append(s)
                 states = filtered
             # Limit results for providers with small context windows
             # When using query, allow more results since they're already filtered
@@ -3195,7 +3240,7 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
                 "automation_id": automation_id,
                 "old_yaml": old_yaml,
                 "new_yaml": new_yaml,
-                "message": "Anteprima della modifica. Conferma per applicare.",
+                "message": api.tr("preview_change_message", "Preview of the change. Confirm to apply."),
                 "IMPORTANT": "The diff is displayed to the user by the UI when available. Briefly summarize in 1-2 sentences WHAT you changed and WHY (e.g. 'Ho sostituito l'orario fisso con un trigger al tramonto per adattarsi alle stagioni.'). Then ask for confirmation in one short sentence.",
             }, ensure_ascii=False)
 
@@ -3570,14 +3615,127 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
                 return json.dumps({"error": f"Could not get areas: {str(e)}"}, default=str)
 
         elif tool_name == "send_notification":
-            message = tool_input.get("message", "")
+            message = str(tool_input.get("message", "") or "").strip()
             title = tool_input.get("title", "Amira")
-            target = tool_input.get("target", "")
+            target = str(tool_input.get("target", "") or "").strip()
+            if not message:
+                return json.dumps({
+                    "status": "error",
+                    "error": "Missing notification message."
+                }, ensure_ascii=False, default=str)
+
+            # Common LLM mistake: passing Telegram chat_id as target.
+            if target and target.isdigit():
+                return json.dumps({
+                    "status": "error",
+                    "error": "Invalid target for send_notification: expected notify service name (e.g. 'telegram' or 'mobile_app_phone'), not a numeric chat_id."
+                }, ensure_ascii=False, default=str)
+
             if target:
                 result = api.call_ha_api("POST", f"services/notify/{target}", {"message": message, "title": title})
+                service = f"notify.{target}"
             else:
                 result = api.call_ha_api("POST", "services/persistent_notification/create", {"message": message, "title": title})
-            return json.dumps({"status": "success", "result": result}, ensure_ascii=False, default=str)
+                service = "persistent_notification.create"
+
+            if isinstance(result, dict) and result.get("error"):
+                return json.dumps({
+                    "status": "error",
+                    "service": service,
+                    "error": result.get("error"),
+                    "details": result.get("details", "")
+                }, ensure_ascii=False, default=str)
+            return json.dumps({
+                "status": "success",
+                "service": service,
+                "result": result
+            }, ensure_ascii=False, default=str)
+
+        elif tool_name == "send_channel_message":
+            channel = str(tool_input.get("channel", "") or "").strip().lower()
+            recipient = str(tool_input.get("recipient", "") or "").strip()
+            message = str(tool_input.get("message", "") or "").strip()
+
+            if channel not in ("telegram", "whatsapp", "discord"):
+                return json.dumps({
+                    "status": "error",
+                    "error": "Invalid channel. Use telegram, whatsapp or discord."
+                }, ensure_ascii=False, default=str)
+            if not recipient or not message:
+                return json.dumps({
+                    "status": "error",
+                    "error": "recipient and message are required."
+                }, ensure_ascii=False, default=str)
+
+            try:
+                if channel == "telegram":
+                    if not recipient.isdigit():
+                        return json.dumps({
+                            "status": "error",
+                            "channel": channel,
+                            "error": "Telegram recipient must be a numeric chat_id."
+                        }, ensure_ascii=False, default=str)
+                    from telegram_bot import get_telegram_bot
+                    bot = get_telegram_bot(api.TELEGRAM_BOT_TOKEN)
+                    if not bot:
+                        return json.dumps({
+                            "status": "error",
+                            "channel": channel,
+                            "error": "Telegram bot not configured."
+                        }, ensure_ascii=False, default=str)
+                    ok = bot.send_message(int(recipient), message)
+                elif channel == "whatsapp":
+                    from whatsapp_bot import get_whatsapp_bot
+                    bot = get_whatsapp_bot(api.TWILIO_ACCOUNT_SID, api.TWILIO_AUTH_TOKEN, api.TWILIO_WHATSAPP_FROM)
+                    if not bot:
+                        return json.dumps({
+                            "status": "error",
+                            "channel": channel,
+                            "error": "WhatsApp bot not configured."
+                        }, ensure_ascii=False, default=str)
+                    ok = bot.send_message(recipient, message)
+                else:  # discord
+                    if not recipient.isdigit():
+                        return json.dumps({
+                            "status": "error",
+                            "channel": channel,
+                            "error": "Discord recipient must be a numeric channel_id."
+                        }, ensure_ascii=False, default=str)
+                    from discord_bot import get_discord_bot
+                    bot = get_discord_bot(
+                        api.DISCORD_BOT_TOKEN,
+                        allowed_channel_ids=api.DISCORD_ALLOWED_CHANNEL_IDS,
+                        allowed_user_ids=api.DISCORD_ALLOWED_USER_IDS,
+                    )
+                    if not bot:
+                        return json.dumps({
+                            "status": "error",
+                            "channel": channel,
+                            "error": "Discord bot not configured."
+                        }, ensure_ascii=False, default=str)
+                    ok = bot.send_message(int(recipient), message)
+
+                if not ok:
+                    return json.dumps({
+                        "status": "error",
+                        "channel": channel,
+                        "recipient": recipient,
+                        "error": "Message delivery failed."
+                    }, ensure_ascii=False, default=str)
+
+                return json.dumps({
+                    "status": "success",
+                    "channel": channel,
+                    "recipient": recipient,
+                    "message": "Message sent."
+                }, ensure_ascii=False, default=str)
+            except Exception as e:
+                return json.dumps({
+                    "status": "error",
+                    "channel": channel,
+                    "recipient": recipient,
+                    "error": str(e)
+                }, ensure_ascii=False, default=str)
 
         elif tool_name == "get_dashboards":
             ws_result = api.call_ha_websocket("lovelace/dashboards/list")
