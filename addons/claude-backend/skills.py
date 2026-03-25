@@ -156,6 +156,21 @@ def delete_skill(name: str) -> bool:
 # Store (GitHub index)
 # ---------------------------------------------------------------------------
 
+def _http_get(url: str, timeout: int = 10) -> bytes:
+    """Fetch URL content. Uses requests if available, falls back to urllib."""
+    headers = {"User-Agent": "Amira-HA-Addon/1.0"}
+    try:
+        import requests as _req
+        resp = _req.get(url, headers=headers, timeout=timeout)
+        resp.raise_for_status()
+        return resp.content
+    except ImportError:
+        import urllib.request
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read()
+
+
 def fetch_store_index(installed_names: Optional[set] = None) -> list[dict]:
     """Fetch skills index from GitHub (cached 5 min). Raises on failure."""
     with _store_lock:
@@ -163,14 +178,8 @@ def fetch_store_index(installed_names: Optional[set] = None) -> list[dict]:
         if _store_cache["data"] is not None and (now - _store_cache["ts"]) < _STORE_TTL:
             skills = _store_cache["data"]
         else:
-            import urllib.request
             import json
-            req = urllib.request.Request(
-                SKILLS_INDEX_URL,
-                headers={"User-Agent": "Amira-HA-Addon/1.0"},
-            )
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode())
+            data = json.loads(_http_get(SKILLS_INDEX_URL).decode())
             skills = data.get("skills", [])
             _store_cache["ts"] = now
             _store_cache["data"] = skills
@@ -183,10 +192,7 @@ def fetch_store_index(installed_names: Optional[set] = None) -> list[dict]:
 
 def fetch_skill_md(raw_url: str) -> str:
     """Fetch raw SKILL.md content from a URL. Raises on failure."""
-    import urllib.request
-    req = urllib.request.Request(raw_url, headers={"User-Agent": "Amira-HA-Addon/1.0"})
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return resp.read().decode("utf-8")
+    return _http_get(raw_url).decode("utf-8")
 
 
 # ---------------------------------------------------------------------------

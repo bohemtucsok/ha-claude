@@ -2,6 +2,15 @@
 
 > **⚠️ After updating, rebuild the add-on** (Settings → Add-ons → Amira → Rebuild) to apply new dependencies.
 
+## 4.6.31 — Fix Skills store button crash + sys.path import fix
+
+### Bug fixes
+- **Fixed `SyntaxError: missing } in template string`** in Skills store panel: the Install button used `onclick='...'` with string concatenation that broke JS single-quoted strings; replaced with `data-name`/`data-url` attributes + `querySelectorAll` event listeners
+- **Fixed `No module named 'skills'`**: `skills_routes.py` now explicitly adds the app root to `sys.path` and imports `skills` at module load time with a try/except; if unavailable, endpoints return `skills_unavailable` instead of a generic error
+- **Improved error messages**: Skills panel now shows "Skills non disponibili. Riavvia l'add-on." instead of a false "internet connection" error when the module is missing; actual error detail shown below network errors for easier debugging
+
+---
+
 ## 4.6.30 — Skills system + SAK/HTML-JS/Mushroom skills + fix Skills UI crash
 
 ### Skills system

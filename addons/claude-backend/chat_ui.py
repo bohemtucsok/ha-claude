@@ -209,6 +209,7 @@ def get_chat_ui():
             "skills_store_empty": "No skills available in the store.",
             "skills_store_loading": "Loading store...",
             "skills_store_error": "Could not load the store. Check your internet connection.",
+            "skills_unavailable": "Skills not available. Please restart the add-on.",
             "skills_refresh": "Refresh",
             "skills_by": "by",
             "skills_requires_version": "Requires Amira v{version}",
@@ -548,6 +549,7 @@ def get_chat_ui():
             "skills_store_empty": "Nessuna skill disponibile nello store.",
             "skills_store_loading": "Caricamento store...",
             "skills_store_error": "Impossibile caricare lo store. Controlla la connessione internet.",
+            "skills_unavailable": "Skills non disponibili. Riavvia l'add-on.",
             "skills_refresh": "Aggiorna",
             "skills_by": "di",
             "skills_requires_version": "Richiede Amira v{version}",
@@ -887,6 +889,7 @@ def get_chat_ui():
             "skills_store_empty": "No hay skills disponibles en la tienda.",
             "skills_store_loading": "Cargando tienda...",
             "skills_store_error": "No se pudo cargar la tienda. Comprueba tu conexión a internet.",
+            "skills_unavailable": "Skills no disponibles. Reinicia el add-on.",
             "skills_refresh": "Actualizar",
             "skills_by": "por",
             "skills_requires_version": "Requiere Amira v{version}",
@@ -1224,6 +1227,7 @@ def get_chat_ui():
             "skills_store_empty": "Aucune skill disponible dans la boutique.",
             "skills_store_loading": "Chargement de la boutique...",
             "skills_store_error": "Impossible de charger la boutique. Vérifiez votre connexion internet.",
+            "skills_unavailable": "Skills non disponibles. Redémarrez l'add-on.",
             "skills_refresh": "Actualiser",
             "skills_by": "par",
             "skills_requires_version": "Nécessite Amira v{version}",
@@ -8022,7 +8026,7 @@ def get_chat_ui():
                                     <span style="font-size:11px;color:#888;margin-left:6px;">v${{s.version || ''}}</span>
                                     ${{s.author ? '<span style="font-size:11px;color:#aaa;margin-left:4px;">' + (T.skills_by||'by') + ' ' + s.author + '</span>' : ''}}
                                 </div>
-                                <button onclick="deleteSkill('${{s.name}}')" style="background:#fee2e2;color:#991b1b;border:none;border-radius:5px;padding:3px 9px;font-size:11px;cursor:pointer;">${{T.skills_delete_btn||'Remove'}}</button>
+                                <button class="sak-del-btn" data-name="${{s.name}}" style="background:#fee2e2;color:#991b1b;border:none;border-radius:5px;padding:3px 9px;font-size:11px;cursor:pointer;">${{T.skills_delete_btn||'Remove'}}</button>
                             </div>
                             <div style="font-size:12px;color:#555;margin-top:4px;">${{_sdesc(s)}}</div>
                             ${{(s.tags||[]).map(t=>`<span style="background:#e8f0fe;color:#1a73e8;border-radius:4px;padding:1px 5px;font-size:10px;margin-right:3px;">${{t}}</span>`).join('')}}
@@ -8036,8 +8040,11 @@ def get_chat_ui():
                 html += '<button onclick="loadSkillsPanel()" style="background:#f0f0f0;border:none;border-radius:5px;padding:3px 9px;font-size:11px;cursor:pointer;">' + (T.skills_refresh||'Refresh') + '</button>';
                 html += '</div>';
 
-                if (storeData.error && store.length === 0) {{
+                if (storeData.error === 'skills_unavailable') {{
+                    html += '<div style="color:#888;font-size:12px;">' + (T.skills_unavailable||'Skills not available. Restart the add-on to activate.') + '</div>';
+                }} else if (storeData.error && store.length === 0) {{
                     html += '<div style="color:#c62828;font-size:12px;">' + (T.skills_store_error||'Could not load store.') + '</div>';
+                    html += '<div style="color:#999;font-size:11px;margin-top:4px;font-family:monospace;">' + (storeData.error||'') + '</div>';
                 }} else if (store.length === 0) {{
                     html += '<div style="color:#999;font-size:12px;">' + (T.skills_store_empty||'No skills available.') + '</div>';
                 }} else {{
@@ -8052,7 +8059,7 @@ def get_chat_ui():
                                 </div>
                                 ${{isInst
                                     ? '<span style="background:#d1fae5;color:#065f46;border-radius:5px;padding:3px 9px;font-size:11px;">' + (T.skills_installed_badge||'Installed') + '</span>'
-                                    : '<button onclick=\'installSkill("' + s.name + '","' + (s.raw_url||'') + '")\' style="background:#4caf50;color:#fff;border:none;border-radius:5px;padding:3px 9px;font-size:11px;cursor:pointer;">' + (T.skills_install_btn||'Install') + '</button>'
+                                    : `<button class="sak-inst-btn" data-name="${{s.name}}" data-url="${{s.raw_url||''}}" style="background:#4caf50;color:#fff;border:none;border-radius:5px;padding:3px 9px;font-size:11px;cursor:pointer;">${{T.skills_install_btn||'Install'}}</button>`
                                 }}
                             </div>
                             <div style="font-size:12px;color:#555;margin-top:4px;">${{_sdesc(s)}}</div>
@@ -8061,6 +8068,12 @@ def get_chat_ui():
                     }});
                 }}
                 panel.innerHTML = html;
+                panel.querySelectorAll('.sak-del-btn').forEach(btn => {{
+                    btn.onclick = () => deleteSkill(btn.dataset.name);
+                }});
+                panel.querySelectorAll('.sak-inst-btn').forEach(btn => {{
+                    btn.onclick = () => installSkill(btn.dataset.name, btn.dataset.url);
+                }});
             }} catch(e) {{
                 panel.innerHTML = '<div style="color:#c62828;padding:12px;">' + (T.skills_store_error||'Error loading skills.') + '</div>';
             }}
