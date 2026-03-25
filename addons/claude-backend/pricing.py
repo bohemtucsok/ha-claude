@@ -175,6 +175,7 @@ FREE_PROVIDERS = {
     "nvidia",
     "ollama",
     "github_copilot",
+    "openai_codex",
     "github",
     "claude_web",
     "chatgpt_web",

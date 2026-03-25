@@ -3800,6 +3800,7 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
         _last_write_result = None        # last WRITE tool result (for fallback display)
         _last_success_read_tool = None   # last successful read tool snapshot for loop fallback
         _preview_round_done = False      # True after preview_automation_change executes
+        _preview_generated_this_turn = False  # Successful preview generated in this request
         _html_draft_pending_name = ""    # create_html_dashboard draft name pending finalize
         _html_dashboard_saved_this_turn = False
         _write_tools_executed: list = []  # names of write tools actually called this turn
@@ -4946,6 +4947,7 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                                 _round_write_confirms.append(f"✅ {_msg}")
 
                     if fn_name == "preview_automation_change" and _status == "preview":
+                        _preview_generated_this_turn = True
                         _norm = _normalize_automation_change_args(tc_args)
                         session_last_preview[session_id] = {
                             "type": "automation_preview",
@@ -5513,6 +5515,26 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                 # NOTE: sentinel-based auto-execute blocks (CONFIRM_CREATE_AUTOMATION etc.)
                 # have been removed. No-tool providers now use the universal Tool Simulator
                 # (<tool_call> XML blocks) which are handled by the streaming loop above.
+        elif _preview_generated_this_turn:
+            # Fallback: some no-tool provider/model combinations can produce
+            # an empty final assistant round right after preview generation.
+            # Ensure the user still receives a confirmation prompt.
+            _preview_msg = (
+                get_lang_text("preview_change_message")
+                or tr("preview_change_message", "Preview of the change. Confirm to apply.")
+                or "Preview of the change. Confirm to apply."
+            )
+            yield {"type": "token", "content": _preview_msg}
+            logger.chat(f"📤 [{AI_PROVIDER}/{get_active_model()}]: {_preview_msg}")
+            _assistant_preview_msg = {
+                "role": "assistant",
+                "content": _preview_msg,
+                "model": get_active_model(),
+                "provider": AI_PROVIDER,
+            }
+            if last_usage:
+                _assistant_preview_msg["usage"] = last_usage
+            conversations[session_id].append(_assistant_preview_msg)
 
         # Trim and save (respect tool_call/tool boundaries)
         if len(conversations[session_id]) > 50:

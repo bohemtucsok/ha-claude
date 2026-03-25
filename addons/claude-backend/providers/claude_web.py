@@ -469,6 +469,10 @@ class ClaudeWebProvider(EnhancedProvider):
         """Parse HTTP error response into a human-readable message."""
         # Try to extract structured info from JSON error bodies
         if status_code == 429:
+            # 429 on Claude Web can mean two different things:
+            # 1) true account usage cap reached (often with resetsAt/representativeClaim)
+            # 2) transient request throttling / anti-abuse rate limit.
+            # Do not always claim the user has exhausted plan quota.
             try:
                 outer = json.loads(raw_body)
                 inner_msg = (outer.get("error") or {}).get("message", "")
@@ -480,6 +484,19 @@ class ClaudeWebProvider(EnhancedProvider):
 
                 resets_at = detail.get("resetsAt")
                 claim = detail.get("representativeClaim", "")
+                msg_l = str(inner_msg or "").lower()
+
+                # Decide if this is likely a hard usage cap, not a transient throttle.
+                is_usage_cap = bool(resets_at or claim)
+                if not is_usage_cap:
+                    usage_markers = (
+                        "usage limit",
+                        "monthly limit",
+                        "weekly limit",
+                        "daily limit",
+                        "quota",
+                    )
+                    is_usage_cap = any(m in msg_l for m in usage_markers)
 
                 # Build human-readable time until reset
                 reset_info = ""
@@ -508,13 +525,24 @@ class ClaudeWebProvider(EnhancedProvider):
                 elif "daily" in claim:
                     limit_type = " (daily limit)"
 
+                if is_usage_cap:
+                    return (
+                        f"Claude.ai usage limit reached{limit_type}.{reset_info}\n"
+                        f"Use another provider or wait for reset."
+                    )
+
+                # 429 but no clear quota signals: likely temporary throttling.
                 return (
-                    f"Claude.ai usage limit reached{limit_type}.{reset_info}\n"
-                    f"Use another provider or wait for reset."
+                    "Claude.ai temporarily rate limited this request (429).\n"
+                    "This may be transient and does not necessarily mean your plan quota is exhausted.\n"
+                    "Retry in a moment or use another provider."
                 )
             except (json.JSONDecodeError, KeyError, TypeError):
                 pass
-            return "Claude.ai usage limit reached. Please try again later."
+            return (
+                "Claude.ai temporarily rate limited this request (429). "
+                "Retry in a moment."
+            )
 
         if status_code == 500:
             return "Claude.ai internal server error. Please retry in a few minutes."
