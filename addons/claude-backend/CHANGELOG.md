@@ -2,6 +2,14 @@
 
 > **⚠️ After updating, rebuild the add-on** (Settings → Add-ons → Amira → Rebuild) to apply new dependencies.
 
+## 4.6.38 — Bubble: fix YAML as bullet points + fix language forcing Italian on all users
+
+### Bug fixes
+- **YAML no longer rendered as bullet points in the bubble**: code blocks are now extracted into placeholders *before* the list regex runs, so `- sensor.temperature` lines inside `content: |` YAML blocks are no longer converted to bullet points
+- **Bubble no longer forces Italian on non-Italian users**: the bubble now sends `language: UI_LANG` with every chat request; the server applies a per-request language lock (thread-safe, no global change) so each user gets responses in their own UI language regardless of the server's global language setting
+
+---
+
 ## 4.6.37 — Fix backtick template literals stripped from code blocks in chat + html-js-card skill 1.3.0
 
 ### Bug fixes

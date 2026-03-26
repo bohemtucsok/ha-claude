@@ -905,13 +905,20 @@ def get_chat_bubble_js(
       detailsBlocks.push(safe);
       return '%%DETAILS_' + (detailsBlocks.length - 1) + '%%';
     }});
-    
+
+    // 1c. Extract code blocks into placeholders BEFORE HTML escaping and list processing.
+    // This prevents: (a) HTML tags inside code being interpreted, (b) YAML "- item" lines
+    // inside code blocks being turned into bullet points by the list regex below.
+    var codeBlocks = [];
+    text = text.replace(/```(\\w*)\\n([\\s\\S]*?)```/g, function(m, lang, code) {{
+      var escaped = code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      codeBlocks.push('<pre class="md-code-block"><code>' + escaped.trim() + '</code></pre>');
+      return '%%CODE_' + (codeBlocks.length - 1) + '%%';
+    }});
+
     let html = text
-      // Escape HTML
+      // Escape HTML (code blocks are already placeholders — safe to escape the rest)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      // Code blocks (``` ... ```)
-      .replace(/```(\\w*)\\n([\\s\\S]*?)```/g, (_, lang, code) =>
-        '<pre class="md-code-block"><code>' + code.trim() + '</code></pre>')
       // Inline code
       .replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>')
       // Bold **text** or __text__
@@ -943,11 +950,15 @@ def get_chat_bubble_js(
     html = html.replace(/<br>(<pre|<div|<strong style)/g, '$1');
     html = html.replace(/(<\\/pre>|<\\/div>)<br>/g, '$1');
     
-    // 2. Restore diff HTML blocks (untouched by markdown transforms)
+    // 2. Restore code blocks (already HTML-safe, not double-escaped)
+    for (var i = 0; i < codeBlocks.length; i++) {{
+      html = html.replace('%%CODE_' + i + '%%', codeBlocks[i]);
+    }}
+    // 2b. Restore diff HTML blocks (untouched by markdown transforms)
     for (var i = 0; i < diffBlocks.length; i++) {{
       html = html.replace('%%DIFF_' + i + '%%', diffBlocks[i]);
     }}
-    // 2b. Restore <details> blocks
+    // 2c. Restore <details> blocks
     for (var i = 0; i < detailsBlocks.length; i++) {{
       html = html.replace('%%DETAILS_' + i + '%%', detailsBlocks[i]);
     }}
@@ -2918,7 +2929,7 @@ def get_chat_bubble_js(
       const response = await fetch(API_BASE + '/api/chat/stream', {{
         method: 'POST',
         headers: {{ 'Content-Type': 'application/json' }},
-        body: JSON.stringify({{ message: fullMsg, session_id: _session }})
+        body: JSON.stringify({{ message: fullMsg, session_id: _session, language: UI_LANG }})
       }});
       if (!response.ok) throw new Error('HTTP ' + response.status);
       const reader = response.body.getReader();
@@ -4477,7 +4488,7 @@ def get_chat_bubble_js(
       const response = await fetch(API_BASE + '/api/chat/stream', {{
         method: 'POST',
         headers: {{ 'Content-Type': 'application/json' }},
-        body: JSON.stringify({{ message: fullMsg, session_id: _session }})
+        body: JSON.stringify({{ message: fullMsg, session_id: _session, language: UI_LANG }})
       }});
       if (!response.ok) {{
         const bodyText = await response.text().catch(() => '');
@@ -5383,7 +5394,7 @@ def get_chat_bubble_js(
       const response = await fetch(API_BASE + '/api/chat/stream', {{
         method: 'POST',
         headers: {{ 'Content-Type': 'application/json' }},
-        body: JSON.stringify({{ message: fullMessage, session_id: getSessionId(), voice_mode: !!voiceModeActive }}),
+        body: JSON.stringify({{ message: fullMessage, session_id: getSessionId(), voice_mode: !!voiceModeActive, language: UI_LANG }}),
         signal: currentAbortController.signal,
       }});
 

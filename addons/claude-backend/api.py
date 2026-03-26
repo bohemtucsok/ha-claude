@@ -3342,7 +3342,7 @@ def _strip_context_blocks(text: str) -> str:
     return result.strip()
 
 
-def stream_chat_with_ai(user_message: str, session_id: str = "default", image_data: str = None, read_only: bool = False, voice_mode: bool = False):
+def stream_chat_with_ai(user_message: str, session_id: str = "default", image_data: str = None, read_only: bool = False, voice_mode: bool = False, req_language: str = None):
     """Stream chat events for all providers with optional image support. Yields SSE event dicts.
     Uses LOCAL intent detection + smart context to minimize tokens sent to AI API."""
     global current_session_id
@@ -3385,6 +3385,20 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
     # Simplified LLM-first approach: most intents are "auto" (all tools, LLM decides)
     intent_info = intent.detect_intent(user_message, "", previous_intent=prev_intent)
     intent_name = intent_info["intent"]
+
+    # Per-request language override: if the caller (e.g. bubble) specifies a language
+    # that differs from the global LANGUAGE, patch the intent prompt's language lock so
+    # the LLM replies in the user's own language regardless of the server setting.
+    _eff_language = (req_language or "").lower()[:2]
+    if _eff_language and _eff_language != LANGUAGE and _eff_language in LANGUAGE_TEXT:
+        _req_lang_lock = LANGUAGE_TEXT[_eff_language].get("strict_language_lock", "")
+        _cur_lang_lock = get_lang_text("strict_language_lock")
+        if _req_lang_lock and intent_info.get("prompt"):
+            if _cur_lang_lock and _cur_lang_lock in intent_info["prompt"]:
+                intent_info["prompt"] = intent_info["prompt"].replace(_cur_lang_lock, _req_lang_lock)
+            else:
+                intent_info["prompt"] = intent_info["prompt"] + "\n\n" + _req_lang_lock
+        logger.info(f"Per-request language override: {LANGUAGE} → {_eff_language}")
 
     # Step 2: Build smart context (skip for chat — not needed)
     # When the message contains [CURRENT_DASHBOARD_HTML] the HTML is extracted and will be injected
@@ -6732,6 +6746,7 @@ def api_chat_stream():
     image_data = data.get("image", None)  # Base64 image data
     read_only = data.get("read_only", False)  # Read-only mode flag
     voice_mode = data.get("voice_mode", False)  # Voice mode: short spoken responses
+    req_language = (data.get("language") or "").lower()[:2] or None  # Per-request language (bubble)
     if not message:
         return jsonify({"error": "Empty message"}), 400
     if image_data:
@@ -6751,7 +6766,7 @@ def api_chat_stream():
 
         def _producer():
             try:
-                for event in stream_chat_with_ai(message, session_id, image_data, read_only=read_only, voice_mode=voice_mode):
+                for event in stream_chat_with_ai(message, session_id, image_data, read_only=read_only, voice_mode=voice_mode, req_language=req_language):
                     q.put(("event", event))
             except Exception as exc:
                 logger.error(
