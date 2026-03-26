@@ -2,6 +2,18 @@
 
 > **⚠️ After updating, rebuild the add-on** (Settings → Add-ons → Amira → Rebuild) to apply new dependencies.
 
+## 4.6.47 — No-tool auto-continue on truncated outputs (`max_tokens`/`length`)
+
+### Bug fix
+- **No-tool providers now auto-continue once when output is truncated**: if a response ends with `finish_reason=max_tokens` (or `length`) and no tool calls are pending, Amira runs one internal continuation round instead of stopping mid-answer.
+- This is especially useful for long YAML/code responses in `gemini_web` fallback flows (e.g. switching to official Google API), where outputs could stop at `content: |` or mid-code-block.
+- Continuation policy:
+  - continue exactly from the last line,
+  - do not repeat previous text,
+  - close open YAML/code fences if needed.
+
+---
+
 ## 4.6.46 — Language consistency hardening + Gemini Web stream dedup + html-js-card skill safety
 
 ### Bug fixes

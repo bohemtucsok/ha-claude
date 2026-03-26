@@ -162,8 +162,8 @@ class GoogleProvider(EnhancedProvider):
         _tool_schemas = self._get_intent_tools(intent_info) or []
         if _tool_schemas:
             _decls: List[Dict[str, Any]] = []
-            for _t in _tool_schemas:
-                _fn = (_t or {}).get("function") if isinstance(_t, dict) else None
+            for _tool_schema in _tool_schemas:
+                _fn = (_tool_schema or {}).get("function") if isinstance(_tool_schema, dict) else None
                 if not isinstance(_fn, dict):
                     continue
                 _name = str(_fn.get("name") or "").strip()

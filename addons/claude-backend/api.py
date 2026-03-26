@@ -3882,6 +3882,7 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
         _duplicate_count = 0             # how many consecutive duplicate rounds
         _deferred_done_event = None      # postpone done for HTML autosave flows
         _skip_tool_extraction = False    # after dedup, skip ToolSimulator next round
+        _no_tool_continuation_used = False  # one-shot continuation for max_tokens truncation
         _last_write_result = None        # last WRITE tool result (for fallback display)
         _last_success_read_tool = None   # last successful read tool snapshot for loop fallback
         _preview_round_done = False      # True after preview_automation_change executes
@@ -4105,6 +4106,7 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                 and _tool_round == 1
             )
             _mcp_guard_stream_buffer: list = []
+            _finish_reason_done = ""
 
             # Stream events, intercepting 'done' to enrich with cost or detect tool calls
             for event in provider_gen:
@@ -4538,6 +4540,51 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                         )
                     )
                     yield {"type": "status", "message": tr("status_html_auto_finalize_error", "⚠️ Draft auto-finalize error: {error}", error=_df_err)}
+
+            # No-tool providers can return finish_reason=max_tokens/length with partial
+            # YAML/code output (especially after an internal fallback). Retry once with
+            # a strict continuation instruction to complete the response.
+            if (
+                not _pending_tool_calls
+                and _is_no_tool_provider
+                and not _no_tool_continuation_used
+                and _finish_reason_done in {"max_tokens", "length"}
+            ):
+                _no_tool_continuation_used = True
+                _partial_answer = "".join(_streamed_text_parts).strip()
+                if _partial_answer:
+                    try:
+                        from providers.tool_simulator import clean_response_text as _crt_cont
+                        _partial_answer = _crt_cont(_partial_answer)
+                    except Exception:
+                        pass
+                _cont_user_msg = (
+                    "[AUTO-CONTINUE]\n"
+                    "Your previous answer was cut due to token limit.\n"
+                    "Continue EXACTLY from the last line.\n"
+                    "- Do NOT repeat any previous text.\n"
+                    "- If you were writing a YAML code block, continue from where it stopped and close fences.\n"
+                    "- Output only the missing continuation."
+                )
+                if _partial_answer:
+                    messages.append({"role": "assistant", "content": _partial_answer})
+                messages.append({"role": "user", "content": _cont_user_msg})
+                _streamed_text_parts = []
+                logger.warning(
+                    tr(
+                        "log_no_tool_truncated_retry",
+                        "No-tool provider output truncated (finish_reason={reason}) — running one auto-continue round",
+                        reason=_finish_reason_done,
+                    )
+                )
+                yield {
+                    "type": "status",
+                    "message": tr(
+                        "status_response_truncated_continuing",
+                        "⚠️ Response was truncated, continuing automatically...",
+                    ),
+                }
+                continue
 
             if not _pending_tool_calls:
                 break  # No tool calls → conversation complete
