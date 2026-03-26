@@ -138,6 +138,10 @@ class DiscordBot:
         if discord is None:
             logger.warning("discord.py not installed; Discord bot disabled")
             return
+        # Suppress discord.py voice-related warnings (PyNaCl/davey not installed — voice unused)
+        import logging as _logging
+        _logging.getLogger("discord.client").setLevel(_logging.ERROR)
+        _logging.getLogger("discord.voice_client").setLevel(_logging.ERROR)
         intents = discord.Intents.default()
         intents.message_content = True
         intents.messages = True
