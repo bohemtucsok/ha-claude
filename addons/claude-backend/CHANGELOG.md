@@ -2,6 +2,16 @@
 
 > **⚠️ After updating, rebuild the add-on** (Settings → Add-ons → Amira → Rebuild) to apply new dependencies.
 
+## 4.6.34 — Skills update detection + banner notifica
+
+### Nuove funzionalità
+- **Rilevamento aggiornamenti skill**: all'avvio (dopo 3 s) la chat confronta le versioni installate con lo store GitHub e mostra un banner giallo in cima alla chat se ci sono aggiornamenti disponibili
+- **Banner dismissibile**: mostra le skill da aggiornare con versione corrente → nuova; pulsante "Vai alle Skill" apre direttamente il pannello; "✕" per chiudere
+- **Pulsante "Aggiorna" nello store**: le skill installate con versione inferiore a quella dello store mostrano un pulsante arancione "⬆ Aggiorna" invece del badge verde "Installed"; il bordo della card diventa giallo per evidenziarle
+- **i18n completa**: banner e pulsante aggiornamento tradotti in IT/EN/ES/FR
+
+---
+
 ## 4.6.33 — Raise skill size limit to 60 KB
 
 ### Bug fixes

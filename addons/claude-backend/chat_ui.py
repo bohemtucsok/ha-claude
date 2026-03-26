@@ -210,6 +210,9 @@ def get_chat_ui():
             "skills_store_loading": "Loading store...",
             "skills_store_error": "Could not load the store. Check your internet connection.",
             "skills_unavailable": "Skills not available. Please restart the add-on.",
+            "skills_update_banner": "Skill update available:",
+            "skills_update_go": "Go to Skills",
+            "skills_update_btn": "Update",
             "skills_refresh": "Refresh",
             "skills_by": "by",
             "skills_requires_version": "Requires Amira v{version}",
@@ -550,6 +553,9 @@ def get_chat_ui():
             "skills_store_loading": "Caricamento store...",
             "skills_store_error": "Impossibile caricare lo store. Controlla la connessione internet.",
             "skills_unavailable": "Skills non disponibili. Riavvia l'add-on.",
+            "skills_update_banner": "Aggiornamento skill disponibile:",
+            "skills_update_go": "Vai alle Skill",
+            "skills_update_btn": "Aggiorna",
             "skills_refresh": "Aggiorna",
             "skills_by": "di",
             "skills_requires_version": "Richiede Amira v{version}",
@@ -890,6 +896,9 @@ def get_chat_ui():
             "skills_store_loading": "Cargando tienda...",
             "skills_store_error": "No se pudo cargar la tienda. Comprueba tu conexión a internet.",
             "skills_unavailable": "Skills no disponibles. Reinicia el add-on.",
+            "skills_update_banner": "Actualización de skill disponible:",
+            "skills_update_go": "Ir a Skills",
+            "skills_update_btn": "Actualizar",
             "skills_refresh": "Actualizar",
             "skills_by": "por",
             "skills_requires_version": "Requiere Amira v{version}",
@@ -1228,6 +1237,9 @@ def get_chat_ui():
             "skills_store_loading": "Chargement de la boutique...",
             "skills_store_error": "Impossible de charger la boutique. Vérifiez votre connexion internet.",
             "skills_unavailable": "Skills non disponibles. Redémarrez l'add-on.",
+            "skills_update_banner": "Mise à jour de skill disponible :",
+            "skills_update_go": "Aller aux Skills",
+            "skills_update_btn": "Mettre à jour",
             "skills_refresh": "Actualiser",
             "skills_by": "par",
             "skills_requires_version": "Nécessite Amira v{version}",
@@ -3358,6 +3370,12 @@ def get_chat_ui():
         </div>
         <div class="file-splitter" id="fileSplitter"></div>
         <div class="main-content">
+            <div id="skillsUpdateBanner" style="display:none;align-items:center;gap:8px;background:#fff8e1;border-bottom:1px solid #ffe082;padding:7px 14px;font-size:12px;color:#5d4037;flex-shrink:0;">
+                <span style="font-size:15px;">🔔</span>
+                <span id="skillsUpdateText" style="flex:1;"></span>
+                <button id="skillsUpdateGoBtn" onclick="document.getElementById('settingsBtn').click();setTimeout(()=>{{document.querySelectorAll('.settings-tab[data-tab]').forEach(t=>{{if(t.dataset.tab==='skills')t.click()}});}},200)" style="background:#ff9800;color:#fff;border:none;border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer;white-space:nowrap;">{ui_js.get('skills_update_go','Vai alle Skill')}</button>
+                <button onclick="document.getElementById('skillsUpdateBanner').style.display='none'" style="background:none;border:none;font-size:15px;cursor:pointer;color:#888;line-height:1;">&#x2715;</button>
+            </div>
             <div class="chat-container" id="chat">
         <div class="message system">
             {msgs['welcome']}<br>
@@ -7988,6 +8006,40 @@ def get_chat_ui():
         // ---- Skills panel ----
         let _installedSkills = [];
 
+        function _semverGt(a, b) {{
+            const pa = String(a || '0').split('.').map(Number);
+            const pb = String(b || '0').split('.').map(Number);
+            for (let i = 0; i < Math.max(pa.length, pb.length); i++) {{
+                const x = pa[i] || 0, y = pb[i] || 0;
+                if (x > y) return true;
+                if (x < y) return false;
+            }}
+            return false;
+        }}
+
+        async function checkSkillsUpdatesOnLoad() {{
+            try {{
+                const [instResp, storeResp] = await Promise.all([
+                    fetch(apiUrl('api/skills')),
+                    fetch(apiUrl('api/skills/store'))
+                ]);
+                if (!instResp.ok || !storeResp.ok) return;
+                const installed = (await instResp.json()).skills || [];
+                const store     = (await storeResp.json()).skills || [];
+                if (!installed.length || !store.length) return;
+                const instMap = new Map(installed.map(s => [s.name, s.version || '0']));
+                const updates = store.filter(s => instMap.has(s.name) && _semverGt(s.version || '0', instMap.get(s.name)));
+                if (updates.length > 0) {{
+                    const banner = document.getElementById('skillsUpdateBanner');
+                    const text   = document.getElementById('skillsUpdateText');
+                    if (banner && text) {{
+                        text.textContent = (T.skills_update_banner || 'Skill update available:') + ' ' + updates.map(s => '/' + s.name + ' v' + s.version).join(', ');
+                        banner.style.display = 'flex';
+                    }}
+                }}
+            }} catch(e) {{}}
+        }}
+
         async function loadSkillsPanel() {{
             const panel = document.getElementById('skillsPanel');
             if (!panel) return;
@@ -8002,7 +8054,8 @@ def get_chat_ui():
                 const installed = instData.skills  || [];
                 const store     = storeData.skills || [];
                 _installedSkills = installed;
-                const instNames  = new Set(installed.map(s => s.name));
+                const instNames      = new Set(installed.map(s => s.name));
+                const instVersionMap = new Map(installed.map(s => [s.name, s.version || '0']));
 
                 const lang = '{ui_lang}';
                 function _sdesc(s) {{
@@ -8049,18 +8102,22 @@ def get_chat_ui():
                     html += '<div style="color:#999;font-size:12px;">' + (T.skills_store_empty||'No skills available.') + '</div>';
                 }} else {{
                     store.forEach(s => {{
-                        const isInst = instNames.has(s.name);
-                        html += `<div style="background:#fafafa;border:1px solid #e8e8e8;border-radius:8px;padding:9px 11px;margin-bottom:7px;">
+                        const isInst   = instNames.has(s.name);
+                        const hasUpd   = isInst && _semverGt(s.version || '0', instVersionMap.get(s.name) || '0');
+                        const actionEl = hasUpd
+                            ? `<button class="sak-inst-btn" data-name="${{s.name}}" data-url="${{s.raw_url||''}}" style="background:#ff9800;color:#fff;border:none;border-radius:5px;padding:3px 9px;font-size:11px;cursor:pointer;">⬆ ${{T.skills_update_btn||'Update'}}</button>`
+                            : isInst
+                                ? `<span style="background:#d1fae5;color:#065f46;border-radius:5px;padding:3px 9px;font-size:11px;">${{T.skills_installed_badge||'Installed'}}</span>`
+                                : `<button class="sak-inst-btn" data-name="${{s.name}}" data-url="${{s.raw_url||''}}" style="background:#4caf50;color:#fff;border:none;border-radius:5px;padding:3px 9px;font-size:11px;cursor:pointer;">${{T.skills_install_btn||'Install'}}</button>`;
+                        html += `<div style="background:#fafafa;border:1px solid ${{hasUpd?'#ffe082':'#e8e8e8'}};border-radius:8px;padding:9px 11px;margin-bottom:7px;">
                             <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
                                 <div>
                                     <span style="font-weight:600;font-size:13px;">/${{s.name}}</span>
                                     <span style="font-size:11px;color:#888;margin-left:6px;">v${{s.version||''}}</span>
+                                    ${{hasUpd ? `<span style="font-size:10px;color:#e65100;margin-left:4px;">(v${{instVersionMap.get(s.name)}} → v${{s.version}})</span>` : ''}}
                                     ${{s.author ? '<span style="font-size:11px;color:#aaa;margin-left:4px;">' + (T.skills_by||'by') + ' ' + s.author + '</span>' : ''}}
                                 </div>
-                                ${{isInst
-                                    ? '<span style="background:#d1fae5;color:#065f46;border-radius:5px;padding:3px 9px;font-size:11px;">' + (T.skills_installed_badge||'Installed') + '</span>'
-                                    : `<button class="sak-inst-btn" data-name="${{s.name}}" data-url="${{s.raw_url||''}}" style="background:#4caf50;color:#fff;border:none;border-radius:5px;padding:3px 9px;font-size:11px;cursor:pointer;">${{T.skills_install_btn||'Install'}}</button>`
-                                }}
+                                ${{actionEl}}
                             </div>
                             <div style="font-size:12px;color:#555;margin-top:4px;">${{_sdesc(s)}}</div>
                             ${{(s.tags||[]).map(t=>`<span style="background:#e8f0fe;color:#1a73e8;border-radius:4px;padding:1px 5px;font-size:10px;margin-right:3px;">${{t}}</span>`).join('')}}
@@ -10236,6 +10293,7 @@ def get_chat_ui():
                 loadModels();
                 loadChatList();
                 loadHistory();
+                setTimeout(checkSkillsUpdatesOnLoad, 3000);
                 if (currentProviderId === 'openai_codex') checkCodexOAuth();
                 if (currentProviderId === 'github_copilot') checkCopilotOAuth();
                 if (currentProviderId === 'claude_web') checkClaudeWebSession();
