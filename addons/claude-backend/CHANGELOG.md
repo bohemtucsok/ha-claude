@@ -2,6 +2,13 @@
 
 > **⚠️ After updating, rebuild the add-on** (Settings → Add-ons → Amira → Rebuild) to apply new dependencies.
 
+## 4.6.42 — Fix: claude_web strips YAML code fences in skill mode
+
+### Bug fix
+- **`claude_web` provider**: anti-artifact rule #2 forbade ALL markdown code blocks, causing Lovelace card YAML to be output as plain text (no copy button, no syntax highlight). Added explicit exception: Lovelace card YAML (`type: custom:html-js-card`, etc.) MUST use ` ```yaml ``` ` fences. Automation/script YAML still routed through `preview_automation_change` tool.
+
+---
+
 ## 4.6.41 — Skill active banner in chat
 
 ### New feature
