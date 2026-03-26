@@ -2,6 +2,23 @@
 
 > **⚠️ After updating, rebuild the add-on** (Settings → Add-ons → Amira → Rebuild) to apply new dependencies.
 
+## 4.6.46 — Language consistency hardening + Gemini Web stream dedup + html-js-card skill safety
+
+### Bug fixes
+- **Per-request language override now patches all language snippets in prompts** (not only `strict_language_lock`): `respond_instruction`, YAML/entity/delete guidance, and create-vs-example rules are now consistently switched to the request language (`api.py`).
+- **Removed Italian hardcoded runtime fallbacks** in key paths:
+  - `perplexity_web`: request locale now follows configured language (`en/it/es/fr`) and empty-input fallback greeting is localized.
+  - `chat_bubble`: last-triggered timestamp formatting now uses UI language locale instead of fixed `it-IT`.
+  - `voice_transcription`: STT/TTS language defaults now follow configured language (Groq/OpenAI/Google STT + Google TTS).
+- **Gemini Web duplicate answer fix**: SDK streaming now handles cumulative chunks correctly (append only new suffix, ignore replayed chunks), preventing duplicated full responses in chat.
+- **html-js-card skill safety rules tightened**:
+  - Added mandatory selector-to-markup consistency rule (`id` used in JS must exist in generated HTML/SVG).
+  - Added null-safe DOM operation guidance for `classList/style/getContext/textContent`.
+  - Added explicit broken-case example (`#line-home` missing) and corrected pattern.
+  - Fixed skill examples to use valid JavaScript (removed invalid assignment patterns).
+
+---
+
 ## 4.6.45 — Skill mode: skip tool simulator in all web providers
 
 ### Improvement

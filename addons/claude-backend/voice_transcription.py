@@ -73,12 +73,24 @@ class VoiceTranscriber:
         self.groq_api_key = os.getenv("GROQ_API_KEY")
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
         self.google_api_key = os.getenv("GOOGLE_API_KEY")
+        self.language = (os.getenv("LANGUAGE", "en") or "en").lower()[:2]
         self.transcription_cache: Dict[str, Dict[str, Any]] = {}
         self.provider_order = [
             TranscriptionProvider.GROQ,
             TranscriptionProvider.OPENAI,
             TranscriptionProvider.GOOGLE,
         ]
+
+    def _transcription_language(self) -> str:
+        return self.language if self.language in ("en", "it", "es", "fr") else "en"
+
+    def _google_language_code(self) -> str:
+        return {
+            "it": "it-IT",
+            "en": "en-US",
+            "es": "es-ES",
+            "fr": "fr-FR",
+        }.get(self._transcription_language(), "en-US")
     
     def _get_audio_duration(self, audio_path: str) -> float:
         """Get audio duration in seconds (approximate)."""
@@ -115,7 +127,7 @@ class VoiceTranscriber:
                 }
                 data = {
                     "model": "whisper-large-v3-turbo",
-                    "language": "it",  # Italian by default
+                    "language": self._transcription_language(),
                 }
                 headers = {"Authorization": f"Bearer {self.groq_api_key}"}
                 
@@ -157,7 +169,7 @@ class VoiceTranscriber:
                 }
                 data = {
                     "model": "whisper-1",
-                    "language": "it",
+                    "language": self._transcription_language(),
                 }
                 headers = {"Authorization": f"Bearer {self.openai_api_key}"}
                 
@@ -196,7 +208,7 @@ class VoiceTranscriber:
             payload = {
                 "config": {
                     "encoding": "LINEAR16",
-                    "languageCode": "it-IT",
+                    "languageCode": self._google_language_code(),
                     "model": "latest_long",
                 },
                 "audio": {
@@ -302,6 +314,15 @@ class TextToSpeech:
         self.google_api_key = os.getenv("GOOGLE_API_KEY")
         self.language = os.getenv("LANGUAGE", "en").lower()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def _google_language_code(self) -> str:
+        lang = (self.language or "en").lower()[:2]
+        return {
+            "it": "it-IT",
+            "en": "en-US",
+            "es": "es-ES",
+            "fr": "fr-FR",
+        }.get(lang, "en-US")
     
     def _get_event_loop(self) -> asyncio.AbstractEventLoop:
         """Get or create an event loop for async edge-tts calls."""
@@ -493,19 +514,20 @@ class TextToSpeech:
             logger.error(f"OpenAI TTS error: {e}")
             return False, b""
     
-    def speak_with_google(self, text: str, language: str = "it-IT") -> Tuple[bool, bytes]:
+    def speak_with_google(self, text: str, language: Optional[str] = None) -> Tuple[bool, bytes]:
         """Generate speech using Google TTS."""
         if not self.google_api_key:
             return False, b""
         
         try:
             url = f"https://texttospeech.googleapis.com/v1/text:synthesize?key={self.google_api_key}"
+            language_code = (language or self._google_language_code()).strip() or "en-US"
             
             payload = {
                 "input": {"text": text},
                 "voice": {
-                    "languageCode": language,
-                    "name": f"{language}-Neural2-A",
+                    "languageCode": language_code,
+                    "name": f"{language_code}-Neural2-A",
                 },
                 "audioConfig": {
                     "audioEncoding": "MP3",

@@ -3389,17 +3389,33 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
     intent_name = intent_info["intent"]
 
     # Per-request language override: if the caller (e.g. bubble) specifies a language
-    # that differs from the global LANGUAGE, patch the intent prompt's language lock so
-    # the LLM replies in the user's own language regardless of the server setting.
+    # that differs from the global LANGUAGE, patch language-specific prompt snippets
+    # so the LLM replies in the user's own language regardless of the server setting.
     _eff_language = (req_language or "").lower()[:2]
     if _eff_language and _eff_language != LANGUAGE and _eff_language in LANGUAGE_TEXT:
-        _req_lang_lock = LANGUAGE_TEXT[_eff_language].get("strict_language_lock", "")
-        _cur_lang_lock = get_lang_text("strict_language_lock")
-        if _req_lang_lock and intent_info.get("prompt"):
-            if _cur_lang_lock and _cur_lang_lock in intent_info["prompt"]:
-                intent_info["prompt"] = intent_info["prompt"].replace(_cur_lang_lock, _req_lang_lock)
-            else:
-                intent_info["prompt"] = intent_info["prompt"] + "\n\n" + _req_lang_lock
+        _cur_lang_text = LANGUAGE_TEXT.get(LANGUAGE, {})
+        _req_lang_text = LANGUAGE_TEXT.get(_eff_language, {})
+        _language_prompt_keys = (
+            "respond_instruction",
+            "strict_language_lock",
+            "show_yaml_rule",
+            "confirm_entity_rule",
+            "confirm_delete_rule",
+            "example_vs_create_rule",
+        )
+        if intent_info.get("prompt"):
+            _prompt = intent_info["prompt"]
+            for _k in _language_prompt_keys:
+                _cur_txt = _cur_lang_text.get(_k, "")
+                _req_txt = _req_lang_text.get(_k, "")
+                if _cur_txt and _req_txt and _cur_txt in _prompt:
+                    _prompt = _prompt.replace(_cur_txt, _req_txt)
+            # Ensure the request-specific language lock is present even if the source
+            # prompt did not include the global-language snippet.
+            _req_lang_lock = _req_lang_text.get("strict_language_lock", "")
+            if _req_lang_lock and _req_lang_lock not in _prompt:
+                _prompt = _prompt + "\n\n" + _req_lang_lock
+            intent_info["prompt"] = _prompt
         logger.info(f"Per-request language override: {LANGUAGE} → {_eff_language}")
 
     # Step 2: Build smart context (skip for chat — not needed)

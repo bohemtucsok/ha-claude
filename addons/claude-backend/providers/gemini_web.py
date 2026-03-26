@@ -375,15 +375,42 @@ async def _send_message_sdk_async(s: Dict[str, Any], prompt: str, model: str = "
         _stream_fn = getattr(_client, "generate_content_stream", None)
         if callable(_stream_fn):
             async def _run_stream() -> None:
+                assembled = ""
                 async for chunk in _stream_fn(prompt, model=model_name):
                     # Compatible with multiple SDK versions/fields.
-                    _delta = (
-                        getattr(chunk, "text_delta", None)
-                        or getattr(chunk, "text", None)
-                        or ""
-                    )
-                    if _delta:
-                        text_parts.append(str(_delta))
+                    # Some SDK builds expose chunk.text as "full text so far" (cumulative),
+                    # while others expose chunk.text_delta as true incremental delta.
+                    _delta_raw = getattr(chunk, "text_delta", None)
+                    _text_raw = getattr(chunk, "text", None)
+
+                    if _delta_raw:
+                        piece = str(_delta_raw)
+                        text_parts.append(piece)
+                        assembled += piece
+                        continue
+
+                    if not _text_raw:
+                        continue
+
+                    current = str(_text_raw)
+                    if not current:
+                        continue
+
+                    # Cumulative stream: keep only the new suffix.
+                    if current.startswith(assembled):
+                        piece = current[len(assembled):]
+                        if piece:
+                            text_parts.append(piece)
+                            assembled = current
+                        continue
+
+                    # Replayed/duplicate full chunk: ignore.
+                    if assembled.startswith(current) or current == assembled:
+                        continue
+
+                    # Fallback for non-cumulative chunk styles.
+                    text_parts.append(current)
+                    assembled += current
 
             await asyncio.wait_for(_run_stream(), timeout=_sdk_deadline)
             _streamed = "".join(text_parts).strip()

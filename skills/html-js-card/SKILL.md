@@ -1,6 +1,6 @@
 ---
 name: html-js-card
-version: 1.6.1
+version: 1.6.2
 description:
   en: "Expert assistant for HTML-JS Card — custom Home Assistant Lovelace cards with HTML, CSS and JavaScript"
   it: "Assistente esperto per HTML-JS Card — card Lovelace personalizzate con HTML, CSS e JavaScript"
@@ -104,11 +104,13 @@ These variables are always available inside `content` scripts:
 
 The card uses **shadow DOM**, so `document.getElementById` cannot find elements inside the card.
 **Always use `card.querySelector('#id')`** to access elements by ID.
+When applying styles/classes or calling methods on queried elements, use null-safe access (`?.`)
+or explicit `if (el)` guards to prevent runtime crashes if an element is missing.
 
 ```javascript
 // ✅ CORRECT — use card.querySelector
 const el = card.querySelector('#my-element');
-el.textContent = 'Hello';
+if (el) el.textContent = 'Hello';
 
 // ❌ WRONG — document.getElementById returns null inside shadow DOM
 const el = document.getElementById('my-element'); // always null!
@@ -489,6 +491,9 @@ content: |
 12. For energy flow diagrams, animated gauges, or custom shapes: prefer inline SVG — no external library needed.
 13. For flow charts and diagrams: use Mermaid.js via `scripts:`.
 14. For D3.js: use `https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js` via `scripts:`.
+15. Every selector used in JavaScript MUST correspond to a real element in the generated HTML/SVG (`id`/class consistency is mandatory).
+16. For DOM operations that may fail (`classList`, `style`, `getContext`, `innerHTML`, `textContent`), use null-safe access (`?.`) or guard clauses.
+17. Never hardcode a different selector name than the generated markup (example: do not call `#line-home` if only `#line-bat` exists).
 
 ## ❌ NEVER do this (common mistakes that break the card)
 
@@ -504,6 +509,17 @@ const ctx = document.getElementById('chart').getContext('2d');
 card.querySelector('#solar').textContent = '…';
 card.querySelector('#btn').addEventListener('click', () => { … });
 const ctx = card.querySelector('#chart').getContext('2d');
+```
+
+### Wrong: selector mismatch causes `... is null`
+```javascript
+// ❌ WRONG — '#line-home' does not exist in SVG, querySelector returns null
+card.querySelector('#line-home').classList.toggle('active-home', home > 10);
+```
+```javascript
+// ✅ CORRECT — selector matches real element and is null-safe
+const lineBat = card.querySelector('#line-bat');
+if (lineBat) lineBat.classList.toggle('active-home', home > 10);
 ```
 
 ### Wrong: `states` variable does not exist

@@ -3815,7 +3815,8 @@ def get_chat_bubble_js(
   }}
 
   function _humanizeConditionOne(c) {{
-    if (!c || typeof c !== 'object') return 'condizione';
+    const condFallback = (tt('flow_condition', 'Condition') || 'Condition').toLowerCase();
+    if (!c || typeof c !== 'object') return condFallback;
     const t = c.condition || '';
     if (t === 'numeric_state') {{
       const n = _entityLabel(c.entity_id) || 'valore';
@@ -3833,7 +3834,7 @@ def get_chat_bubble_js(
       if (c.before) return tf('flow_before', 'Before', {{ value: c.before }});
       return 'fascia oraria';
     }}
-    return t ? String(t).replace(/_/g, ' ') : 'condizione';
+      return t ? String(t).replace(/_/g, ' ') : condFallback;
   }}
 
   function _expandActionNodes(actions) {{
@@ -3860,7 +3861,7 @@ def get_chat_bubble_js(
         if (Array.isArray(node.choose) && node.choose.length) {{
           node.choose.forEach((ch, idx) => {{
             const conds = Array.isArray(ch.conditions) ? ch.conditions : (ch.conditions ? [ch.conditions] : []);
-            const condTxt = conds.length ? conds.map(_humanizeConditionOne).join(' & ') : 'condizione';
+            const condTxt = conds.length ? conds.map(_humanizeConditionOne).join(' & ') : (tt('flow_condition', 'Condition') || 'Condition').toLowerCase();
             const label = tf('flow_if', 'If', {{ value: condTxt }});
             const bid = _nextBranchId();
             pushAction({{ action: '__branch__', __kind: 'branch_marker' }}, label, tf('flow_branch_choose', 'Choose branch', {{ index: (idx + 1) }}), bid);
@@ -3877,7 +3878,7 @@ def get_chat_bubble_js(
         }}
         if (node.if) {{
           const ifConds = Array.isArray(node.if) ? node.if : [node.if];
-          const ifTxt = ifConds.map(_humanizeConditionOne).join(' & ') || 'condizione';
+          const ifTxt = ifConds.map(_humanizeConditionOne).join(' & ') || (tt('flow_condition', 'Condition') || 'Condition').toLowerCase();
           const ifLabel = tf('flow_if', 'If', {{ value: ifTxt }});
           const thenBid = _nextBranchId();
           pushAction({{ action: '__branch__', __kind: 'branch_marker' }}, ifLabel, tf('flow_if', 'If', {{ value: ifTxt }}), thenBid);
@@ -3923,7 +3924,9 @@ def get_chat_bubble_js(
     try {{
       const d = new Date(ts);
       if (isNaN(d.getTime())) return String(ts);
-      return d.toLocaleString('it-IT', {{
+      const localeMap = {{ it: 'it-IT', en: 'en-US', es: 'es-ES', fr: 'fr-FR' }};
+      const loc = localeMap[UI_LANG] || 'en-US';
+      return d.toLocaleString(loc, {{
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
@@ -4234,7 +4237,7 @@ def get_chat_bubble_js(
             const fork = {{type:'fork', branches:[]}};
             node.choose.forEach(function(ch, bi) {{
               const conds = Array.isArray(ch.conditions) ? ch.conditions : (ch.conditions ? [ch.conditions] : []);
-              const condTxt = conds.length ? conds.map(_humanizeConditionOne).join(' & ') : 'condizione';
+              const condTxt = conds.length ? conds.map(_humanizeConditionOne).join(' & ') : (tt('flow_condition', 'Condition') || 'Condition').toLowerCase();
               const lbl = tf('flow_if','If',{{value:condTxt}});
               const grSh = BRANCH_GRADS[bi % BRANCH_GRADS.length];
               const brNodes = (Array.isArray(ch.sequence) ? ch.sequence : []).map(function(a) {{ return {{node:a,grad:grSh[0],shadow:grSh[1]}}; }});
@@ -4250,7 +4253,7 @@ def get_chat_bubble_js(
             segments.push({{type:'node', node:node, nodeType:nodeType}});
             const fork = {{type:'fork', branches:[]}};
             const ifConds = Array.isArray(node.if) ? node.if : [node.if];
-            const ifTxt = ifConds.map(_humanizeConditionOne).join(' & ') || 'condizione';
+            const ifTxt = ifConds.map(_humanizeConditionOne).join(' & ') || (tt('flow_condition', 'Condition') || 'Condition').toLowerCase();
             const grSh0 = BRANCH_GRADS[0];
             const thenNodes = (Array.isArray(node.then) ? node.then : []).map(function(a) {{ return {{node:a,grad:grSh0[0],shadow:grSh0[1]}}; }});
             fork.branches.push({{label:tf('flow_if','If',{{value:ifTxt}}), grad:grSh0[0], shadow:grSh0[1], nodes:thenNodes}});

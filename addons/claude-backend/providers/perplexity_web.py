@@ -43,6 +43,28 @@ _HEADERS = {
 _stored_session: Optional[Dict[str, Any]] = None
 
 
+def _perplexity_locale() -> str:
+    """Map configured add-on language to Perplexity locale."""
+    lang = (os.getenv("LANGUAGE", "en") or "en").lower()[:2]
+    return {
+        "it": "it-IT",
+        "en": "en-US",
+        "es": "es-ES",
+        "fr": "fr-FR",
+    }.get(lang, "en-US")
+
+
+def _default_user_text() -> str:
+    """Language-aware fallback when no user text is available."""
+    lang = (os.getenv("LANGUAGE", "en") or "en").lower()[:2]
+    return {
+        "it": "Ciao",
+        "en": "Hello",
+        "es": "Hola",
+        "fr": "Bonjour",
+    }.get(lang, "Hello")
+
+
 def _load_session() -> Optional[Dict[str, Any]]:
     try:
         if os.path.exists(_TOKEN_FILE):
@@ -305,7 +327,7 @@ class PerplexityWebProvider(EnhancedProvider):
                     user_text = "\n".join(parts).strip()
                 break
         if not user_text:
-            user_text = "Ciao"
+            user_text = _default_user_text()
 
         # Align with claude_web behavior: inject ToolSimulator instructions
         # so no-tool web providers emit <tool_call> blocks instead of plain prose.
@@ -347,7 +369,7 @@ class PerplexityWebProvider(EnhancedProvider):
                 "frontend_context_uuid": str(uuid.uuid4()),
                 "frontend_uuid": str(uuid.uuid4()),
                 "is_incognito": False,
-                "language": "it-IT",
+                "language": _perplexity_locale(),
                 "last_backend_uuid": None,
                 "mode": mode,
                 "model_preference": model_pref,
