@@ -1,6 +1,6 @@
 ---
 name: html-js-card
-version: 1.4.0
+version: 1.5.0
 description:
   en: "Expert assistant for HTML-JS Card — custom Home Assistant Lovelace cards with HTML, CSS and JavaScript"
   it: "Assistente esperto per HTML-JS Card — card Lovelace personalizzate con HTML, CSS e JavaScript"
@@ -40,6 +40,24 @@ content: |
 ```
 
 The `content` field is **required**. All other fields are optional.
+
+## Height guidelines
+
+- **Prefer `height: auto`** for cards with only tiles/text — the card sizes to its content automatically.
+- **Set an explicit height only when needed** (charts, SVG gauges, fixed-layout grids).
+- **When estimating height, always add a ~20% buffer** — browsers add padding, borders and gap that are easy to undercount. A card that looks like 420px often needs 500px.
+- **Rough reference** (adjust to actual content):
+
+| Content | Suggested height |
+|---------|-----------------|
+| 1 row of 4 tiles | 120px |
+| 2 rows of 4 tiles | 240px |
+| 3 rows of 4 tiles | 360px |
+| Chart.js line chart | +200px |
+| SVG gauge / arc | +160px |
+| Mermaid diagram | +220px |
+
+- If the user reports content is cut off, increase height by 60–80px.
 
 ## Runtime variables
 
