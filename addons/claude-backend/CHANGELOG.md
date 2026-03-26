@@ -2,6 +2,14 @@
 
 > **⚠️ After updating, rebuild the add-on** (Settings → Add-ons → Amira → Rebuild) to apply new dependencies.
 
+## 4.6.43 — Fix: skill card type ignored when using claude_web provider
+
+### Bug fix
+- **`claude_web` + skill**: the SKILL.md rules were buried under the tool simulator in the system prompt, causing the model to use its training-data defaults (`button-card`, `mushroom-*`, `power-flow-card-plus`) instead of `custom:html-js-card`. Fix: when a skill is active, a short, direct reminder is appended to the **user message itself** (highest attention position) immediately before generation — `[⚠️ SKILL ACTIVE: html-js-card — ONLY output type: custom:html-js-card — NEVER use button-card...]`.
+- `api.py`: sets `intent_info["active_skill"]` when injecting a skill so providers can read it.
+
+---
+
 ## 4.6.42 — Fix: claude_web strips YAML code fences in skill mode
 
 ### Bug fix

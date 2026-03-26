@@ -3541,6 +3541,7 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
             )
             if _enriched_prompt is not None:
                 intent_info["prompt"] = _enriched_prompt
+                intent_info["active_skill"] = _skill_name
                 session_active_skill[session_id] = _skill_name
                 if _remaining:
                     user_message = _remaining
@@ -3558,6 +3559,7 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
             )
             if _enriched_prompt is not None:
                 intent_info["prompt"] = _enriched_prompt
+                intent_info["active_skill"] = _active_skill
                 yield {"type": "skill_active", "name": _active_skill}
                 logger.info(f"Skill '{_active_skill}' re-injected for follow-up in session {session_id}")
 

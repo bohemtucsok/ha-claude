@@ -340,6 +340,20 @@ class ClaudeWebProvider(EnhancedProvider):
         # System prompt is passed at conversation creation (server-side) — use plain prompt.
         prompt_text = conversation_context
 
+        # When a skill is active, append a terse reminder directly in the user message.
+        # The user-turn ending is where the model pays the most attention — this prevents
+        # the model from ignoring the skill rules buried in the system prompt.
+        _active_skill = (intent_info or {}).get("active_skill")
+        if _active_skill:
+            skill_card_type = f"type: custom:{_active_skill}"
+            prompt_text = (
+                prompt_text
+                + f"\n\n[⚠️ SKILL ACTIVE: {_active_skill} — "
+                f"ONLY output `{skill_card_type}` cards — "
+                f"NEVER use button-card, mushroom-*, power-flow-card-plus or any other type — "
+                f"ALWAYS wrap YAML in ```yaml fences]"
+            )
+
         body = {
             "prompt": prompt_text,
             "model": model,
