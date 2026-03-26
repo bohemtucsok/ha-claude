@@ -2,21 +2,21 @@
 
 > **⚠️ After updating, rebuild the add-on** (Settings → Add-ons → Amira → Rebuild) to apply new dependencies.
 
-## 4.6.35 — Skills store: nascondi skill già installate
+## 4.6.35 — Skills store: hide already-installed skills
 
 ### Bug fixes / UX
-- **Store non mostra le skill già installate**: le skill installate senza aggiornamenti vengono rimosse dalla lista store per evitare duplicati; compaiono solo nello store se è disponibile un aggiornamento (con pulsante "⬆ Aggiorna")
-- Se tutte le skill dello store sono già installate e aggiornate, lo store mostra "Nessuna skill disponibile"
+- **Store no longer shows already-installed skills**: installed skills without available updates are removed from the store list to avoid duplication; they only reappear in the store if an update is available (with the "⬆ Update" button)
+- If all store skills are already installed and up to date, the store shows "No new skills available"
 
 ---
 
-## 4.6.34 — Skills update detection + banner notifica
+## 4.6.34 — Skills update detection + notification banner
 
-### Nuove funzionalità
-- **Rilevamento aggiornamenti skill**: all'avvio (dopo 3 s) la chat confronta le versioni installate con lo store GitHub e mostra un banner giallo in cima alla chat se ci sono aggiornamenti disponibili
-- **Banner dismissibile**: mostra le skill da aggiornare con versione corrente → nuova; pulsante "Vai alle Skill" apre direttamente il pannello; "✕" per chiudere
-- **Pulsante "Aggiorna" nello store**: le skill installate con versione inferiore a quella dello store mostrano un pulsante arancione "⬆ Aggiorna" invece del badge verde "Installed"; il bordo della card diventa giallo per evidenziarle
-- **i18n completa**: banner e pulsante aggiornamento tradotti in IT/EN/ES/FR
+### New features
+- **Skill update detection**: 3 seconds after page load, the chat compares installed skill versions against the GitHub store and shows a yellow banner at the top if updates are available
+- **Dismissible banner**: lists skills to update with current → new version; "Go to Skills" button opens the panel directly; "✕" to dismiss
+- **"Update" button in store**: installed skills with a lower version than the store show an orange "⬆ Update" button instead of the green "Installed" badge; the card border turns yellow to highlight them
+- **Full i18n**: banner and update button translated in IT/EN/ES/FR
 
 ---
 
@@ -30,7 +30,7 @@
 ## 4.6.32 — Fix skills.py missing from Dockerfile
 
 ### Bug fixes
-- **Fixed `skills.py` not copied into Docker image**: `COPY skills.py .` was missing from Dockerfile, causing `No module named 'skills'` and "Skills non disponibili" even after rebuild
+- **Fixed `skills.py` not copied into Docker image**: `COPY skills.py .` was missing from Dockerfile, causing `No module named 'skills'` and "Skills not available" even after rebuild
 
 ---
 
@@ -39,7 +39,7 @@
 ### Bug fixes
 - **Fixed `SyntaxError: missing } in template string`** in Skills store panel: the Install button used `onclick='...'` with string concatenation that broke JS single-quoted strings; replaced with `data-name`/`data-url` attributes + `querySelectorAll` event listeners
 - **Fixed `No module named 'skills'`**: `skills_routes.py` now explicitly adds the app root to `sys.path` and imports `skills` at module load time with a try/except; if unavailable, endpoints return `skills_unavailable` instead of a generic error
-- **Improved error messages**: Skills panel now shows "Skills non disponibili. Riavvia l'add-on." instead of a false "internet connection" error when the module is missing; actual error detail shown below network errors for easier debugging
+- **Improved error messages**: Skills panel now shows "Skills not available. Please restart the add-on." instead of a false "internet connection" error when the module is missing; actual error detail shown below network errors for easier debugging
 
 ---
 
