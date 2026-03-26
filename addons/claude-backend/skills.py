@@ -26,7 +26,7 @@ SKILLS_INDEX_URL = (
 )
 _VALID_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{1,30}$")
 _RESERVED_NAMES = {"help", "clear", "reset", "debug", "new", "abort"}
-_MAX_BODY_CHARS = 8000
+_MAX_BODY_CHARS = 60000
 
 # Store cache: avoid hammering GitHub on every panel open
 _store_cache: dict = {"ts": 0.0, "data": None}

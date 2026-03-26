@@ -2,6 +2,13 @@
 
 > **⚠️ After updating, rebuild the add-on** (Settings → Add-ons → Amira → Rebuild) to apply new dependencies.
 
+## 4.6.33 — Raise skill size limit to 60 KB
+
+### Bug fixes
+- **Fixed "Skill content too large"**: raised `_MAX_BODY_CHARS` from 8000 to 60000 — the SAK skill is ~46 KB and HTML-JS Card ~9 KB, both exceeded the old limit
+
+---
+
 ## 4.6.32 — Fix skills.py missing from Dockerfile
 
 ### Bug fixes
