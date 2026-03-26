@@ -8153,6 +8153,8 @@ def get_chat_ui():
                 const data = await resp.json();
                 if (data.success) {{
                     await loadSkillsPanel();
+                    document.getElementById('skillsUpdateBanner').style.display = 'none';
+                    await checkSkillsUpdatesOnLoad();
                 }} else {{
                     alert('❌ ' + (data.error || 'Install failed'));
                 }}
