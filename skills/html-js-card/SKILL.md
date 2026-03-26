@@ -1,6 +1,6 @@
 ---
 name: html-js-card
-version: 1.5.0
+version: 1.6.0
 description:
   en: "Expert assistant for HTML-JS Card — custom Home Assistant Lovelace cards with HTML, CSS and JavaScript"
   it: "Assistente esperto per HTML-JS Card — card Lovelace personalizzate con HTML, CSS e JavaScript"
@@ -9,6 +9,25 @@ description:
 author: Bobsilvio
 tags: [lovelace, cards, html, javascript, css, dashboard, custom]
 min_version: "4.6.0"
+---
+
+## ⚠️ CRITICAL — READ THIS FIRST
+
+**You are in HTML-JS Card mode. ALL cards you generate MUST use `type: custom:html-js-card`.**
+
+**NEVER generate cards of these types:**
+- `custom:mushroom-template-card`, `custom:mushroom-*` — NOT allowed here
+- `custom:power-flow-card-plus` — NOT allowed here
+- `custom:mini-graph-card`, `custom:apexcharts-card` (standalone) — NOT allowed here
+- `type: entities`, `type: sensor`, `type: gauge` — NOT allowed here
+- Any other card type that is not `custom:html-js-card`
+
+**The ONLY valid card type in this skill is `type: custom:html-js-card`.**
+If the user wants energy flow → implement it with **inline SVG inside `content:`**.
+If the user wants ApexCharts → load it via **`scripts:`** and render it inside `content:`.
+If the user wants a header/title → HTML inside `content:`, not a separate mushroom card.
+Everything goes inside one (or more) `custom:html-js-card` cards.
+
 ---
 
 You are an expert in **HTML-JS Card** for Home Assistant Lovelace dashboards.
@@ -303,6 +322,120 @@ content: |
       card.querySelector('#arc-label').textContent = isFinite(val) ? Math.round(val) : '—';
       const pct = isFinite(val) ? Math.max(0, Math.min(1, val / max)) : 0;
       card.querySelector('#arc-fill').style.strokeDashoffset = 172.8 * (1 - pct);
+    }
+    updateCard(entities);
+    card.addEventListener('hass-update', e => updateCard(e.detail.entities));
+  </script>
+```
+
+### ApexCharts bar/line chart example
+
+```yaml
+type: custom:html-js-card
+title: Potenza solare
+height: 300px
+entities:
+  - sensor.epcube_solarpower
+  - sensor.epcube_batterysoc
+scripts:
+  - https://cdnjs.cloudflare.com/ajax/libs/apexcharts/3.46.0/apexcharts.min.js
+content: |
+  <div id="chart"></div>
+  <script>
+    const history = { solar: [], soc: [], labels: [] };
+    let apx;
+
+    function updateCard(ents) {
+      const solar = parseFloat(ents['sensor.epcube_solarpower']?.state);
+      const soc   = parseFloat(ents['sensor.epcube_batterysoc']?.state);
+      if (!isNaN(solar)) {
+        const now = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+        history.solar.push(Math.round(solar));
+        history.soc.push(Math.round(soc));
+        history.labels.push(now);
+        if (history.solar.length > 20) { history.solar.shift(); history.soc.shift(); history.labels.shift(); }
+      }
+
+      if (!apx) {
+        apx = new ApexCharts(card.querySelector('#chart'), {
+          chart: { type: 'line', height: 260, toolbar: { show: false }, animations: { enabled: false } },
+          series: [
+            { name: 'Solare (W)', data: [...history.solar] },
+            { name: 'Batteria (%)', data: [...history.soc] }
+          ],
+          xaxis: { categories: [...history.labels] },
+          yaxis: [
+            { title: { text: 'W' } },
+            { opposite: true, title: { text: '%' }, min: 0, max: 100 }
+          ],
+          colors: ['var(--warning-color)', 'var(--success-color)'],
+          stroke: { curve: 'smooth', width: 2 },
+          tooltip: { shared: true }
+        });
+        apx.render();
+      } else {
+        apx.updateOptions({
+          series: [{ data: [...history.solar] }, { data: [...history.soc] }],
+          xaxis: { categories: [...history.labels] }
+        });
+      }
+    }
+
+    updateCard(entities);
+    card.addEventListener('hass-update', e => updateCard(e.detail.entities));
+  </script>
+```
+
+### Inline SVG: energy flow diagram (solar → battery → house → grid)
+
+```yaml
+type: custom:html-js-card
+height: 220px
+entities:
+  - sensor.epcube_solarpower
+  - sensor.epcube_batterysoc
+  - sensor.epcube_gridpower
+  - sensor.epcube_homepower
+content: |
+  <style>
+    #flow-svg { width:100%; max-height:200px; display:block; }
+    .node-label { font-size:11px; fill:var(--secondary-text-color); text-anchor:middle; }
+    .node-value { font-size:14px; font-weight:700; fill:var(--primary-text-color); text-anchor:middle; }
+    .flow-line  { stroke:var(--divider-color); stroke-width:2; fill:none; }
+    .flow-active{ stroke:var(--success-color); stroke-width:3; fill:none; }
+  </style>
+  <svg id="flow-svg" viewBox="0 0 320 180">
+    <!-- nodes -->
+    <circle cx="40"  cy="90" r="28" fill="rgba(255,183,0,0.15)" stroke="var(--warning-color)" stroke-width="2"/>
+    <circle cx="160" cy="40" r="28" fill="rgba(0,200,83,0.12)"  stroke="var(--success-color)" stroke-width="2"/>
+    <circle cx="280" cy="90" r="28" fill="rgba(33,150,243,0.12)" stroke="var(--info-color,#2196f3)" stroke-width="2"/>
+    <circle cx="160" cy="145" r="28" fill="rgba(156,39,176,0.12)" stroke="var(--accent-color,#9c27b0)" stroke-width="2"/>
+    <!-- lines -->
+    <line class="flow-line" x1="68"  y1="82"  x2="132" y2="52"/>
+    <line class="flow-line" x1="68"  y1="98"  x2="132" y2="128"/>
+    <line class="flow-line" x1="188" y1="52"  x2="252" y2="82"/>
+    <line class="flow-line" x1="188" y1="128" x2="252" y2="98"/>
+    <!-- icons / labels -->
+    <text class="node-label" x="40"  y="86">☀️</text>
+    <text class="node-label" x="40"  y="126">Solare</text>
+    <text class="node-value" id="v-solar" x="40" y="108">—</text>
+    <text class="node-label" x="160" y="36">🔋</text>
+    <text class="node-label" x="160" y="20">Batteria</text>
+    <text class="node-value" id="v-bat"   x="160" y="58">—</text>
+    <text class="node-label" x="280" y="86">🏠</text>
+    <text class="node-label" x="280" y="126">Casa</text>
+    <text class="node-value" id="v-home"  x="280" y="108">—</text>
+    <text class="node-label" x="160" y="141">⚡</text>
+    <text class="node-label" x="160" y="178">Rete</text>
+    <text class="node-value" id="v-grid"  x="160" y="163">—</text>
+  </svg>
+  <script>
+    function fmt(v, unit) { return isFinite(v) ? Math.round(v) + unit : '—'; }
+    function updateCard(ents) {
+      card.querySelector('#v-solar').textContent = fmt(parseFloat(ents['sensor.epcube_solarpower']?.state), 'W');
+      card.querySelector('#v-bat').textContent   = fmt(parseFloat(ents['sensor.epcube_batterysoc']?.state), '%');
+      card.querySelector('#v-home').textContent  = fmt(parseFloat(ents['sensor.epcube_homepower']?.state), 'W');
+      card.querySelector('#v-grid').textContent  = fmt(parseFloat(ents['sensor.epcube_gridpower']?.state), 'W');
     }
     updateCard(entities);
     card.addEventListener('hass-update', e => updateCard(e.detail.entities));
