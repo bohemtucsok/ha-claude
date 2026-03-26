@@ -7426,21 +7426,31 @@ def get_chat_ui():
                 }}
             }}
 
-            // 2. Code blocks — escape HTML inside the code body so tags like <style>/<script>/<div>
-            // are shown as text rather than interpreted as DOM elements when assigned to innerHTML.
+            // 2. Extract code blocks into placeholders BEFORE inline processing.
+            // This prevents the inline-code regex (step 3) from eating backtick template
+            // literals inside code block content (e.g. `${{fmt(x)}}` → <code>...</code>).
+            // HTML inside the code body is also escaped so tags like <style>/<script>/<div>
+            // render as text rather than being interpreted by the browser.
+            var codeBlocks = [];
             text = text.replace(/```(\\w*)\\n([\\s\\S]*?)```/g, function(match, lang, code) {{
                 var escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                return '<div class="code-block"><button class="copy-button" type="button">\U0001F4CB ' + T.copy_btn + '</button><pre><code>' + escaped + '</code></pre></div>';
+                var html = '<div class="code-block"><button class="copy-button" type="button">\U0001F4CB ' + T.copy_btn + '</button><pre><code>' + escaped + '</code></pre></div>';
+                codeBlocks.push(html);
+                return '%%CODE_' + (codeBlocks.length - 1) + '%%';
             }});
-            // 3. Inline code, bold, newlines
+            // 3. Inline code, bold, newlines — code blocks are placeholders, safe to process
             text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
             text = text.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
             text = text.replace(/\\n/g, '<br>');
-            // 4. Restore diff HTML blocks (untouched by markdown transforms)
+            // 4. Restore code blocks
+            for (var i = 0; i < codeBlocks.length; i++) {{
+                text = text.replace('%%CODE_' + i + '%%', codeBlocks[i]);
+            }}
+            // 4b. Restore diff HTML blocks (untouched by markdown transforms)
             for (var i = 0; i < diffBlocks.length; i++) {{
                 text = text.replace('%%DIFF_' + i + '%%', diffBlocks[i]);
             }}
-            // 4b. Restore <details> blocks
+            // 4c. Restore <details> blocks
             for (var i = 0; i < detailsBlocks.length; i++) {{
                 text = text.replace('%%DETAILS_' + i + '%%', detailsBlocks[i]);
             }}

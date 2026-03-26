@@ -2,6 +2,13 @@
 
 > **⚠️ After updating, rebuild the add-on** (Settings → Add-ons → Amira → Rebuild) to apply new dependencies.
 
+## 4.6.37 — Fix backtick template literals stripped from code blocks in chat
+
+### Bug fixes
+- **Backtick template literals preserved in code blocks**: the inline-code regex (`` `text` `` → `<code>`) was running after code block extraction, hitting JS template literals like `` `${fmt(x, 0)}` `` inside YAML/JS code and stripping the backticks — causing `unexpected token: '{'` errors when the user pasted the copied code. Code blocks are now extracted into placeholders first, so inline processing never touches their content.
+
+---
+
 ## 4.6.36 — Fix HTML tags stripped from YAML code blocks in chat
 
 ### Bug fixes
