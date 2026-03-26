@@ -143,6 +143,13 @@ Supports **23+ AI providers** and **60+ models**: Anthropic Claude, OpenAI, Goog
 - **Daily Aggregates**: Usage statistics over time
 - **Multi-Currency**: USD or EUR
 
+### 🧩 Skills
+- **Skill Store**: Install expert AI skills directly from the Settings panel → 🧩 Skills tab
+- **Slash command**: type `/skill-name your request` in chat to activate a skill — the AI receives expert documentation and responds accordingly
+- **Autocomplete**: typing `/` in the chat input shows installed skills with name and description
+- **Update notifications**: a banner appears at the top of the chat when an installed skill has an update available in the store
+- **Built-in skills**: `swiss-army-knife-card`, `html-js-card`, `mushroom` — more coming
+
 ### 🌍 Multilingual Support
 - **4 Languages**: English, Italian, Spanish, French
 - **AI Responses**: AI always responds in your chosen language
@@ -400,6 +407,81 @@ When a message arrives on Telegram, Amira automatically switches to the `home` a
 | `PUT /api/agents/channels` | Update channel assignments |
 
 > No restart needed — config is hot-reloaded when `agents.json` changes.
+
+---
+
+## 🧩 Skills
+
+Skills are expert AI documentation packages that you can install from the built-in store. When you prefix a message with `/skill-name`, Amira injects the skill's documentation into the AI prompt — giving the model deep knowledge of a specific library or domain.
+
+### Using a skill
+
+Type `/` in the chat input to see installed skills with autocomplete, then complete your request:
+
+```
+/swiss-army-knife-card create a temperature gauge card for sensor.living_room_temperature
+/html-js-card make a card with solar production and battery SOC
+/mushroom create a chip row for my lights and climate
+```
+
+The AI will respond with ready-to-use YAML/code based on the skill's documentation — no need to explain the library syntax yourself.
+
+### Installing skills
+
+1. Open the **sidebar → 🧩 Skills** tab
+2. Browse the **Store** section
+3. Click **Install** on any skill
+4. The skill is saved to `/config/amira/skills/<name>/SKILL.md` and is immediately available
+
+If an update is available, a **yellow banner** appears at the top of the chat and the store shows an orange **⬆ Update** button.
+
+### Available skills
+
+| Skill | Command | Description |
+|-------|---------|-------------|
+| Swiss Army Knife Card | `/swiss-army-knife-card` | SVG-based Lovelace cards — shapes, gauges, sliders, sparklines, animations |
+| HTML-JS Card | `/html-js-card` | Custom Lovelace cards with HTML, CSS and JavaScript |
+| Mushroom | `/mushroom` | Minimalist Mushroom UI Cards |
+
+### Creating your own skill
+
+A skill is a single Markdown file with YAML frontmatter. Create a file `SKILL.md` anywhere and install it via the API or by placing it directly in `/config/amira/skills/<name>/SKILL.md`.
+
+**Minimal structure:**
+
+```markdown
+---
+name: my-skill
+version: 1.0.0
+description:
+  en: "Short description in English"
+  it: "Breve descrizione in italiano"
+author: yourname
+tags: [lovelace, cards]
+min_version: "4.6.0"
+---
+
+You are an expert in **My Library**...
+
+## How to use it
+
+...documentation, examples, rules...
+```
+
+**Frontmatter fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | ✅ | Lowercase, hyphens allowed (e.g. `my-skill`) |
+| `version` | ✅ | Semver string (e.g. `1.0.0`) — used for update detection |
+| `description` | ✅ | String or object with language keys (`en`, `it`, `es`, `fr`) |
+| `author` | — | Your name or handle |
+| `tags` | — | Array of strings for categorization |
+| `min_version` | — | Minimum Amira version required |
+
+**Publishing to the store:**
+
+To make a skill available in the Amira store, add an entry to [`skills/index.json`](skills/index.json) in this repository with a `raw_url` pointing to the raw `SKILL.md` on GitHub. Pull requests welcome.
 
 ---
 
