@@ -2,6 +2,13 @@
 
 > **⚠️ After updating, rebuild the add-on** (Settings → Add-ons → Amira → Rebuild) to apply new dependencies.
 
+## 4.6.36 — Fix HTML tags stripped from YAML code blocks in chat
+
+### Bug fixes
+- **HTML tags no longer stripped from code blocks**: content inside ` ```yaml ``` ` or any fenced code block is now HTML-escaped before insertion into the DOM, so tags like `<style>`, `<div>`, `<script>` inside a `content: |` block are displayed as plain text instead of being interpreted and removed by the browser
+
+---
+
 ## 4.6.35 — Skills store: hide already-installed skills
 
 ### Bug fixes / UX

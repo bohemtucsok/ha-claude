@@ -7426,8 +7426,12 @@ def get_chat_ui():
                 }}
             }}
 
-            // 2. Code blocks
-            text = text.replace(/```(\\w*)\\n([\\s\\S]*?)```/g, '<div class="code-block"><button class="copy-button" type="button">\U0001F4CB ' + T.copy_btn + '</button><pre><code>$2</code></pre></div>');
+            // 2. Code blocks — escape HTML inside the code body so tags like <style>/<script>/<div>
+            // are shown as text rather than interpreted as DOM elements when assigned to innerHTML.
+            text = text.replace(/```(\\w*)\\n([\\s\\S]*?)```/g, function(match, lang, code) {{
+                var escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                return '<div class="code-block"><button class="copy-button" type="button">\U0001F4CB ' + T.copy_btn + '</button><pre><code>' + escaped + '</code></pre></div>';
+            }});
             // 3. Inline code, bold, newlines
             text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
             text = text.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
