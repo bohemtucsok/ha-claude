@@ -71,6 +71,7 @@ COPY model_catalog.py .
 COPY agent_config.py .
 COPY model_fallback.py .
 COPY usage_tracker.py .
+COPY skills.py .
 
 # Copy new providers module (v3.17.12+)
 COPY providers /app/providers

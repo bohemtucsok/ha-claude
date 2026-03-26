@@ -2,6 +2,13 @@
 
 > **⚠️ After updating, rebuild the add-on** (Settings → Add-ons → Amira → Rebuild) to apply new dependencies.
 
+## 4.6.32 — Fix skills.py missing from Dockerfile
+
+### Bug fixes
+- **Fixed `skills.py` not copied into Docker image**: `COPY skills.py .` was missing from Dockerfile, causing `No module named 'skills'` and "Skills non disponibili" even after rebuild
+
+---
+
 ## 4.6.31 — Fix Skills store button crash + sys.path import fix
 
 ### Bug fixes
