@@ -3408,7 +3408,10 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
             _dashboard_name_hint = _nm.group(1)
         logger.info(f"Dashboard HTML split: extracted {len(_dashboard_html_block)} chars, name='{_dashboard_name_hint}'")
 
-    if intent_name != "chat":
+    import re as _re_skill
+    _is_skill_msg = bool(_re_skill.match(r"^/[a-z][a-z0-9_-]+", user_message.strip().lower()))
+
+    if intent_name != "chat" or _is_skill_msg:
         smart_context = intent.build_smart_context(
             user_message,
             intent=intent_name,
@@ -3422,9 +3425,11 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                 logger.info(f"Memory context (MEMORY.md) injected for session {session_id}")
                 smart_context = memory_context + "\n\n" + smart_context
 
-        # Step 3: Re-detect intent WITH full smart context (for HTML dashboard refs in context)
-        intent_info = intent.detect_intent(user_message, smart_context, previous_intent=prev_intent)
-        intent_name = intent_info["intent"]
+        # Step 3: Re-detect intent WITH full smart context — but skip for skill commands
+        # to avoid overriding the chat intent we just set.
+        if not _is_skill_msg:
+            intent_info = intent.detect_intent(user_message, smart_context, previous_intent=prev_intent)
+            intent_name = intent_info["intent"]
     else:
         smart_context = ""
         # Inject memory even for chat intent (no tools, but memory is still relevant)
