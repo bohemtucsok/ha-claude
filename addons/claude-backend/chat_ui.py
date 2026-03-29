@@ -272,6 +272,7 @@ def get_chat_ui():
             "restart_in_progress": "Restarting add-on...",
             "restart_failed": "Restart failed",
             "settings_language": "Language",
+            "settings_interaction_mode": "Interaction Style",
             "settings_enable_memory": "Memory",
             "settings_enable_file_access": "File Access",
             "settings_enable_file_upload": "File Upload",
@@ -312,6 +313,7 @@ def get_chat_ui():
             "settings_section_costs": "Costs",
             # Settings descriptions
             "settings_desc_language": "AI response language (English, Italian, Spanish, or French)",
+            "settings_desc_interaction_mode": "Strict = more safeguards/prompts, Lean = more direct and natural conversation",
             "settings_desc_enable_memory": "[EXPERIMENTAL] Persistent memory \u2013 the AI only remembers what you write in MEMORY.md across sessions. Past conversations are NEVER injected into the prompt.",
             "settings_desc_enable_file_access": "Allow AI to read/write Home Assistant config files (automations, scripts, YAML)",
             "settings_desc_enable_file_upload": "[EXPERIMENTAL] Allow uploading documents (PDF, DOCX, TXT, MD, YAML) for AI analysis",
@@ -616,6 +618,7 @@ def get_chat_ui():
             "restart_in_progress": "Riavvio add-on in corso...",
             "restart_failed": "Riavvio fallito",
             "settings_language": "Lingua",
+            "settings_interaction_mode": "Stile Interazione",
             "settings_enable_memory": "Memoria",
             "settings_enable_file_access": "Accesso File",
             "settings_enable_file_upload": "Upload File",
@@ -655,6 +658,7 @@ def get_chat_ui():
             "settings_section_costs": "Costi",
             # Settings descriptions
             "settings_desc_language": "Lingua delle risposte AI (Inglese, Italiano, Spagnolo o Francese)",
+            "settings_desc_interaction_mode": "Strict = più guardrail e prompt, Lean = conversazione più diretta e naturale",
             "settings_desc_enable_memory": "[SPERIMENTALE] Memoria persistente \u2013 l'AI ricorda solo ci\u00f2 che scrivi in MEMORY.md tra le sessioni. Le conversazioni passate NON vengono mai iniettate nel prompt.",
             "settings_desc_enable_file_access": "Permetti all'AI di leggere/scrivere file di configurazione Home Assistant (automazioni, script, YAML)",
             "settings_desc_enable_file_upload": "[SPERIMENTALE] Permetti di caricare documenti (PDF, DOCX, TXT, MD, YAML) per l'analisi AI",
@@ -960,6 +964,7 @@ def get_chat_ui():
             "restart_in_progress": "Reiniciando add-on...",
             "restart_failed": "Reinicio fallido",
             "settings_language": "Idioma",
+            "settings_interaction_mode": "Estilo de Interacción",
             "settings_enable_memory": "Memoria",
             "settings_enable_file_access": "Acceso a Archivos",
             "settings_enable_file_upload": "Carga de Archivos",
@@ -998,6 +1003,7 @@ def get_chat_ui():
             "settings_section_costs": "Costos",
             # Settings descriptions
             "settings_desc_language": "Idioma de las respuestas de la IA (Ingl\u00e9s, Italiano, Espa\u00f1ol o Franc\u00e9s)",
+            "settings_desc_interaction_mode": "Strict = más salvaguardas y prompts, Lean = conversación más directa y natural",
             "settings_desc_enable_memory": "[EXPERIMENTAL] Memoria persistente \u2013 la IA solo recuerda lo que escribes en MEMORY.md entre sesiones. Las conversaciones pasadas NUNCA se inyectan en el prompt.",
             "settings_desc_enable_file_access": "Permitir a la IA leer/escribir archivos de configuraci\u00f3n de Home Assistant (automatizaciones, scripts, YAML)",
             "settings_desc_enable_file_upload": "[EXPERIMENTAL] Permitir subir documentos (PDF, DOCX, TXT, MD, YAML) para an\u00e1lisis de la IA",
@@ -1302,6 +1308,7 @@ def get_chat_ui():
             "restart_in_progress": "Red\u00e9marrage de l'add-on...",
             "restart_failed": "\u00c9chec du red\u00e9marrage",
             "settings_language": "Langue",
+            "settings_interaction_mode": "Style d’Interaction",
             "settings_enable_memory": "Memoire",
             "settings_enable_file_access": "Acces Fichiers",
             "settings_enable_file_upload": "Telechargement",
@@ -1340,6 +1347,7 @@ def get_chat_ui():
             "settings_section_costs": "Couts",
             # Settings descriptions
             "settings_desc_language": "Langue des r\u00e9ponses de l'IA (Anglais, Italien, Espagnol ou Fran\u00e7ais)",
+            "settings_desc_interaction_mode": "Strict = plus de garde-fous et prompts, Lean = conversation plus directe et naturelle",
             "settings_desc_enable_memory": "[EXP\u00c9RIMENTAL] M\u00e9moire persistante \u2013 l'IA ne retient que ce que vous \u00e9crivez dans MEMORY.md entre les sessions. Les conversations pass\u00e9es ne sont JAMAIS inject\u00e9es dans le prompt.",
             "settings_desc_enable_file_access": "Autoriser l'IA \u00e0 lire/\u00e9crire les fichiers de configuration Home Assistant (automatisations, scripts, YAML)",
             "settings_desc_enable_file_upload": "[EXP\u00c9RIMENTAL] Autoriser le t\u00e9l\u00e9chargement de documents (PDF, DOCX, TXT, MD, YAML) pour l'analyse IA",
@@ -1673,7 +1681,7 @@ def get_chat_ui():
         .device-rename:hover {{ background: #667eea; color: white; }}
         .device-delete {{ font-size: 11px; color: #e53e3e; cursor: pointer; padding: 4px 10px; border-radius: 4px; border: 1px solid #e53e3e; background: none; transition: all 0.2s; }}
         .device-delete:hover {{ background: #e53e3e; color: white; }}
-        .main-content {{ flex: 1; display: flex; flex-direction: column; min-height: 0; }}
+        .main-content {{ flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }}
         .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 20px; display: flex; align-items: center; gap: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); min-width: 0; overflow-x: hidden; }}
         .header h1 {{ font-size: 18px; font-weight: 600; }}
         .header .badge {{ font-size: 11px; opacity: 1; background: rgba(255,255,255,0.2); padding: 3px 10px; border-radius: 10px; font-weight: 500; letter-spacing: 0.3px; }}
@@ -1875,9 +1883,9 @@ def get_chat_ui():
         .chat-container {{ flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }}
         .message {{ max-width: 85%; padding: 12px 16px; border-radius: 16px; line-height: 1.5; font-size: 14px; word-wrap: break-word; overflow-wrap: anywhere; animation: fadeIn 0.3s ease; }}
         @keyframes fadeIn {{ from {{ opacity: 0; transform: translateY(8px); }} to {{ opacity: 1; transform: translateY(0); }} }}
-        .message.user {{ background: #667eea; color: white; align-self: flex-end; border-bottom-right-radius: 4px; white-space: pre-wrap; tab-size: 2; }}
-        .message.user.long {{ max-height: 320px; overflow: auto; }}
-        .message.user .user-text {{ white-space: pre-wrap; }}
+        .message.user {{ background: #667eea; color: white; align-self: flex-end; border-bottom-right-radius: 4px; white-space: pre-wrap; tab-size: 2; word-break: break-word; overflow-wrap: anywhere; }}
+        .message.user.long {{ max-height: 320px; overflow-y: auto; overflow-x: hidden; }}
+        .message.user .user-text {{ white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }}
         .message.user .user-code-block {{ margin-top: 8px; background: rgba(255,255,255,0.16); border: 1px solid rgba(255,255,255,0.35); border-radius: 10px; overflow: hidden; }}
         .message.user .user-code-label {{ padding: 4px 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; background: rgba(0,0,0,0.2); }}
         .message.user .user-code-block pre {{ margin: 0; padding: 10px; max-height: 260px; overflow: auto; white-space: pre; font-size: 12px; line-height: 1.4; font-family: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }}
@@ -1943,7 +1951,7 @@ def get_chat_ui():
         .input-toolbar .fmt-btn svg {{ width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 2; }}
         .input-row {{ display: flex; gap: 8px; align-items: flex-end; }}
         .input-row > * {{ min-width: 0; }}
-        .input-area textarea {{ flex: 1; border: 1px solid #ddd; border-radius: 20px; padding: 10px 16px; font-size: 14px; font-family: inherit; resize: none; max-height: 120px; outline: none; transition: border-color 0.2s; }}
+        .input-area textarea {{ flex: 1; border: 1px solid #ddd; border-radius: 20px; padding: 10px 16px; font-size: 14px; font-family: inherit; resize: none; max-height: 120px; outline: none; transition: border-color 0.2s; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }}
         .input-area textarea:focus {{ border-color: #667eea; }}
         .input-area button {{ background: #667eea; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; flex-shrink: 0; }}
         .input-area button:hover {{ background: #5a6fd6; }}
@@ -4151,24 +4159,22 @@ def get_chat_ui():
         function initSidebarResize() {{
             if (!sidebarEl || !splitterEl) return;
 
-            // On mobile (<600px), sidebar is stacked/hidden — skip resize.
-            // On tablet (600-1199px) and desktop (1200px+), allow resize with mouse AND touch.
-            const isMobileLayout = window.matchMedia('(max-width: 599px)').matches;
-            if (isMobileLayout) return;
-
             const minWidth = 140;
-            const MIN_CHAT = 320; // keep chat area readable
+            const MIN_CHAT = 320;
+            function isMobile() {{ return window.matchMedia('(max-width: 599px)').matches; }}
             function getMaxWidth() {{
-                // Leave room for splitter + chat area, but allow wider sidebars on tablet.
                 const byViewport = window.innerWidth - MIN_CHAT - splitterEl.getBoundingClientRect().width - 8;
                 return Math.max(minWidth, Math.min(520, byViewport));
             }}
             const storageKey = 'chatSidebarWidth';
 
-            const saved = parseInt(safeLocalStorageGet(storageKey) || '', 10);
-            if (!Number.isNaN(saved)) {{
-                const w = Math.max(minWidth, Math.min(getMaxWidth(), saved));
-                sidebarEl.style.width = w + 'px';
+            // Restore saved width (only on non-mobile layout at load time).
+            if (!isMobile()) {{
+                const saved = parseInt(safeLocalStorageGet(storageKey) || '', 10);
+                if (!Number.isNaN(saved)) {{
+                    const w = Math.max(minWidth, Math.min(getMaxWidth(), saved));
+                    sidebarEl.style.width = w + 'px';
+                }}
             }}
 
             let dragging = false;
@@ -4176,6 +4182,8 @@ def get_chat_ui():
             let startWidth = 0;
 
             function startDrag(x) {{
+                // Skip drag if currently in mobile stacked layout.
+                if (isMobile()) return;
                 dragging = true;
                 startX = x;
                 startWidth = sidebarEl.getBoundingClientRect().width;
@@ -4197,12 +4205,12 @@ def get_chat_ui():
                 safeLocalStorageSet(storageKey, String(finalW));
             }}
 
-            // Mouse events
+            // Always attach listeners — mobile check is done at drag-start time,
+            // not at init time, so the panel still works if the iframe grows later.
             splitterEl.addEventListener('mousedown', (e) => {{ startDrag(e.clientX); e.preventDefault(); }});
             window.addEventListener('mousemove', (e) => moveDrag(e.clientX));
             window.addEventListener('mouseup', endDrag);
 
-            // Touch events (tablet)
             splitterEl.addEventListener('touchstart', (e) => {{
                 if (e.touches.length === 1) {{ startDrag(e.touches[0].clientX); e.preventDefault(); }}
             }}, {{ passive: false }});
@@ -4214,8 +4222,8 @@ def get_chat_ui():
             }}, {{ passive: false }});
             window.addEventListener('touchend', endDrag);
 
-            // Keep width valid after orientation/viewport changes.
             window.addEventListener('resize', () => {{
+                if (isMobile()) return;
                 const currentW = Math.round(sidebarEl.getBoundingClientRect().width);
                 const clamped = Math.max(minWidth, Math.min(getMaxWidth(), currentW));
                 if (clamped !== currentW) sidebarEl.style.width = clamped + 'px';
@@ -6178,6 +6186,7 @@ def get_chat_ui():
             // i18n labels for setting keys
             const LABELS = {{
                 language: T.settings_language || 'Language',
+                interaction_mode: T.settings_interaction_mode || 'Interaction Style',
                 enable_memory: T.settings_enable_memory || 'Memory',
                 enable_file_access: T.settings_enable_file_access || 'File Access',
                 enable_file_upload: T.settings_enable_file_upload || 'File Upload',
@@ -7179,9 +7188,12 @@ def get_chat_ui():
                 // If the assistant is asking to choose an entity_id, provide tap-to-select UI
                 injectEntityPicker(div, text);
             }} else {{
-                const userText = stripContextInjections(text);
+                const _cr = String.fromCharCode(13);
+                const userText = String(stripContextInjections(text) || '')
+                    .split(_cr + '\\n').join('\\n')
+                    .split(_cr).join('\\n');
                 const rendered = formatUserInputDisplay(userText);
-                if (rendered.hasCode) {{
+                if (rendered.html) {{
                     div.innerHTML = rendered.html;
                 }} else {{
                     div.textContent = userText;

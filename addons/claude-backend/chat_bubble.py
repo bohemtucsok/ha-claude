@@ -822,8 +822,16 @@ def get_chat_bubble_js(
       return (ha && ha.hass && ha.hass.auth && ha.hass.auth.data && ha.hass.auth.data.access_token) || '';
     }} catch(e) {{ return ''; }}
   }}
+  // Detect HA companion app — it has "HomeAssistant/" in the UA and lacks normal browser cookies.
+  function _isCompanionApp() {{
+    return /HomeAssistant\//i.test(navigator.userAgent);
+  }}
   async function _ensureIngressSession() {{
     if (_ingressSessionOk) return true;
+    // Only needed for the HA companion app / embedded WebView — regular browsers
+    // already have the hassio_session cookie set automatically. Calling this
+    // endpoint from a regular browser always returns 401 and pollutes the console.
+    if (!_isCompanionApp()) {{ _ingressSessionOk = true; return true; }}
     const token = _getHassToken();
     if (!token) return false;
     try {{
@@ -1687,18 +1695,57 @@ def get_chat_bubble_js(
     #ha-claude-bubble .msg.assistant details summary:hover {{ background: var(--primary-color, #03a9f4); color: #fff; }}
     #ha-claude-bubble .msg.assistant details > div {{ max-height: 180px; overflow-y: auto; padding: 6px 10px; font-size: 12px; line-height: 1.5; }}
     #ha-claude-bubble .msg.assistant details code {{ background: rgba(0,0,0,0.06); padding: 1px 3px; border-radius: 3px; font-size: 11px; }}
-    /* Diff styles for colored code changes */
-    #ha-claude-bubble .diff-side {{ overflow-x: auto; margin: 8px 0; border-radius: 6px; border: 1px solid var(--divider-color, #e1e4e8); }}
-    #ha-claude-bubble .diff-table {{ width: 100%; border-collapse: collapse; font-family: monospace; font-size: 11px; table-layout: fixed; }}
-    #ha-claude-bubble .diff-table th {{ padding: 4px 8px; background: var(--secondary-background-color, #f6f8fa); border-bottom: 1px solid var(--divider-color, #e1e4e8); text-align: left; font-size: 10px; font-weight: 600; width: 50%; }}
-    #ha-claude-bubble .diff-th-old {{ color: #cb2431; }}
-    #ha-claude-bubble .diff-th-new {{ color: #22863a; border-left: 1px solid var(--divider-color, #e1e4e8); }}
-    #ha-claude-bubble .diff-table td {{ padding: 1px 6px; white-space: pre-wrap; word-break: break-all; vertical-align: top; font-size: 10px; line-height: 1.4; }}
-    #ha-claude-bubble .diff-eq {{ color: var(--secondary-text-color, #586069); }}
-    #ha-claude-bubble .diff-del {{ background: #ffeef0; color: #cb2431; }}
-    #ha-claude-bubble .diff-add {{ background: #e6ffec; color: #22863a; }}
-    #ha-claude-bubble .diff-empty {{ background: var(--secondary-background-color, #fafbfc); }}
-    #ha-claude-bubble .diff-table td + td {{ border-left: 1px solid var(--divider-color, #e1e4e8); }}
+    /* Diff styles (aligned with chat_ui split view) */
+    #ha-claude-bubble .diff-side, #amira-auto-sidebar .diff-side, #amira-card-chat .diff-side {{
+      overflow-x: auto;
+      margin: 10px 0;
+      border-radius: 8px;
+      border: 1px solid #e1e4e8;
+      background: #ffffff;
+    }}
+    #ha-claude-bubble .diff-table, #amira-auto-sidebar .diff-table, #amira-card-chat .diff-table {{
+      width: 100%;
+      border-collapse: collapse;
+      font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+      font-size: 11px;
+      table-layout: fixed;
+    }}
+    #ha-claude-bubble .diff-table th, #amira-auto-sidebar .diff-table th, #amira-card-chat .diff-table th {{
+      padding: 6px 10px;
+      background: #f6f8fa;
+      border-bottom: 1px solid #e1e4e8;
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+      width: 50%;
+    }}
+    #ha-claude-bubble .diff-th-old, #amira-auto-sidebar .diff-th-old, #amira-card-chat .diff-th-old {{ color: #cb2431; }}
+    #ha-claude-bubble .diff-th-new, #amira-auto-sidebar .diff-th-new, #amira-card-chat .diff-th-new {{ color: #22863a; border-left: 1px solid #e1e4e8; }}
+    #ha-claude-bubble .diff-table td, #amira-auto-sidebar .diff-table td, #amira-card-chat .diff-table td {{
+      padding: 2px 8px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      vertical-align: top;
+      font-size: 11px;
+      line-height: 1.5;
+      border-bottom: 1px solid #f0f2f5;
+    }}
+    #ha-claude-bubble .diff-eq, #amira-auto-sidebar .diff-eq, #amira-card-chat .diff-eq {{ color: #586069; background: #fbfdff; }}
+    #ha-claude-bubble .diff-del, #amira-auto-sidebar .diff-del, #amira-card-chat .diff-del {{ background: #ffeef0; color: #cb2431; }}
+    #ha-claude-bubble .diff-add, #amira-auto-sidebar .diff-add, #amira-card-chat .diff-add {{ background: #e6ffec; color: #22863a; }}
+    #ha-claude-bubble .diff-empty, #amira-auto-sidebar .diff-empty, #amira-card-chat .diff-empty {{ background: #fafbfc; }}
+    #ha-claude-bubble .diff-table td + td, #amira-auto-sidebar .diff-table td + td, #amira-card-chat .diff-table td + td {{ border-left: 1px solid #e1e4e8; }}
+    #ha-claude-bubble .diff-collapse, #amira-auto-sidebar .diff-collapse, #amira-card-chat .diff-collapse {{
+      text-align: center;
+      color: #6a737d;
+      background: #f1f8ff;
+      font-style: italic;
+      font-size: 11px;
+      padding: 2px 10px;
+      border-top: 1px solid #e1e4e8;
+      border-bottom: 1px solid #e1e4e8;
+    }}
     /* Confirmation buttons */
     #ha-claude-bubble .confirm-buttons {{ display: flex; gap: 10px; margin-top: 12px; justify-content: center; }}
     #ha-claude-bubble .confirm-btn {{ padding: 8px 20px; border-radius: 20px; border: 2px solid; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; }}
@@ -2555,27 +2602,24 @@ def get_chat_bubble_js(
       setTimeout(function() {{ btn.textContent = T.copy_btn || 'Copy'; }}, 1500);
     }}
     function fail() {{
-      btn.textContent = 'Error';
-      setTimeout(function() {{ btn.textContent = T.copy_btn || 'Copy'; }}, 1500);
-    }}
-    function fallback() {{
+      // Last resort: execCommand (deprecated, unreliable in shadow DOM, but better than nothing)
       var ta = document.createElement('textarea');
       ta.value = txt;
-      ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;';
-      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;font-size:16px;';
       document.body.appendChild(ta);
-      ta.focus();
-      ta.select();
+      ta.focus(); ta.select();
       if (ta.setSelectionRange) ta.setSelectionRange(0, ta.value.length);
-      try {{
-        if (document.execCommand('copy')) ok();
-        else fail();
-      }} catch(e) {{
-        fail();
-      }}
+      var ok2 = false;
+      try {{ ok2 = document.execCommand('copy'); }} catch(e) {{}}
       document.body.removeChild(ta);
+      if (ok2) {{ ok(); }} else {{
+        btn.textContent = 'Error';
+        setTimeout(function() {{ btn.textContent = T.copy_btn || 'Copy'; }}, 1500);
+      }}
     }}
 
+    // Prefer async Clipboard API — it's reliable within a user-gesture even when async.
+    // execCommand('copy') returns true in HA shadow DOM but often writes nothing.
     var clipboards = [];
     try {{
       if (navigator && navigator.clipboard && navigator.clipboard.writeText) clipboards.push(navigator.clipboard);
@@ -2593,7 +2637,7 @@ def get_chat_bubble_js(
 
     function tryClipboard(i) {{
       if (i >= clipboards.length) {{
-        fallback();
+        fail();
         return;
       }}
       clipboards[i].writeText(txt).then(ok).catch(function() {{ tryClipboard(i + 1); }});
@@ -2906,7 +2950,7 @@ def get_chat_bubble_js(
     if (!_cardMsgsEl) return null;
     const d = document.createElement('div');
     d.style.cssText = role === 'user'
-      ? 'align-self:flex-end;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:6px 10px;border-radius:12px 12px 2px 12px;font-size:13px;max-width:85%;word-break:break-word;'
+      ? 'align-self:flex-end;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:6px 10px;border-radius:12px 12px 2px 12px;font-size:13px;max-width:85%;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;tab-size:2;line-height:1.45;'
       : 'align-self:flex-start;background:var(--secondary-background-color,#f0f0f0);color:var(--primary-text-color,#212121);padding:6px 10px;border-radius:12px 12px 12px 2px;font-size:13px;max-width:85%;word-break:break-word;line-height:1.5;';
     if (role === 'user') d.textContent = text;
     else d.innerHTML = renderMarkdown(text);
@@ -2916,8 +2960,10 @@ def get_chat_bubble_js(
   }}
 
   async function cardPanelSend(presetText) {{
-    const text = presetText || (_cardInputEl ? _cardInputEl.value.trim() : '');
-    if (!text) return;
+    const text = (presetText !== undefined && presetText !== null)
+      ? String(presetText).replace(/\\r\\n?/g, '\\n')
+      : (_cardInputEl ? String(_cardInputEl.value || '').replace(/\\r\\n?/g, '\\n') : '');
+    if (!text.trim()) return;
     if (_cardInputEl && !presetText) {{ _cardInputEl.value = ''; _cardInputEl.style.height = 'auto'; }}
     _cardPanelAddMsg('user', text);
     const thinkEl = _cardPanelAddMsg('assistant', T.thinking + '…');
@@ -2936,6 +2982,7 @@ def get_chat_bubble_js(
       const decoder = new TextDecoder();
       let buffer = '', assistantText = '';
       let firstToken = true;
+      let gotErrorEvent = false;
 
       while (true) {{
         const {{ done, value }} = await reader.read();
@@ -3015,6 +3062,7 @@ def get_chat_bubble_js(
                 thinkEl.appendChild(uDiv);
               }}
             }} else if (evt.type === 'error') {{
+              gotErrorEvent = true;
               if (thinkEl) thinkEl.textContent = evt.message || T.error_connection;
             }} else if (evt.type === 'status') {{
               const msg = evt.message || evt.content || '';
@@ -3026,8 +3074,8 @@ def get_chat_bubble_js(
           }} catch (parseErr) {{}}
         }}
       }}
-      // Fallback: if stream closed without any tokens, show something
-      if (!assistantText && thinkEl) {{
+      // Fallback: if stream closed without any tokens or errors, show connection error
+      if (!assistantText && !gotErrorEvent && thinkEl) {{
         thinkEl.textContent = T.error_connection;
       }}
     }} catch(e) {{
@@ -3110,6 +3158,26 @@ def get_chat_bubble_js(
   }}
   function resetAutoSession() {{
     try {{ localStorage.removeItem(AUTO_SESSION_KEY); }} catch(e) {{}}
+  }}
+
+  async function _loadAutoConversation(sessionId) {{
+    if (!_autoMsgsEl || !sessionId) return;
+    const target = _autoMsgsEl;
+    try {{
+      const resp = await fetch(API_BASE + '/api/conversations/' + encodeURIComponent(sessionId), {{credentials:'same-origin'}});
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const messages = (data && Array.isArray(data.messages)) ? data.messages : [];
+      if (!messages.length || _autoMsgsEl !== target) return;
+      const recent = messages.slice(-30);
+      recent.forEach(m => {{
+        if (!m || (m.role !== 'user' && m.role !== 'assistant')) return;
+        _autoAddMsg(m.role, m.content || '');
+      }});
+      if (_autoMsgsEl === target) _autoMsgsEl.scrollTop = _autoMsgsEl.scrollHeight;
+    }} catch(e) {{
+      console.error('[Amira auto] load conversation error:', e);
+    }}
   }}
 
   // ---- Toolbar button injection (position:fixed on body — avoids Shadow DOM unreliability) ----
@@ -4135,7 +4203,7 @@ def get_chat_bubble_js(
     const flowEl = document.createElement('div');
     flowEl.id = AMIRA_FLOW_ID;
     // Render inside the automation editor container (not as a fixed top overlay).
-    flowEl.style.cssText = 'position:relative;z-index:2;display:flex;flex-direction:column;align-items:stretch;gap:5px;padding:8px 12px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 4px 20px rgba(99,102,241,0.09),0 1px 3px rgba(0,0,0,0.06),inset 0 3px 0 0 #7c8fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:8px 0 10px;';
+    flowEl.style.cssText = 'position:relative;z-index:2;display:flex;flex-direction:column;align-items:stretch;gap:5px;padding:8px 12px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 4px 20px rgba(99,102,241,0.09),0 1px 3px rgba(0,0,0,0.06),inset 0 3px 0 0 #7c8fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:8px 0 10px;overflow-x:auto;';
     if (!document.getElementById('amira-flow-anim-style')) {{
       const st = document.createElement('style');
       st.id = 'amira-flow-anim-style';
@@ -4283,15 +4351,15 @@ def get_chat_bubble_js(
         action:    {{ grads: ['linear-gradient(135deg,#34d399,#059669)', 'linear-gradient(135deg,#22d3ee,#0284c7)', 'linear-gradient(135deg,#a3e635,#65a30d)'], shadow: 'rgba(16,185,129,0.32)',  label: T.flow_action    || 'Action',     icon: '\U0001f4a1' }}
       }};
       const typeCounters = {{ trigger: 0, condition: 0, action: 0 }};
-      const WAVE = 20;
+      const WAVE = 24;
 
       const pipelineRow = document.createElement('div');
-      pipelineRow.style.cssText = 'display:flex;align-items:center;padding:20px 8px 12px;overflow-x:auto;gap:0;min-height:136px;justify-content:flex-start;flex-wrap:nowrap;';
+      pipelineRow.style.cssText = 'display:flex;align-items:center;padding:24px 12px 16px 8px;gap:0;min-height:176px;justify-content:flex-start;flex-wrap:nowrap;width:max-content;';
 
       let _si = 0, _lastWY = 0;
 
       function _mkConnSvg(fromY, toY, dashed) {{
-        const W=44,H=110,mid=H/2,y1=mid-fromY,y2=mid-toY,cx=W*0.55;
+        const W=50,H=122,mid=H/2,y1=mid-fromY,y2=mid-toY,cx=W*0.55;
         const sv=document.createElementNS('http://www.w3.org/2000/svg','svg');
         sv.setAttribute('width',String(W)); sv.setAttribute('height',String(H));
         sv.style.cssText='flex-shrink:0;overflow:visible;align-self:center;';
@@ -4320,18 +4388,18 @@ def get_chat_bubble_js(
         wrap.style.cssText='display:flex;flex-direction:column;align-items:center;gap:3px;transform:translateY('+wY+'px);flex-shrink:0;';
         const iconEl=document.createElement('div');
         iconEl.textContent=tc.icon;
-        iconEl.style.cssText='font-size:14px;line-height:1;margin-bottom:2px;';
+        iconEl.style.cssText='font-size:18px;line-height:1;margin-bottom:4px;';
         const desc=_describeFlowNode(seg.node,seg.nodeType);
         const detail=_describeFlowDetail(seg.node,seg.nodeType)||desc;
-        const sd=desc.length>22?desc.substring(0,20)+'\u2026':desc;
+        const sd=desc.length>30?desc.substring(0,28)+'\u2026':desc;
         const circ=document.createElement('div');
-        circ.style.cssText='width:64px;height:64px;border-radius:50%;background:'+grad+';display:flex;align-items:center;justify-content:center;padding:5px;box-sizing:border-box;box-shadow:0 4px 16px '+shadow+';cursor:pointer;transition:transform .15s ease,box-shadow .15s ease;';
+        circ.style.cssText='width:98px;height:98px;border-radius:50%;background:'+grad+';display:flex;align-items:center;justify-content:center;padding:10px;box-sizing:border-box;box-shadow:0 6px 20px '+shadow+';cursor:pointer;transition:transform .15s ease,box-shadow .15s ease;';
         circ.title=detail;
         const de=document.createElement('div'); de.textContent=sd;
-        de.style.cssText='color:#fff;font-size:9px;font-weight:600;text-align:center;line-height:1.25;word-break:break-word;pointer-events:none;';
+        de.style.cssText='color:#fff;font-size:12.5px;font-weight:600;text-align:center;line-height:1.28;word-break:break-word;overflow-wrap:anywhere;pointer-events:none;';
         circ.appendChild(de);
         const tl=document.createElement('div'); tl.textContent=tc.label.toUpperCase();
-        tl.style.cssText='font-size:8px;font-weight:700;letter-spacing:0.5px;color:#64748b;margin-top:1px;';
+        tl.style.cssText='font-size:11px;font-weight:700;letter-spacing:0.5px;color:#64748b;margin-top:4px;';
         wrap.appendChild(iconEl); wrap.appendChild(circ); wrap.appendChild(tl);
         circ.addEventListener('mouseenter',()=>{{circ.style.transform='scale(1.1)';circ.style.boxShadow='0 6px 22px '+shadow;}});
         circ.addEventListener('mouseleave',()=>{{circ.style.transform='';circ.style.boxShadow='0 4px 16px '+shadow;}});
@@ -4345,9 +4413,9 @@ def get_chat_bubble_js(
       function _renderSegFork(seg) {{
         if(_si>0) pipelineRow.appendChild(_mkConnSvg(_lastWY,0,false));
         _lastWY=0; _si++;
-        const N=seg.branches.length, brH=72, gap=8;
+        const N=seg.branches.length, brH=98, gap=12;
         const totalH=N*brH+(N-1)*gap;
-        const fkW=30;
+        const fkW=44;
         // Fork diverge SVG — one bezier per branch
         const fkSvg=document.createElementNS('http://www.w3.org/2000/svg','svg');
         fkSvg.setAttribute('width',String(fkW)); fkSvg.setAttribute('height',String(totalH));
@@ -4373,34 +4441,34 @@ def get_chat_bubble_js(
           brRow.style.cssText='display:flex;align-items:center;gap:0;';
           // Condition label badge
           const bdg=document.createElement('div');
-          const sl=br.label.length>22?br.label.substring(0,20)+'\u2026':br.label;
+          const sl=br.label.length>30?br.label.substring(0,28)+'\u2026':br.label;
           bdg.textContent=sl; bdg.title=br.label;
-          bdg.style.cssText='background:'+br.grad+';color:#fff;font-size:8px;font-weight:700;padding:3px 7px;border-radius:10px;white-space:nowrap;flex-shrink:0;margin-right:4px;max-width:88px;overflow:hidden;text-overflow:ellipsis;';
+          bdg.style.cssText='background:'+br.grad+';color:#fff;font-size:11px;font-weight:700;padding:6px 10px;border-radius:12px;white-space:nowrap;flex-shrink:0;margin-right:8px;max-width:190px;overflow:hidden;text-overflow:ellipsis;';
           brRow.appendChild(bdg);
           // Action circles in this branch
           br.nodes.forEach(function(item,ni){{
             if(ni>0){{
               const msv=document.createElementNS('http://www.w3.org/2000/svg','svg');
-              msv.setAttribute('width','22'); msv.setAttribute('height','48');
+              msv.setAttribute('width','30'); msv.setAttribute('height','64');
               msv.style.cssText='flex-shrink:0;overflow:visible;align-self:center;';
               const mp=document.createElementNS('http://www.w3.org/2000/svg','path');
-              mp.setAttribute('d','M0,24 L22,24'); mp.setAttribute('stroke','#ddd6fe');
-              mp.setAttribute('stroke-width','1.5'); mp.setAttribute('stroke-dasharray','4 3'); mp.setAttribute('fill','none');
+              mp.setAttribute('d','M0,32 L30,32'); mp.setAttribute('stroke','#ddd6fe');
+              mp.setAttribute('stroke-width','1.8'); mp.setAttribute('stroke-dasharray','4 3'); mp.setAttribute('fill','none');
               const ma=document.createElementNS('http://www.w3.org/2000/svg','polygon');
-              ma.setAttribute('points','22,24 15,20 15,28'); ma.setAttribute('fill','#c4b5fd');
+              ma.setAttribute('points','30,32 22,27 22,37'); ma.setAttribute('fill','#c4b5fd');
               msv.appendChild(mp); msv.appendChild(ma);
               brRow.appendChild(msv);
             }}
             const ndesc=_describeFlowNode(item.node,'action');
             const ndetail=_describeFlowDetail(item.node,'action')||ndesc;
-            const nsd=ndesc.length>16?ndesc.substring(0,14)+'\u2026':ndesc;
+            const nsd=ndesc.length>22?ndesc.substring(0,20)+'\u2026':ndesc;
             const nw=document.createElement('div');
             nw.style.cssText='display:flex;flex-direction:column;align-items:center;flex-shrink:0;';
             const nc=document.createElement('div');
-            nc.style.cssText='width:48px;height:48px;border-radius:50%;background:'+item.grad+';display:flex;align-items:center;justify-content:center;padding:4px;box-sizing:border-box;box-shadow:0 3px 10px '+item.shadow+';cursor:pointer;transition:transform .15s ease;opacity:0.92;';
+            nc.style.cssText='width:74px;height:74px;border-radius:50%;background:'+item.grad+';display:flex;align-items:center;justify-content:center;padding:8px;box-sizing:border-box;box-shadow:0 4px 12px '+item.shadow+';cursor:pointer;transition:transform .15s ease;opacity:0.94;';
             nc.title=ndetail;
             const nde=document.createElement('div'); nde.textContent=nsd;
-            nde.style.cssText='color:#fff;font-size:7.5px;font-weight:600;text-align:center;line-height:1.2;word-break:break-word;pointer-events:none;';
+            nde.style.cssText='color:#fff;font-size:10.5px;font-weight:600;text-align:center;line-height:1.25;word-break:break-word;overflow-wrap:anywhere;pointer-events:none;';
             nc.appendChild(nde); nw.appendChild(nc);
             nc.addEventListener('mouseenter',()=>{{nc.style.transform='scale(1.1)';}});
             nc.addEventListener('mouseleave',()=>{{nc.style.transform='';}});
@@ -4461,7 +4529,7 @@ def get_chat_bubble_js(
     if (!_autoMsgsEl) return null;
     const d = document.createElement('div');
     d.style.cssText = role === 'user'
-      ? 'align-self:flex-end;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:8px 12px;border-radius:14px 14px 2px 14px;font-size:13px;max-width:85%;word-break:break-word;line-height:1.45;'
+      ? 'align-self:flex-end;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:8px 12px;border-radius:14px 14px 2px 14px;font-size:13px;max-width:85%;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;tab-size:2;line-height:1.45;'
       : 'align-self:flex-start;background:var(--secondary-background-color,#f0f0f0);color:var(--primary-text-color,#212121);padding:8px 12px;border-radius:14px 14px 14px 2px;font-size:13px;max-width:85%;word-break:break-word;line-height:1.5;';
     if (role === 'user') d.textContent = text;
     else d.innerHTML = renderMarkdown(text);
@@ -4471,8 +4539,10 @@ def get_chat_bubble_js(
   }}
 
   async function autoSidebarSend(presetText) {{
-    const text = presetText || (_autoInputEl ? _autoInputEl.value.trim() : '');
-    if (!text) return;
+    const text = (presetText !== undefined && presetText !== null)
+      ? String(presetText).replace(/\\r\\n?/g, '\\n')
+      : (_autoInputEl ? String(_autoInputEl.value || '').replace(/\\r\\n?/g, '\\n') : '');
+    if (!text.trim()) return;
     if (_autoInputEl && !presetText) {{ _autoInputEl.value = ''; _autoInputEl.style.height = 'auto'; }}
     _autoAddMsg('user', text);
     const thinkEl = _autoAddMsg('assistant', T.thinking + '\u2026');
@@ -4524,6 +4594,7 @@ def get_chat_bubble_js(
       let buffer = '', assistantText = '', pendingDiffHtml = '';
       let firstToken = true;
       let usageRendered = false;
+      let gotErrorEvent = false;
 
       while (true) {{
         const {{ done, value }} = await reader.read();
@@ -4575,6 +4646,7 @@ def get_chat_bubble_js(
                   usageRendered = true;
                 }}
               }} else if (evt.type === 'error') {{
+                gotErrorEvent = true;
                 if (thinkEl) thinkEl.textContent = evt.message || T.error_connection;
               }} else if (evt.type === 'status') {{
                 const msg = evt.message || evt.content || evt.status || evt.text || '';
@@ -4593,7 +4665,7 @@ def get_chat_bubble_js(
       }}
       if (!gotAnyEvent && thinkEl) {{
         thinkEl.textContent = T.connection_lost || T.error_connection;
-      }} else if (!gotAnyToken && !assistantText && thinkEl) {{
+      }} else if (!gotAnyToken && !assistantText && !gotErrorEvent && thinkEl) {{
         thinkEl.textContent = T.connection_lost || T.error_connection;
       }}
     }} catch(e) {{
@@ -4757,6 +4829,9 @@ def get_chat_bubble_js(
     _autoAgentSel  = autoAgentSel;
     _autoSidebarOpen = true;
     saveSetting('auto-sidebar-open', true);
+
+    // Restore current automation chat conversation after page refresh/reopen.
+    _loadAutoConversation(getAutoSessionId());
 
     // Close floating bubble panel if open (sidebar takes over)
     if (isOpen) {{ isOpen = false; panel.classList.remove('open'); }}
