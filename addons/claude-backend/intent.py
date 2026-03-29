@@ -116,10 +116,16 @@ TOOL USAGE GUIDE:
 — AUTOMATIONS:
   • Find: get_automations (search by keyword)
   • Create: search_entities first (find correct entity_ids), then create_automation with COMPLETE config
+    - If the user asks for a NEW automation ("new/create/add another"), NEVER modify existing automations in the same turn.
+    - In that case use create_automation only, unless the user explicitly asks to modify a specific existing automation.
   • Modify: MANDATORY 2-step:
       STEP 1 — call preview_automation_change(automation_id, changes) IMMEDIATELY. Do NOT ask "shall I prepare the preview?" — just call it.
       STEP 2 — ONLY after user confirms ("sì/yes/ok/procedi"), call update_automation(automation_id, changes)
       NEVER call update_automation directly on the first request. Always preview first.
+      IMPORTANT: In Home Assistant, conditions run BEFORE actions. Never use a response_variable created in actions
+      (for example weather.get_forecasts response_variable like daily_fc) inside conditions. Put that logic in actions
+      (choose/if) after the fetch action, or send an always-on summary without blocking condition.
+      NEVER modify an automation inferred only from fuzzy context when user intent is ambiguous; ask to choose: create new vs modify existing.
       If the user asks additional tweaks before confirming, produce a NEW preview with updated changes.
       Do not ask repeated confirmation for each micro-tweak; ask once on the latest preview.
   • Delete: identify it, ASK EXPLICIT CONFIRMATION, then delete_automation
@@ -623,7 +629,16 @@ def detect_intent(user_message: str, smart_context: str, previous_intent: str | 
     # --- CHAT (greetings, chitchat) --- short messages that don't need tools
     chat_kw = lang_keywords.get("chat", [])
     words = msg.strip().rstrip("!?.,").split()
-    if len(words) <= 5 and any(k in msg for k in chat_kw):
+    def _contains_chat_kw(_msg: str, _kw: str) -> bool:
+        _kw = (_kw or "").strip().lower()
+        if not _kw:
+            return False
+        # For very short keywords (ok/hi/hey), require full word match
+        if len(_kw) <= 3:
+            return bool(re.search(rf"(?<![a-z0-9_]){re.escape(_kw)}(?![a-z0-9_])", _msg))
+        return _kw in _msg
+
+    if len(words) <= 5 and any(_contains_chat_kw(msg, k) for k in chat_kw):
         return {"intent": "chat", "tools": INTENT_TOOL_SETS["chat"],
                 "prompt": INTENT_PROMPTS["chat"], "specific_target": False, "max_rounds": 1}
 
@@ -805,8 +820,27 @@ def build_smart_context(user_message: str, intent: str = None, max_chars: int = 
 
     try:
         # --- AUTOMATION CONTEXT ---
-        auto_keywords = ["automazione", "automation", "automazion", "trigger", "condizione", "condition"]
+        auto_keywords = [
+            "automazione", "automation", "automazion", "automatización", "automatizacion",
+            "automatisation", "trigger", "condizione", "condition", "condición", "condition",
+        ]
+        create_auto_keywords = [
+            "nuova automazione", "nuove automazioni", "new automation", "new automations",
+            "crea automazione", "creare automazione", "create automation", "add automation",
+            "aggiungi automazione", "altra automazione", "un'altra automazione", "un altra automazione",
+            "nueva automatización", "nuevas automatizaciones", "crear automatización", "añadir automatización",
+            "nouvelle automatisation", "nouvelles automatisations", "créer automatisation", "ajouter automatisation",
+        ]
+        modify_auto_keywords = [
+            "modifica automazione", "modifica questa automazione", "modify automation",
+            "update automation", "aggiorna automazione", "cambia automazione", "questa automazione",
+            "modificar automatización", "actualizar automatización", "esta automatización",
+            "modifier automatisation", "mettre à jour automatisation", "cette automatisation",
+        ]
         force_automation_context = intent == "modify_automation"
+        wants_new_automation = any(k in msg_lower for k in create_auto_keywords)
+        wants_modify_automation = any(k in msg_lower for k in modify_auto_keywords)
+        prefer_creation_context = wants_new_automation and not wants_modify_automation and not force_automation_context
         if force_automation_context or any(k in msg_lower for k in auto_keywords):
             import yaml
             # Get automation list
@@ -843,7 +877,9 @@ def build_smart_context(user_message: str, intent: str = None, max_chars: int = 
                     logger.info(f"Smart context: using bubble context automation id='{target_auto_id}' ('{target_auto_alias}')")
 
             # ── Priority 2: fuzzy matching of automation name in message ──────────
-            if not target_auto_id:
+            # Skip fuzzy targeting when user explicitly asks to create NEW automations:
+            # this prevents accidental updates to unrelated existing automations.
+            if not target_auto_id and not prefer_creation_context:
                 best_score = 0
                 best_match = None
 
@@ -935,6 +971,12 @@ def build_smart_context(user_message: str, intent: str = None, max_chars: int = 
                 if len(list_json) > 3000:
                     list_json = list_json[:3000] + '...]'
                 context_parts.append(f"## AUTOMAZIONI DISPONIBILI\n{list_json}")
+                if prefer_creation_context:
+                    context_parts.append(
+                        "## NOTA OPERATIVA\n"
+                        "L'utente sta chiedendo di CREARE nuove automazioni. "
+                        "Non proporre update_automation su automazioni esistenti senza conferma esplicita."
+                    )
 
         # --- SCRIPT CONTEXT ---
         script_keywords = ["script", "scena", "scenari", "routine", "sequenza"]

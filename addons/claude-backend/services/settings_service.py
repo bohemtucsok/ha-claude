@@ -16,6 +16,7 @@ MCP_RUNTIME_FILE = "/config/amira/mcp_runtime.json"
 
 SETTINGS_DEFAULTS = {
     "language": "en",
+    "interaction_mode": "strict",
     "enable_memory": False,
     "enable_file_access": False,
     "enable_file_upload": True,
@@ -53,6 +54,7 @@ SETTINGS_DEFAULTS = {
 # Maps settings key → Python global variable name
 _SETTINGS_GLOBAL_MAP = {
     "language": "LANGUAGE",
+    "interaction_mode": "CHAT_INTERACTION_MODE",
     "enable_memory": "ENABLE_MEMORY",
     "enable_file_access": "ENABLE_FILE_ACCESS",
     "enable_file_upload": "ENABLE_FILE_UPLOAD",

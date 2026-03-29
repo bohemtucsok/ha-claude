@@ -561,3 +561,61 @@ function updateCard(ents) { ... }
 updateCard(entities); // initial render
 card.addEventListener('hass-update', (e) => updateCard(e.detail.entities));
 ```
+
+### Wrong: using a separate `js:` YAML field (field does not exist)
+```yaml
+# ❌ WRONG — the `js:` field does NOT exist in html-js-card
+# Any JS written here is silently ignored — the card stays stuck on its initial HTML (e.g. "Loading...")
+type: custom:html-js-card
+content: |
+  <div id="root">Loading...</div>
+js: |
+  (function() {
+    const hass = this.hass;   // ❌ also wrong: `this.hass` does not exist
+    ...
+  })()
+```
+```yaml
+# ✅ CORRECT — JavaScript goes inside a <script> tag within `content:`
+type: custom:html-js-card
+content: |
+  <div id="root">Loading...</div>
+  <script>
+    window._hjc_hass = hass;  // ✅ `hass` is injected automatically
+
+    function updateCard(ents) {
+      card.querySelector('#root').textContent = ents['sensor.x']?.state || '—';
+    }
+
+    updateCard(entities);
+    card.addEventListener('hass-update', (e) => {
+      window._hjc_hass = e.detail.hass;
+      updateCard(e.detail.entities);
+    });
+  </script>
+```
+
+### Wrong: `this.hass`, `this.querySelector`, or IIFE with `this`
+```javascript
+// ❌ WRONG — `this` is not the card context; these all return undefined/null
+const hass = this.hass;
+const el = this.querySelector('#root');
+(function() { const hass = this.hass; ... })();
+```
+```javascript
+// ✅ CORRECT — use the injected variables directly
+const state = hass.states['sensor.x']?.state;
+const el = card.querySelector('#root');
+```
+
+### Wrong: inline onclick functions not exposed on `window`
+```javascript
+// ❌ WRONG — local function is not accessible from inline HTML onclick in shadow DOM
+function doAction() { ... }
+// <button onclick="doAction()"> → ReferenceError: doAction is not defined
+```
+```javascript
+// ✅ CORRECT — expose on window so inline onclick can find it
+window.doAction = function() { window._hjc_hass.callService(...); };
+// <button onclick="doAction()"> → works correctly
+```

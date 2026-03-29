@@ -7436,6 +7436,14 @@ def get_chat_ui():
                 }}, 2000);
             }};
 
+            // On non-secure contexts (HTTP) the Clipboard API may silently resolve
+            // without writing — skip it and use execCommand directly.
+            if (!window.isSecureContext) {{
+                const ok = fallbackCopy(code, showSuccess);
+                if (!ok) addMessage('⚠️ Copy failed in this browser context. Try selecting the code manually.', 'system');
+                return;
+            }}
+
             // Try multiple clipboard contexts (iframe/HA shell can differ).
             const clipboards = [];
             if (navigator && navigator.clipboard && navigator.clipboard.writeText) clipboards.push(navigator.clipboard);
@@ -7470,11 +7478,7 @@ def get_chat_ui():
                     if (!doc || !doc.body) return false;
                     const textarea = doc.createElement('textarea');
                     textarea.value = text;
-                    textarea.style.position = 'fixed';
-                    textarea.style.opacity = '0';
-                    textarea.style.left = '-9999px';
-                    textarea.style.top = '-9999px';
-                    textarea.setAttribute('readonly', '');
+                    textarea.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;font-size:16px;';
                     doc.body.appendChild(textarea);
                     textarea.focus();
                     textarea.select();

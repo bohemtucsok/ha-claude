@@ -309,6 +309,7 @@ DISCORD_ALLOWED_USERS: set = _parse_allowed_ids(DISCORD_ALLOWED_USER_IDS)
 ENABLE_MCP = os.getenv("ENABLE_MCP", "true").lower() not in ("false", "0", "")
 MCP_CONFIG_FILE = os.getenv("MCP_CONFIG_FILE", "/config/amira/mcp_config.json")
 FALLBACK_ENABLED = os.getenv("FALLBACK_ENABLED", "true").lower() not in ("false", "0", "no")
+CHAT_INTERACTION_MODE = os.getenv("CHAT_INTERACTION_MODE", "strict").strip().lower()
 
 
 def _apply_settings(settings: dict) -> None:
@@ -344,6 +345,10 @@ def _apply_settings(settings: dict) -> None:
         # Normalize specific string values
         if key == "language":
             value = str(value).lower()
+        elif key == "interaction_mode":
+            value = str(value).lower().strip()
+            if value not in ("strict", "lean"):
+                value = "strict"
         elif key == "cost_currency":
             value = str(value).upper()
         elif key == "tts_voice":
@@ -1916,9 +1921,12 @@ _browser_console_errors: list = []
 session_last_intent: Dict[str, str] = {}
 # Last preview signature per session (to ensure update matches shown preview)
 session_last_preview: Dict[str, Dict[str, Any]] = {}
+# Pending confirmation/follow-up context per session (lightweight state machine)
+session_pending_context: Dict[str, Dict[str, Any]] = {}
 # Active skill per session — re-injected on follow-up messages so the LLM keeps the skill context
 session_active_skill: Dict[str, str] = {}
 _PREVIEW_MATCH_TTL_SECONDS = 3600
+_PENDING_CONTEXT_TTL_SECONDS = 7200
 
 # Current session ID for thread-safe access in execute_tool (Flask sync workers)
 current_session_id: str = "default"
@@ -2917,26 +2925,15 @@ def _validate_entity_ids_in_response(text: str) -> str:
         if lang == "it":
             warning = f"\n\n⚠️ **Attenzione: alcuni entity ID potrebbero non esistere.**\n"
             warning += f"Non trovati su HA: {inv_list}\n"
-            if suggestions:
-                warning += "\n**Entità reali trovate nel tuo sistema:**\n" + "\n".join(suggestions[:10])
-                warning += "\n\n_Usa questi entity ID al posto di quelli suggeriti sopra._"
-            else:
-                warning += "\nChiedi di nuovo specificando di cercare prima le entità reali."
         elif lang == "es":
             warning = f"\n\n⚠️ **Atención: algunos entity ID podrían no existir.**\n"
             warning += f"No encontrados: {inv_list}\n"
-            if suggestions:
-                warning += "\n**Entidades reales:**\n" + "\n".join(suggestions[:10])
         elif lang == "fr":
             warning = f"\n\n⚠️ **Attention : certains entity ID pourraient ne pas exister.**\n"
             warning += f"Non trouvés : {inv_list}\n"
-            if suggestions:
-                warning += "\n**Entités réelles :**\n" + "\n".join(suggestions[:10])
         else:
             warning = f"\n\n⚠️ **Warning: some entity IDs may not exist.**\n"
             warning += f"Not found: {inv_list}\n"
-            if suggestions:
-                warning += "\n**Real entities found:**\n" + "\n".join(suggestions[:10])
 
         logger.warning(f"Entity validation: {len(invalid)} invalid IDs in response: {invalid}")
         return text + warning
@@ -3065,6 +3062,69 @@ def _automation_change_signature(raw_args: dict) -> str:
     """Stable signature for preview/update argument matching."""
     norm = _normalize_automation_change_args(raw_args)
     return json.dumps(norm, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _find_invalid_response_variable_in_conditions(tool_name: str, raw_args: dict) -> str:
+    """Return offending response_variable name if used inside conditions templates.
+
+    In Home Assistant, conditions are evaluated before actions. Variables created by
+    action steps (e.g. response_variable from weather.get_forecasts) are not available
+    in conditions.
+    """
+    if not isinstance(raw_args, dict):
+        return ""
+
+    if tool_name in {"preview_automation_change", "update_automation"}:
+        payload = (_normalize_automation_change_args(raw_args) or {}).get("changes", {}) or {}
+    else:
+        payload = raw_args
+    if not isinstance(payload, dict):
+        return ""
+
+    actions = payload.get("actions", payload.get("action", []))
+    if isinstance(actions, dict):
+        actions = [actions]
+    if not isinstance(actions, list):
+        actions = []
+
+    response_vars = set()
+    for step in actions:
+        if not isinstance(step, dict):
+            continue
+        rv = step.get("response_variable")
+        if isinstance(rv, str) and rv.strip():
+            response_vars.add(rv.strip())
+
+    if not response_vars:
+        return ""
+
+    conditions = payload.get("conditions", payload.get("condition", []))
+    if isinstance(conditions, dict):
+        conditions = [conditions]
+    if not isinstance(conditions, list):
+        conditions = []
+
+    template_blobs = []
+
+    def _collect_templates(node):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if isinstance(k, str) and k in {"value_template", "template"} and isinstance(v, str):
+                    template_blobs.append(v)
+                _collect_templates(v)
+        elif isinstance(node, list):
+            for it in node:
+                _collect_templates(it)
+
+    _collect_templates(conditions)
+    if not template_blobs:
+        return ""
+
+    for rv in response_vars:
+        pat = re.compile(rf"\b{re.escape(rv)}\b")
+        if any(pat.search(tpl or "") for tpl in template_blobs):
+            return rv
+    return ""
 
 
 def _is_mcp_data_request(text: str) -> bool:
@@ -3344,6 +3404,118 @@ def _strip_context_blocks(text: str) -> str:
     return result.strip()
 
 
+def _normalize_user_message_for_routing(user_message: str) -> str:
+    """Remove synthetic context/html blocks and return a normalized lowercase text."""
+    try:
+        msg = _strip_context_blocks(user_message or "")
+        msg = re.sub(r'\[CURRENT_DASHBOARD_HTML\][\s\S]*?\[/CURRENT_DASHBOARD_HTML\]', '', msg, flags=re.IGNORECASE)
+        msg = re.sub(r'\s+', ' ', msg).strip().lower()
+        return msg
+    except Exception:
+        return str(user_message or "").strip().lower()
+
+
+def _all_lang_keywords(key: str) -> set[str]:
+    """Collect keyword entries across all configured languages."""
+    out: set[str] = set()
+    try:
+        for _lang_data in (KEYWORDS or {}).values():
+            vals = _lang_data.get(key, []) if isinstance(_lang_data, dict) else []
+            if isinstance(vals, list):
+                for v in vals:
+                    if isinstance(v, str) and v.strip():
+                        out.add(v.strip().lower())
+    except Exception:
+        pass
+    return out
+
+
+def _looks_like_new_automation_request(user_message: str) -> bool:
+    msg = _normalize_user_message_for_routing(user_message)
+    automation_markers = (
+        "automaz", "automation", "automatiz", "automatisation", "automatización", "automatisation"
+    )
+    if not any(m in msg for m in automation_markers):
+        return False
+    create_signals = {
+        "nuova automazione", "nuove automazioni", "new automation", "new automations",
+        "crea automazione", "creare automazione", "create automation", "add automation",
+        "aggiungi automazione", "un'altra automazione", "un altra automazione", "altra automazione",
+        "nueva automatización", "nuevas automatizaciones", "crear automatización", "añadir automatización",
+        "nouvelle automatisation", "nouvelles automatisations", "créer automatisation", "ajouter automatisation",
+    }
+    modify_signals = set(_all_lang_keywords("modify")) | {
+        "modifica automazione", "modify automation", "update automation",
+        "aggiorna automazione", "cambia automazione",
+        "modificar automatización", "actualizar automatización",
+        "modifier automatisation", "mettre à jour automatisation",
+    }
+    has_create = any(s in msg for s in create_signals)
+    has_modify = any(s in msg for s in modify_signals)
+    return bool(has_create and not has_modify)
+
+
+def _has_explicit_automation_target(user_message: str) -> bool:
+    """True only when user clearly targets an existing automation."""
+    raw = str(user_message or "")
+    msg = _normalize_user_message_for_routing(raw)
+    # Bubble context explicitly scoped to one automation
+    if re.search(r'\[context:[^\]]*automation\s+id=["\']*\d+', raw, re.IGNORECASE):
+        return True
+    # Explicit automation entity/id references
+    if re.search(r'\bautomation\.[a-z0-9_]+\b', msg):
+        return True
+    if re.search(r'\b(?:id|automation_id)\s*[:=]?\s*\d{4,}\b', msg):
+        return True
+    # Quoted automation name + modify intent is explicit enough
+    quoted_name = re.search(r'["“][^"”]{3,}["”]', raw)
+    modify_terms = sorted(_all_lang_keywords("modify") | {
+        "modifica", "modify", "update", "aggiorna", "cambia", "edit",
+        "modificar", "actualizar", "modifier", "changer", "mettre à jour",
+    }, key=len, reverse=True)
+    has_modify_intent = any(t and t in msg for t in modify_terms)
+    return bool(quoted_name and has_modify_intent)
+
+
+def _extract_pending_context_from_assistant(text: str) -> Optional[str]:
+    """Extract a compact actionable context when assistant asks for confirmation."""
+    t = str(text or "").strip()
+    if not t:
+        return None
+    tl = t.lower()
+    ask_terms = (
+        "confermi", "conferma", "procedo", "procedi", "confermi e",
+        "confirm", "confirm?", "proceed", "apply", "shall i",
+        "confirma", "confirmas", "proceder", "procedo con",
+        "confirme", "procède", "appliquer",
+    )
+    if "?" not in t and not any(k in tl for k in ask_terms):
+        return None
+    summary = re.sub(r"\s+", " ", t).strip()
+    if len(summary) > 420:
+        summary = summary[:420].rstrip() + "..."
+    return summary
+
+
+def _is_short_followup_reply(user_message: str) -> bool:
+    txt = _normalize_user_message_for_routing(user_message)
+    if not txt:
+        return False
+    words = [w for w in txt.split(" ") if w]
+    if len(words) <= 8 and len(txt) <= 80:
+        return True
+    followup_markers = ("manca", "seconda", "2", "continua", "vai avanti", "next", "missing")
+    return any(m in txt for m in followup_markers)
+
+
+def _is_confirmation_reply(user_message: str) -> bool:
+    txt = _normalize_user_message_for_routing(user_message)
+    if not txt:
+        return False
+    confirms = _all_lang_keywords("confirm") | {"yes", "ok", "okay", "si", "sì", "oui", "vale"}
+    return txt in confirms
+
+
 def stream_chat_with_ai(user_message: str, session_id: str = "default", image_data: str = None, read_only: bool = False, voice_mode: bool = False, req_language: str = None):
     """Stream chat events for all providers with optional image support. Yields SSE event dicts.
     Uses LOCAL intent detection + smart context to minimize tokens sent to AI API."""
@@ -3379,6 +3551,31 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
 
     if session_id not in conversations:
         conversations[session_id] = []
+
+    _lean_mode = str(CHAT_INTERACTION_MODE).lower().strip() == "lean"
+
+    # Reinforce short follow-ups (e.g. "yes", "manca la 2") with pending context
+    # captured from the previous assistant confirmation question.
+    if not _lean_mode:
+        _pending = session_pending_context.get(session_id)
+        if _pending:
+            try:
+                _age = time.time() - float(_pending.get("ts", 0))
+            except Exception:
+                _age = _PENDING_CONTEXT_TTL_SECONDS + 1
+            if _age > _PENDING_CONTEXT_TTL_SECONDS:
+                session_pending_context.pop(session_id, None)
+                _pending = None
+        if _pending and (_is_confirmation_reply(user_message) or _is_short_followup_reply(user_message)):
+            _summary = str(_pending.get("summary", "") or "").strip()
+            if _summary:
+                user_message = (
+                    f"{user_message}\n\n"
+                    f"[CONTEXT: Pending request from previous assistant turn]\n"
+                    f"{_summary}\n"
+                    f"[/CONTEXT]"
+                )
+                logger.info(f"Pending-context booster injected for session {session_id}")
 
     # Get previous intent for confirmation continuity
     prev_intent = session_last_intent.get(session_id)
@@ -3444,10 +3641,16 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
     _is_skill_msg = bool(_re_skill.match(r"^/[a-z][a-z0-9_-]+", user_message.strip().lower()))
 
     if intent_name != "chat" or _is_skill_msg:
-        smart_context = intent.build_smart_context(
-            user_message,
-            intent=intent_name,
-        )
+        if _lean_mode and intent_name == "auto" and not _is_skill_msg:
+            # Lean mode: keep conversation natural and avoid heavy preloaded
+            # context that often makes replies feel templated.
+            smart_context = ""
+            logger.info("Lean mode: smart context preload skipped for auto intent")
+        else:
+            smart_context = intent.build_smart_context(
+                user_message,
+                intent=intent_name,
+            )
 
         # Step 2.5: Inject memory context if enabled
         memory_context = ""
@@ -3473,6 +3676,8 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
 
     # Store this intent for next message's confirmation continuity
     session_last_intent[session_id] = intent_name
+    _has_explicit_auto_target = _has_explicit_automation_target(user_message)
+    _looks_new_auto_req = _looks_like_new_automation_request(user_message)
     _intent_tools = intent_info.get("tools")
     # tools=None means "all tools" (LLM-first), tools=[] means "no tools" (chat)
     # Compute ACTUAL tool count (respects provider tier: compact/extended/full)
@@ -4843,7 +5048,102 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                 )
             else:
                 _pg_blocked = []
-            if _cur_has_preview:
+
+            # Additional safety: preview/update of existing automations requires
+            # explicit target context (bubble/id/name+modify). When user asks for
+            # NEW automations, block update flow and force create/disambiguation.
+            _target_blocked = []
+            _TARGET_GUARDED_AUTOMATION_TOOLS = {"preview_automation_change", "update_automation"}
+            for _tc in list(_pending_tool_calls):
+                _nm = _tc.get("name")
+                if _nm not in _TARGET_GUARDED_AUTOMATION_TOOLS:
+                    continue
+                if _looks_new_auto_req:
+                    _pending_tool_calls.remove(_tc)
+                    _tc["_block_reason"] = (
+                        "[BLOCKED by automation-target guard] "
+                        "The user asked to create NEW automation(s), but this tool modifies an existing one. "
+                        "Use create_automation for new automations. "
+                        "If ambiguous, ask: 'Vuoi creare nuove automazioni o modificare un'automazione esistente?'"
+                    )
+                    _target_blocked.append(_tc)
+                    logger.warning(f"Automation-target guard: blocked {_nm} due to new-automation request")
+                    continue
+                if not _has_explicit_auto_target:
+                    _pending_tool_calls.remove(_tc)
+                    _tc["_block_reason"] = (
+                        "[BLOCKED by automation-target guard] "
+                        "No explicit target automation was provided for a modify flow. "
+                        "Do not infer from fuzzy smart-context matches. "
+                        "Ask user to choose: create new automation(s) OR modify a specific existing automation (name/id)."
+                    )
+                    _target_blocked.append(_tc)
+                    logger.warning(f"Automation-target guard: blocked {_nm} (missing explicit target)")
+
+            # Preview guard: preview_automation_change must include actual changes.
+            # Empty previews create a broken UX (double-confirm loops with no diff intent).
+            _preview_arg_blocked = []
+            for _tc in list(_pending_tool_calls):
+                if _tc.get("name") != "preview_automation_change":
+                    continue
+                try:
+                    _pa_args = json.loads(_tc.get("arguments", "{}") or "{}")
+                except Exception:
+                    _pa_args = {}
+                if not isinstance(_pa_args, dict):
+                    _pa_args = {}
+                _preview_norm = _normalize_automation_change_args(_pa_args)
+                _has_changes = bool(_preview_norm.get("changes")) or bool(_preview_norm.get("add_condition"))
+                if _has_changes:
+                    continue
+                _pending_tool_calls.remove(_tc)
+                _blocked_aid = _preview_norm.get("automation_id", "")
+                _tc["_block_reason"] = (
+                    "[BLOCKED by preview-args guard] "
+                    "preview_automation_change was called without actual changes. "
+                    "Provide non-empty changes (for example changes={\"action\": [...]}), "
+                    "then show the preview and ask for confirmation."
+                )
+                _preview_arg_blocked.append(_tc)
+                logger.warning(
+                    f"Preview-args guard: blocked preview_automation_change with empty changes "
+                    f"(automation_id={_blocked_aid!r})"
+                )
+
+            # Condition-dependency guard:
+            # block automations where conditions reference response_variable values
+            # created in actions (invalid execution order in Home Assistant).
+            _cond_dep_blocked = []
+            _COND_DEP_GUARDED = {"create_automation", "preview_automation_change", "update_automation"}
+            for _tc in list(_pending_tool_calls):
+                _nm = _tc.get("name")
+                if _nm not in _COND_DEP_GUARDED:
+                    continue
+                try:
+                    _raw = json.loads(_tc.get("arguments", "{}") or "{}")
+                except Exception:
+                    _raw = {}
+                if not isinstance(_raw, dict):
+                    _raw = {}
+                _offending = _find_invalid_response_variable_in_conditions(_nm, _raw)
+                if not _offending:
+                    continue
+                _pending_tool_calls.remove(_tc)
+                _tc["_block_reason"] = (
+                    "[BLOCKED by automation condition-dependency guard] "
+                    f"Condition templates reference '{_offending}', but that value is created in actions "
+                    "(response_variable). In Home Assistant, conditions run before actions, so this is invalid. "
+                    "Move that check into actions (choose/if) after the data-fetch step, or remove the condition."
+                )
+                _cond_dep_blocked.append(_tc)
+                logger.warning(
+                    f"Condition-dependency guard: blocked {_nm} due to response_variable "
+                    f"reference in conditions ({_offending})"
+                )
+
+            # Mark that a preview has been generated only if a valid preview call
+            # remains pending after safety guards.
+            if any(tc.get("name") == "preview_automation_change" for tc in _pending_tool_calls):
                 _preview_round_done = True
 
             # Additional safety: update_automation must match the last shown preview
@@ -4938,10 +5238,16 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
             for _sb_idx, _sb_item in enumerate(_sig_blocked):
                 if not _sb_item.get("id"):
                     _sb_item["id"] = f"call_{_sb_item.get('name', 'blocked')}_{_sb_idx}_sig"
+            for _tb_idx, _tb_item in enumerate(_target_blocked):
+                if not _tb_item.get("id"):
+                    _tb_item["id"] = f"call_{_tb_item.get('name', 'blocked')}_{_tb_idx}_tgt"
+            for _ab_idx, _ab_item in enumerate(_preview_arg_blocked):
+                if not _ab_item.get("id"):
+                    _ab_item["id"] = f"call_{_ab_item.get('name', 'blocked')}_{_ab_idx}_parg"
 
             # Append assistant message with tool_calls (OpenAI format)
             # Include both executed and blocked tool calls so history stays well-formed
-            _all_tcs_for_msg = _pending_tool_calls + _pg_blocked + _sig_blocked
+            _all_tcs_for_msg = _pending_tool_calls + _pg_blocked + _sig_blocked + _target_blocked + _preview_arg_blocked
             messages.append({
                 "role": "assistant",
                 "content": text_so_far or None,
@@ -4958,7 +5264,7 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                 ],
             })
             # Add synthetic "blocked" results for write tools the guard prevented
-            for _pb_tc in (_pg_blocked + _sig_blocked):
+            for _pb_tc in (_pg_blocked + _sig_blocked + _target_blocked + _preview_arg_blocked):
                 messages.append({
                     "role": "tool",
                     "tool_call_id": _pb_tc["id"],
@@ -5435,6 +5741,8 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                 _is_no_tool_provider
                 and assembled
                 and not _write_tools_executed
+                and not _preview_generated_this_turn
+                and not _lean_mode
                 and intent_name not in ("chat", "create_html_dashboard")
                 and (_looks_like_fake_success or _user_asked_action)
             ):
@@ -5452,6 +5760,16 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                 # Log the AI response for debugging (truncate to 500 chars)
                 _log_resp = assembled[:500] + ('...' if len(assembled) > 500 else '')
                 logger.chat(f"📤 [{AI_PROVIDER}/{get_active_model()}]: {_log_resp}")
+                _pending_summary = _extract_pending_context_from_assistant(assembled)
+                if _pending_summary:
+                    session_pending_context[session_id] = {
+                        "summary": _pending_summary,
+                        "ts": time.time(),
+                    }
+                elif _write_tools_executed:
+                    # Once a write action is actually executed, pending confirmation
+                    # context is no longer relevant.
+                    session_pending_context.pop(session_id, None)
                 assistant_msg: dict = {
                     "role": "assistant",
                     "content": assembled,
@@ -9239,6 +9557,11 @@ def api_settings_get():
                      {"value": "es", "label": "Español"},
                      {"value": "fr", "label": "Français"},
                  ]},
+                {"key": "interaction_mode", "type": "select",
+                 "options": [
+                     {"value": "strict", "label": "Strict (Safe)"},
+                     {"value": "lean", "label": "Lean (Natural)"},
+                 ]},
             ],
         },
         {
@@ -9386,6 +9709,7 @@ def api_uninstall_cleanup():
         read_only_sessions.clear()
         session_last_intent.clear()
         session_last_preview.clear()
+        session_pending_context.clear()
         session_active_skill.clear()
         removed.append("runtime_memory_state")
     except Exception as e:

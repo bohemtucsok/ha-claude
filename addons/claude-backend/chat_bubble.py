@@ -824,7 +824,7 @@ def get_chat_bubble_js(
   }}
   // Detect HA companion app — it has "HomeAssistant/" in the UA and lacks normal browser cookies.
   function _isCompanionApp() {{
-    return /HomeAssistant\//i.test(navigator.userAgent);
+    return /HomeAssistant\\//i.test(navigator.userAgent);
   }}
   async function _ensureIngressSession() {{
     if (_ingressSessionOk) return true;
@@ -920,7 +920,9 @@ def get_chat_bubble_js(
     var codeBlocks = [];
     text = text.replace(/```(\\w*)\\n([\\s\\S]*?)```/g, function(m, lang, code) {{
       var escaped = code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      codeBlocks.push('<pre class="md-code-block"><code>' + escaped.trim() + '</code></pre>');
+      codeBlocks.push('<div style="position:relative;margin:6px 0;">'
+        + '<button type="button" class="amira-copy-btn" style="position:absolute;top:6px;right:6px;background:#334155;border:1px solid #475569;color:#e2e8f0;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:500;letter-spacing:0.3px;transition:background .15s;z-index:1;">' + (typeof T !== 'undefined' ? T.copy_btn : 'Copy') + '</button>'
+        + '<pre style="background:#1e293b;color:#e2e8f0;padding:36px 10px 10px 10px;border-radius:6px;font-size:12px;overflow:auto;max-height:400px;margin:0;white-space:pre;word-break:normal;"><code>' + escaped.trim() + '</code></pre></div>');
       return '%%CODE_' + (codeBlocks.length - 1) + '%%';
     }});
 
@@ -1681,8 +1683,8 @@ def get_chat_bubble_js(
     }}
     #ha-claude-bubble .msg.assistant pre.md-code-block {{
       background: var(--primary-text-color, #333); color: var(--card-background-color, #fff);
-      padding: 8px; border-radius: 6px; overflow-x: auto; font-size: 12px;
-      margin: 4px 0; white-space: pre-wrap; word-break: break-all;
+      padding: 30px 8px 8px 8px; border-radius: 6px; overflow-x: auto; font-size: 12px;
+      margin: 0; white-space: pre-wrap; word-break: break-all;
     }}
     #ha-claude-bubble .msg.assistant code.md-inline-code {{
       background: rgba(0,0,0,0.08); padding: 1px 4px; border-radius: 3px; font-size: 12px;
@@ -2602,24 +2604,48 @@ def get_chat_bubble_js(
       setTimeout(function() {{ btn.textContent = T.copy_btn || 'Copy'; }}, 1500);
     }}
     function fail() {{
-      // Last resort: execCommand (deprecated, unreliable in shadow DOM, but better than nothing)
-      var ta = document.createElement('textarea');
-      ta.value = txt;
-      ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;font-size:16px;';
-      document.body.appendChild(ta);
-      ta.focus(); ta.select();
-      if (ta.setSelectionRange) ta.setSelectionRange(0, ta.value.length);
+      // Use copy-event interception to bypass Firefox shadow DOM clipboard restriction.
+      // In Firefox, execCommand('copy') from a shadow DOM event context silently fails
+      // to write clipboard even when focus is in the main document.
+      // Intercepting the 'copy' event and calling e.clipboardData.setData() bypasses this.
+      var copied = false;
+      function onCopy(ev) {{
+        ev.preventDefault();
+        try {{ ev.clipboardData.setData('text/plain', txt); copied = true; }} catch(_) {{}}
+      }}
+      document.addEventListener('copy', onCopy, true);
+      var dummy = document.createElement('span');
+      dummy.setAttribute('tabindex', '-1');
+      dummy.style.cssText = 'position:fixed;left:-9999px;top:-9999px;font-size:1px;';
+      dummy.textContent = ' ';
+      document.body.appendChild(dummy);
       var ok2 = false;
-      try {{ ok2 = document.execCommand('copy'); }} catch(e) {{}}
-      document.body.removeChild(ta);
-      if (ok2) {{ ok(); }} else {{
+      try {{
+        dummy.focus();
+        var sel = window.getSelection();
+        var range = document.createRange();
+        range.selectNodeContents(dummy);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        ok2 = document.execCommand('copy');
+        sel.removeAllRanges();
+      }} catch(e) {{}}
+      document.body.removeChild(dummy);
+      document.removeEventListener('copy', onCopy, true);
+      if (copied) {{ ok(); }} else {{
         btn.textContent = 'Error';
         setTimeout(function() {{ btn.textContent = T.copy_btn || 'Copy'; }}, 1500);
       }}
     }}
 
-    // Prefer async Clipboard API — it's reliable within a user-gesture even when async.
-    // execCommand('copy') returns true in HA shadow DOM but often writes nothing.
+    // On non-secure contexts (HTTP) the Clipboard API may silently resolve without
+    // writing anything — skip it and use execCommand directly from the click handler.
+    if (!window.isSecureContext) {{
+      fail();
+      return;
+    }}
+
+    // Secure context (HTTPS): use async Clipboard API.
     var clipboards = [];
     try {{
       if (navigator && navigator.clipboard && navigator.clipboard.writeText) clipboards.push(navigator.clipboard);
@@ -2676,7 +2702,7 @@ def get_chat_bubble_js(
       const escaped = code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       const placeholder = '___CODEBLOCK_' + codeBlocks.length + '___';
       codeBlocks.push('<div style="position:relative;margin:6px 0;">'
-        + '<button class="amira-copy-btn" style="position:absolute;top:6px;right:6px;background:#334155;border:1px solid #475569;color:#e2e8f0;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:500;letter-spacing:0.3px;transition:background .15s;z-index:1;">' + T.copy_btn + '</button>'
+        + '<button type="button" class="amira-copy-btn" style="position:absolute;top:6px;right:6px;background:#334155;border:1px solid #475569;color:#e2e8f0;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:500;letter-spacing:0.3px;transition:background .15s;z-index:1;">' + T.copy_btn + '</button>'
         + '<pre style="background:#1e293b;color:#e2e8f0;padding:8px 10px;border-radius:6px;font-size:12px;overflow-x:auto;margin:0;white-space:pre-wrap;word-break:break-word;"><code>' + escaped + '</code></pre></div>');
       return placeholder;
     }});
@@ -2918,6 +2944,8 @@ def get_chat_bubble_js(
     // Save direct references — getElementById won't cross shadow DOM
     _cardPanelEl = panel;
     _cardMsgsEl  = msgs;
+    // Copy buttons are handled by the document-level capture listener (_findCopyBtn via composedPath)
+    // which works across HA's open shadow roots without needing a per-panel handler.
     _cardInputEl = inp;
     _cardProvSel   = cardProvSel;
     _cardModSel    = cardModSel;
