@@ -201,6 +201,7 @@ ROUTE_REGISTRATIONS = {
     'files': [
         (file_bp, '/api/files/list', 'api_files_list', ['GET']),
         (file_bp, '/api/files/read', 'api_files_read', ['GET']),
+        (file_bp, '/api/files/write', 'api_files_write', ['POST']),
     ],
     'skills': [
         # /api/skills/store MUST come before /api/skills/<name> to avoid routing collision

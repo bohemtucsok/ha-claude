@@ -920,9 +920,11 @@ def get_chat_bubble_js(
     var codeBlocks = [];
     text = text.replace(/```(\\w*)\\n([\\s\\S]*?)```/g, function(m, lang, code) {{
       var escaped = code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      codeBlocks.push('<div style="position:relative;margin:6px 0;">'
-        + '<button type="button" class="amira-copy-btn" style="position:absolute;top:6px;right:6px;background:#334155;border:1px solid #475569;color:#e2e8f0;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:500;letter-spacing:0.3px;transition:background .15s;z-index:1;">' + (typeof T !== 'undefined' ? T.copy_btn : 'Copy') + '</button>'
-        + '<pre style="background:#1e293b;color:#e2e8f0;padding:36px 10px 10px 10px;border-radius:6px;font-size:12px;overflow:auto;max-height:400px;margin:0;white-space:pre;word-break:normal;"><code>' + escaped.trim() + '</code></pre></div>');
+      codeBlocks.push('<div style="margin:6px 0;">'
+        + '<div style="position:sticky;top:0;z-index:5;background:#1e293b;border-radius:6px 6px 0 0;display:flex;justify-content:flex-end;padding:4px 6px;">'
+        + '<button type="button" class="amira-copy-btn" style="background:#334155;border:1px solid #475569;color:#e2e8f0;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:500;letter-spacing:0.3px;transition:background .15s;">' + (typeof T !== 'undefined' ? T.copy_btn : 'Copy') + '</button>'
+        + '</div>'
+        + '<pre style="background:#1e293b;color:#e2e8f0;padding:8px 10px 10px;border-radius:0 0 6px 6px;font-size:12px;overflow:auto;max-height:400px;margin:0;white-space:pre;word-break:normal;"><code>' + escaped.trim() + '</code></pre></div>');
       return '%%CODE_' + (codeBlocks.length - 1) + '%%';
     }});
 
@@ -1338,47 +1340,14 @@ def get_chat_bubble_js(
     if (ctx.type === 'card_editor') {{
       let p = '[CONTEXT: User is editing a Lovelace card in the HA card editor.';
       if (ctx.cardYaml) {{
-        // Pre-validate entities against hass.states
-        // hass.states is the AUTHORITATIVE source for the frontend — if an entity
-        // is NOT in hass.states, HA cards CANNOT use it (disabled/unavailable/wrong id).
-        let entityReport = '';
-        let hasNotFound = false;
-        try {{
-          const haEl = document.querySelector('home-assistant');
-          const hass = haEl && haEl.hass;
-          if (hass && hass.states) {{
-            const entityRe = /entity:\\s+([\\w]+\\.[\\w]+)/g;
-            let em;
-            const checks = [];
-            while ((em = entityRe.exec(ctx.cardYaml)) !== null) {{
-              const eid = em[1];
-              const st = hass.states[eid];
-              if (st) {{
-                checks.push(eid + ': VALID (state=' + st.state + ')');
-              }} else {{
-                checks.push(eid + ': NOT FOUND in hass.states — card will show error. Could be wrong id, disabled, or hidden. Verify ONCE via get_integration_entities.');
-                hasNotFound = true;
-              }}
-            }}
-            if (checks.length > 0) {{
-              entityReport = '\\nENTITY VALIDATION (hass.states — authoritative for cards):\\n' + checks.join('\\n') + '\\n';
-            }}
-          }}
-        }} catch(e) {{}}
-
         p += ' The current card YAML is:\\n```yaml\\n' + ctx.cardYaml + '\\n```\\n'
-           + entityReport
            + 'IMPORTANT RULES for card editing:\\n'
-           + '1. Entities marked VALID exist and work in cards — no need to re-verify.\\n'
-           + '2. For NOT FOUND entities: call get_integration_entities ONCE to check the integration. Call it only ONCE — do NOT repeat.\\n'
-           + '3. If get_integration_entities confirms the entity EXISTS with a valid state but hass.states does not have it: report that the entity exists in HA but is not available to cards (may be disabled or hidden). Suggest the user try enabling it in Settings > Entities or restart HA. Do NOT keep searching.\\n'
-           + '4. If get_integration_entities does NOT find the entity: look for a similar entity_id with matching device_class/unit and suggest the replacement.\\n'
-           + '5. When suggesting a modification, ALWAYS show the complete corrected YAML in a ```yaml code block with a brief explanation.\\n'
-           + '6. Do NOT suggest changes based on guesses about entity names. Only replace an entity if you found a valid alternative.\\n'
-           + '7. If all entities are VALID and the YAML has no structural issues, say so clearly and suggest only optional improvements.\\n'
-           + '8. The user will paste the YAML manually in the editor — do NOT use write_config_file or update_dashboard.\\n'
-           + '9. NEVER show [TOOL RESULT] blocks or raw JSON data to the user — only show the final human-readable answer.\\n'
-           + '10. After receiving tool results, produce your FINAL answer immediately. Do NOT call the same tool again.';
+           + '1. When suggesting a modification, ALWAYS show the complete corrected YAML in a ```yaml code block with a brief explanation.\\n'
+           + '2. Do NOT suggest changes based on guesses about entity names. Only replace an entity if you found a valid alternative via get_integration_entities.\\n'
+           + '3. If the user asks about entity problems, use get_integration_entities ONCE to check — do NOT repeat the same tool call.\\n'
+           + '4. The user will paste the YAML manually in the editor — do NOT use write_config_file or update_dashboard.\\n'
+           + '5. NEVER show [TOOL RESULT] blocks or raw JSON data to the user — only show the final human-readable answer.\\n'
+           + '6. After receiving tool results, produce your FINAL answer immediately. Do NOT call the same tool again.';
       }}
       p += ']';
       return p + ' ';
@@ -1526,6 +1495,8 @@ def get_chat_bubble_js(
   }}
   function resetCardSession() {{
     try {{ localStorage.removeItem(CARD_SESSION_KEY); }} catch(e) {{}}
+    _cardLastYamlHash = null;
+    _cardContextConfirmed = false;
   }}
   
   // ---- Fallback in-memory storage (for private browsing or disabled localStorage) ----
@@ -1810,8 +1781,17 @@ def get_chat_bubble_js(
     #ha-claude-bubble .chat-input-area {{
       display: flex; padding: 10px 12px;
       border-top: 1px solid var(--divider-color, #e0e0e0);
-      gap: 6px; align-items: flex-end; flex-shrink: 0;
+      gap: 6px; align-items: flex-end; flex-shrink: 0; position: relative;
     }}
+    #ha-claude-bubble #haChatSlashMenu {{
+      display:none; position:absolute; bottom:calc(100% + 2px); left:12px; right:12px;
+      background:var(--card-background-color,#fff); border:1px solid var(--divider-color,#ddd);
+      border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,0.15); z-index:9999; overflow:hidden;
+    }}
+    #ha-claude-bubble .ha-slash-item {{ padding:7px 10px; cursor:pointer; display:flex; gap:8px; align-items:center; }}
+    #ha-claude-bubble .ha-slash-item:hover, #ha-claude-bubble .ha-slash-item.active {{ background:#f0f0ff; }}
+    #ha-claude-bubble .ha-slash-cmd {{ font-weight:600; color:#667eea; font-size:12px; white-space:nowrap; }}
+    #ha-claude-bubble .ha-slash-desc {{ font-size:11px; color:#888; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
     #ha-claude-bubble .chat-input-area textarea {{
       flex: 1; border: 1px solid var(--divider-color, #ddd); border-radius: 8px;
       padding: 8px 12px; font-size: 13px; font-family: inherit; resize: none;
@@ -2014,6 +1994,55 @@ def get_chat_bubble_js(
         min-width: 60px; font-size: 10px; padding: 2px 3px;
       }}
     }}
+    /* ---- Amira dark mode (Amira UI toggle, independent of HA theme) ---- */
+    #ha-claude-bubble.amira-dark {{
+      --card-background-color: #1e2028;
+      --secondary-background-color: #272a35;
+      --primary-text-color: #e0e4ef;
+      --secondary-text-color: #9ea5b8;
+      --divider-color: #383c4a;
+    }}
+    #ha-claude-bubble.amira-dark .context-bar--warn {{
+      background: #3a2e10; color: #f5c64e; border-bottom-color: #7a5e10;
+    }}
+    #ha-claude-bubble.amira-dark .diff-side {{
+      background: #1a1d25; border-color: #383c4a;
+    }}
+    #ha-claude-bubble.amira-dark .diff-table th {{
+      background: #22252f; border-bottom-color: #383c4a;
+    }}
+    #ha-claude-bubble.amira-dark .diff-table td {{
+      border-bottom-color: #2a2d36;
+    }}
+    #ha-claude-bubble.amira-dark .diff-th-old {{ color: #f28b8b; }}
+    #ha-claude-bubble.amira-dark .diff-th-new {{ color: #7ec897; border-left-color: #383c4a; }}
+    #ha-claude-bubble.amira-dark .diff-eq {{ color: #9ea5b8; background: #1e2028; }}
+    #ha-claude-bubble.amira-dark .diff-del {{ background: #3a1a1a; color: #f28b8b; }}
+    #ha-claude-bubble.amira-dark .diff-add {{ background: #1a3a22; color: #7ec897; }}
+    #ha-claude-bubble.amira-dark .diff-empty {{ background: #1c1f27; }}
+    #ha-claude-bubble.amira-dark .diff-table td + td {{ border-left-color: #383c4a; }}
+    #ha-claude-bubble.amira-dark .diff-collapse {{
+      color: #9ea5b8; background: #22252f; border-color: #383c4a;
+    }}
+    #ha-claude-bubble.amira-dark .ha-slash-item {{ background: #272a35; border-color: #383c4a; }}
+    #ha-claude-bubble.amira-dark .ha-slash-item:hover,
+    #ha-claude-bubble.amira-dark .ha-slash-item.active {{ background: #2e3245; }}
+    #ha-claude-bubble.amira-dark .ha-slash-cmd {{ color: #9b8ef0; }}
+    #ha-claude-bubble.amira-dark .ha-slash-desc {{ color: #9ea5b8; }}
+    #ha-claude-bubble.amira-dark .session-conn-bar {{
+      background: #1a2e20; border-bottom-color: #2a4a30; color: #7ec897;
+    }}
+    #ha-claude-bubble.amira-dark .session-conn-bar .sc-dot {{ background: #4caf50; }}
+    #ha-claude-bubble.amira-dark .session-conn-bar .sc-disc {{
+      color: #7ec897; border-color: #4caf50;
+    }}
+    #ha-claude-bubble.amira-dark .session-conn-bar .sc-disc:hover {{ background: #1e3a26; }}
+    #ha-claude-bubble.amira-dark .confirm-yes {{ background: #1a3a1e; border-color: #4caf50; color: #7ec897; }}
+    #ha-claude-bubble.amira-dark .confirm-no {{ background: #3a1a1a; border-color: #ef5350; color: #f28b8b; }}
+    #ha-claude-bubble.amira-dark .msg.assistant details code {{ background: rgba(255,255,255,0.08); }}
+    #ha-claude-bubble.amira-dark .history-item {{
+      background: var(--secondary-background-color, #272a35); border-color: var(--divider-color, #383c4a);
+    }}
   `;
   document.head.appendChild(style);
 
@@ -2052,6 +2081,7 @@ def get_chat_bubble_js(
       <div class="quick-actions" id="haQuickActions" style="display:none;"></div>
       <div class="chat-messages" id="haChatMessages"></div>
       <div class="chat-input-area">
+        <div id="haChatSlashMenu"></div>
         <textarea id="haChatInput" rows="1" placeholder="${{T.placeholder}}"></textarea>
         <button class="input-btn voice-btn" id="haChatVoice" title="Voice">&#127908;</button>
         <button class="input-btn send-btn" id="haChatSend" title="${{T.send}}">&#9654;</button>
@@ -2071,6 +2101,17 @@ def get_chat_bubble_js(
     <button class="bubble-btn" id="haChatBubbleBtn" title="Amira"{' style="display:none"' if not show_bubble else ''}>&#129302;</button>
   `;
   document.body.appendChild(root);
+
+  // ---- Apply Amira dark mode from backend setting ----
+  (async function _applyAmiraDarkMode() {{
+    try {{
+      const r = await fetch(API_BASE + '/api/settings', {{credentials:'same-origin'}});
+      const d = await r.json();
+      if (d && d.success && d.settings && d.settings.dark_mode === true) {{
+        root.classList.add('amira-dark');
+      }}
+    }} catch(e) {{}}
+  }})();
 
   // ---- Elements ----
   const panel = document.getElementById('haChatPanel');
@@ -2572,6 +2613,10 @@ def get_chat_bubble_js(
   let _cardProvSel   = null;  // card panel provider select mirror
   let _cardModSel    = null;  // card panel model select mirror
   let _cardAgentSel  = null;  // card panel agent select mirror
+  // YAML context deduplication: track which YAML was last sent and whether the AI
+  // has confirmed receiving it. On follow-up turns with unchanged YAML, skip re-injection.
+  let _cardLastYamlHash = null;  // hash of last YAML included in a sent message
+  let _cardContextConfirmed = false;  // true after AI responded (context confirmed received)
 
   function _cardBtnExists() {{
     return !!(_cardBtnParent && _cardBtnParent.querySelector('#' + CARD_BTN_ID));
@@ -2805,8 +2850,15 @@ def get_chat_bubble_js(
     const surface = _getCardSurface();
     if (!surface) return;
 
-    // Keep original surface width — only adjust overflow so the panel fits inside
-    surface.style.cssText += ';display:flex !important;flex-direction:column !important;max-height:90vh !important;overflow:hidden !important;width:' + surface.offsetWidth + 'px !important;max-width:' + surface.offsetWidth + 'px !important;';
+    // Pin surface size: grow height by exactly the panel height (300px + header/input ≈ 60px),
+    // capped at 90vh. This avoids the dialog expanding to near-full-screen (max-height:90vh
+    // was overriding HA's native dialog sizing and making it much taller than needed).
+    const _surfW = surface.offsetWidth || 0;
+    const _surfH = surface.offsetHeight || 0;
+    const _panelH = 360; // Amira panel: header(36) + qaRow(~30) + msgs(~250) + input(44)
+    const _maxVh = Math.floor(window.innerHeight * 0.9);
+    const _targetH = _surfH > 0 ? Math.min(_surfH + _panelH, _maxVh) : _maxVh;
+    surface.style.cssText += ';display:flex !important;flex-direction:column !important;height:' + _targetH + 'px !important;max-height:' + _targetH + 'px !important;overflow:hidden !important;width:' + _surfW + 'px !important;max-width:' + _surfW + 'px !important;';
 
     const panel = document.createElement('div');
     panel.id = CARD_PANEL_ID;
@@ -2909,18 +2961,56 @@ def get_chat_bubble_js(
 
     // Input row
     const inputRow = document.createElement('div');
-    inputRow.style.cssText = 'display:flex;gap:6px;padding:8px;flex-shrink:0;border-top:1px solid var(--divider-color,#e0e0e0);';
+    inputRow.style.cssText = 'display:flex;gap:6px;padding:8px;flex-shrink:0;border-top:1px solid var(--divider-color,#e0e0e0);position:relative;';
+    // Skill slash menu for card panel
+    const _csm = document.createElement('div');
+    _csm.style.cssText = 'display:none;position:absolute;bottom:calc(100% + 2px);left:0;right:0;background:var(--card-background-color,#fff);border:1px solid var(--divider-color,#ddd);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.15);z-index:9999;overflow:hidden;';
+    let _csmSkills = [], _csmIdx = -1;
+    fetch(API_BASE + '/api/skills').then(r => r.json()).then(d => {{ _csmSkills = (d.skills || []).filter(s => s.installed !== false); }}).catch(() => {{}});
+    function _csmDesc(s) {{ const d = s.description; return (typeof d === 'object' ? d[UI_LANG] || d['en'] || Object.values(d)[0] : d) || ''; }}
+    function _csmShow(filter) {{
+      const m = _csmSkills.filter(s => s.name.startsWith(filter.toLowerCase()));
+      if (!m.length) {{ _csm.style.display='none'; _csmIdx=-1; return; }}
+      _csmIdx = -1;
+      _csm.innerHTML = m.map(s =>
+        `<div data-cmd="/${{s.name}}" style="padding:7px 10px;cursor:pointer;display:flex;gap:8px;align-items:center;">` +
+        `<span style="font-weight:600;color:#667eea;font-size:12px;white-space:nowrap">/${{s.name}}</span>` +
+        `<span style="font-size:11px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${{_csmDesc(s)}}</span></div>`
+      ).join('');
+      _csm.querySelectorAll('[data-cmd]').forEach(el => {{
+        el.addEventListener('mouseover', () => el.style.background='#f0f0ff');
+        el.addEventListener('mouseout', () => el.style.background='');
+        el.addEventListener('mousedown', e => {{ e.preventDefault(); _csmInsert(el.dataset.cmd); }});
+      }});
+      _csm.style.display = 'block';
+    }}
+    function _csmHide() {{ _csm.style.display='none'; _csmIdx=-1; }}
+    function _csmInsert(cmd) {{ inp.value = cmd + ' '; inp.focus(); _csmHide(); inp.dispatchEvent(new Event('input')); }}
     const inp = document.createElement('textarea');
     inp.id = CARD_PANEL_ID + '-input';
     inp.placeholder = T.placeholder;
     inp.rows = 1;
     inp.style.cssText = 'flex:1;border:1px solid var(--divider-color,#ddd);border-radius:8px;padding:6px 10px;font-size:13px;resize:none;outline:none;background:var(--secondary-background-color,#f9f9f9);color:var(--primary-text-color,#212121);font-family:inherit;';
-    inp.addEventListener('input', () => {{ inp.style.height='auto'; inp.style.height=Math.min(inp.scrollHeight,80)+'px'; }});
-    inp.addEventListener('keydown', e => {{ if(e.key==='Enter'&&!e.shiftKey){{ e.preventDefault(); cardPanelSend(); }} }});
+    inp.addEventListener('input', () => {{
+      inp.style.height='auto'; inp.style.height=Math.min(inp.scrollHeight,80)+'px';
+      const v = inp.value;
+      if (v.startsWith('/') && !v.includes(' ')) _csmShow(v.slice(1)); else _csmHide();
+    }});
+    inp.addEventListener('keydown', e => {{
+      if (_csm.style.display !== 'none') {{
+        const items = _csm.querySelectorAll('[data-cmd]');
+        if (e.key === 'ArrowDown') {{ e.preventDefault(); _csmIdx = Math.min(_csmIdx+1, items.length-1); items.forEach((el,i) => el.style.background = i===_csmIdx?'#f0f0ff':''); return; }}
+        if (e.key === 'ArrowUp') {{ e.preventDefault(); _csmIdx = Math.max(_csmIdx-1,-1); items.forEach((el,i) => el.style.background = i===_csmIdx?'#f0f0ff':''); return; }}
+        if ((e.key==='Enter'||e.key==='Tab') && _csmIdx>=0) {{ e.preventDefault(); _csmInsert(items[_csmIdx].dataset.cmd); return; }}
+        if (e.key==='Escape') {{ _csmHide(); return; }}
+      }}
+      if(e.key==='Enter'&&!e.shiftKey){{ e.preventDefault(); cardPanelSend(); }}
+    }});
     const sendB = document.createElement('button');
     sendB.textContent = '▶';
     sendB.style.cssText = 'background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;border:none;border-radius:8px;padding:0 14px;cursor:pointer;font-size:16px;flex-shrink:0;';
     sendB.onclick = () => cardPanelSend();
+    inputRow.appendChild(_csm);
     inputRow.appendChild(inp);
     inputRow.appendChild(sendB);
 
@@ -2959,6 +3049,7 @@ def get_chat_bubble_js(
     if (surface) {{
       surface.style.display = '';
       surface.style.flexDirection = '';
+      surface.style.height = '';
       surface.style.maxHeight = '';
       surface.style.overflow = '';
       surface.style.width = '';
@@ -2987,6 +3078,14 @@ def get_chat_bubble_js(
     return d;
   }}
 
+  // Simple non-cryptographic hash for YAML deduplication.
+  function _yamlHash(s) {{
+    if (!s) return 0;
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+    return h;
+  }}
+
   async function cardPanelSend(presetText) {{
     const text = (presetText !== undefined && presetText !== null)
       ? String(presetText).replace(/\\r\\n?/g, '\\n')
@@ -2997,8 +3096,22 @@ def get_chat_bubble_js(
     const thinkEl = _cardPanelAddMsg('assistant', T.thinking + '…');
     try {{
       const ctx = detectContext();
-      const prefix = buildContextPrefix(ctx);
-      const fullMsg = prefix ? prefix + '\\n\\n' + text : text;
+      // YAML deduplication: only include full [CONTEXT: ...yaml...] on first message or when
+      // YAML changed. Follow-up messages with same YAML just send the plain question —
+      // the AI already has the YAML from the conversation history (native claude.ai context
+      // for claude_web, or Amira's stored history for API providers).
+      const _yaml = ctx && ctx.cardYaml;
+      const _yamlH = _yamlHash(_yaml || '');
+      const _yamlChanged = _yamlH !== _cardLastYamlHash;
+      const _needsContext = !_cardContextConfirmed || _yamlChanged;
+      let fullMsg;
+      if (_needsContext) {{
+        const prefix = buildContextPrefix();
+        fullMsg = prefix ? prefix + '\\n\\n' + text : text;
+        if (_yaml) _cardLastYamlHash = _yamlH;
+      }} else {{
+        fullMsg = text;
+      }}
       const _session = getCardSessionId();
       const response = await fetch(API_BASE + '/api/chat/stream', {{
         method: 'POST',
@@ -3011,6 +3124,7 @@ def get_chat_bubble_js(
       let buffer = '', assistantText = '';
       let firstToken = true;
       let gotErrorEvent = false;
+      let _cardStatusSteps = [];
 
       while (true) {{
         const {{ done, value }} = await reader.read();
@@ -3022,8 +3136,9 @@ def get_chat_bubble_js(
               if (!line.startsWith('data: ')) continue;
               try {{
                 const evt = JSON.parse(line.slice(6));
-                if (evt.type === 'token') {{ assistantText += evt.content || ''; }}
+                if (evt.type === 'token') {{ _cardContextConfirmed = true; assistantText += evt.content || ''; }}
                 else if (evt.type === 'done') {{
+                  _cardContextConfirmed = true;
                   if (evt.full_text) {{ assistantText = evt.full_text; }}
                   if (evt.usage) {{ _flushUsage = evt.usage; }}
                 }}
@@ -3061,7 +3176,7 @@ def get_chat_bubble_js(
           try {{
             const evt = JSON.parse(line.slice(6));
             if (evt.type === 'token') {{
-              if (firstToken) {{ firstToken = false; }}
+              if (firstToken) {{ firstToken = false; _cardContextConfirmed = true; }}
               assistantText += evt.content || '';
               if (thinkEl) thinkEl.innerHTML = _renderInlineMd(assistantText);
               if (_cardMsgsEl) _cardMsgsEl.scrollTop = _cardMsgsEl.scrollHeight;
@@ -3069,6 +3184,9 @@ def get_chat_bubble_js(
               assistantText = '';
               if (thinkEl) thinkEl.innerHTML = T.thinking + '…';
             }} else if (evt.type === 'done') {{
+              // For no-tool providers (claude_web, etc.) tokens arrive only here as full_text.
+              // Mark context confirmed so subsequent messages skip re-injecting the YAML.
+              if (firstToken) {{ firstToken = false; _cardContextConfirmed = true; }}
               if (evt.full_text) {{
                 assistantText = evt.full_text;
                 if (thinkEl) thinkEl.innerHTML = _renderInlineMd(assistantText);
@@ -3094,10 +3212,28 @@ def get_chat_bubble_js(
               if (thinkEl) thinkEl.textContent = evt.message || T.error_connection;
             }} else if (evt.type === 'status') {{
               const msg = evt.message || evt.content || '';
-              if (firstToken && thinkEl) thinkEl.textContent = msg + '…';
+              if (firstToken && thinkEl && msg) {{
+                _cardStatusSteps.push(msg);
+                const latest = _cardStatusSteps.slice(-4);
+                const html = latest.map((s, i) =>
+                  i === latest.length - 1
+                    ? '<span style="font-weight:500">⏳ ' + s + '</span>'
+                    : '<span style="opacity:0.55;font-size:11px">• ' + s + '</span>'
+                ).join('<br>');
+                thinkEl.innerHTML = html;
+              }}
             }} else if (evt.type === 'tool') {{
               const desc = evt.description || evt.name || 'tool';
-              if (firstToken && thinkEl) thinkEl.textContent = '\U0001f527 ' + desc + '…';
+              if (firstToken && thinkEl) {{
+                _cardStatusSteps.push('\U0001f527 ' + desc);
+                const latest = _cardStatusSteps.slice(-4);
+                const html = latest.map((s, i) =>
+                  i === latest.length - 1
+                    ? '<span style="font-weight:500">' + s + '</span>'
+                    : '<span style="opacity:0.55;font-size:11px">• ' + s + '</span>'
+                ).join('<br>');
+                thinkEl.innerHTML = html;
+              }}
             }}
           }} catch (parseErr) {{}}
         }}
@@ -4752,14 +4888,24 @@ def get_chat_bubble_js(
     }}
     const autoModSel = document.createElement('select');
     autoModSel.style.cssText = 'font-size:11px;padding:2px 4px;border-radius:4px;border:none;background:rgba(255,255,255,0.2);color:#fff;cursor:pointer;max-width:200px;min-width:0;flex-shrink:1;';
-    if (_mainModSel) {{
+    function _syncAutoModSel() {{
+      if (!_mainModSel) return;
+      autoModSel.innerHTML = '';
       Array.from(_mainModSel.options).forEach(o => {{
         const opt = document.createElement('option');
         opt.value = o.value; opt.textContent = o.textContent;
         if (o.selected) opt.selected = true;
         autoModSel.appendChild(opt);
       }});
+      autoModSel.value = _mainModSel.value;
+    }}
+    if (_mainModSel) {{
+      _syncAutoModSel();
       autoModSel.addEventListener('change', () => {{ _mainModSel.value = autoModSel.value; _mainModSel.dispatchEvent(new Event('change')); }});
+      // Keep model list in sync when provider changes (main select updates asynchronously)
+      const _modObserver = new MutationObserver(() => {{ _syncAutoModSel(); }});
+      _modObserver.observe(_mainModSel, {{ childList: true, subtree: false }});
+      sidebar.__amiraModObserver = _modObserver;
     }}
     // New chat + close buttons
     const hdrActions = document.createElement('div');
@@ -4848,6 +4994,35 @@ def get_chat_bubble_js(
       document.body.appendChild(sidebar);
     }}
 
+    // Inject styles into the shadow root that contains our sidebar.
+    // document.head styles do not pierce shadow DOM, so code blocks and diff
+    // tables would be unstyled without this.
+    try {{
+      const shadowRoot = sidebar.getRootNode();
+      if (shadowRoot && shadowRoot !== document && !shadowRoot.getElementById('amira-auto-shadow-style')) {{
+        const st = document.createElement('style');
+        st.id = 'amira-auto-shadow-style';
+        st.textContent = [
+          '#amira-auto-sidebar .diff-side{{overflow-x:auto;margin:10px 0;border-radius:8px;border:1px solid #e1e4e8;background:#fff}}',
+          '#amira-auto-sidebar .diff-table{{width:100%;border-collapse:collapse;font-family:"SF Mono","Menlo","Monaco","Courier New",monospace;font-size:11px;table-layout:fixed}}',
+          '#amira-auto-sidebar .diff-table th{{padding:6px 10px;background:#f6f8fa;border-bottom:1px solid #e1e4e8;text-align:left;font-size:11px;font-weight:600;width:50%}}',
+          '#amira-auto-sidebar .diff-th-old{{color:#cb2431}}',
+          '#amira-auto-sidebar .diff-th-new{{color:#22863a;border-left:1px solid #e1e4e8}}',
+          '#amira-auto-sidebar .diff-table td{{padding:2px 8px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;vertical-align:top;font-size:11px;line-height:1.5;border-bottom:1px solid #f0f2f5}}',
+          '#amira-auto-sidebar .diff-eq{{color:#586069;background:#fbfdff}}',
+          '#amira-auto-sidebar .diff-del{{background:#ffeef0;color:#cb2431}}',
+          '#amira-auto-sidebar .diff-add{{background:#e6ffec;color:#22863a}}',
+          '#amira-auto-sidebar .diff-empty{{background:#fafbfc}}',
+          '#amira-auto-sidebar .diff-table td+td{{border-left:1px solid #e1e4e8}}',
+          '#amira-auto-sidebar .diff-collapse{{text-align:center;color:#6a737d;background:#f1f8ff;font-style:italic;font-size:11px;padding:2px 10px}}',
+          '#amira-auto-sidebar .ha-entity-link{{display:inline-block;margin:10px 0 4px;padding:6px 16px;background:#4361ee;color:#fff!important;border-radius:8px;text-decoration:none;font-size:13px;font-weight:500;cursor:pointer}}',
+          '#amira-auto-sidebar .amira-copy-btn{{position:absolute;top:6px;right:6px;background:#334155;border:1px solid #475569;color:#e2e8f0;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:500;z-index:1}}',
+          '#amira-auto-sidebar code.md-inline-code{{background:rgba(0,0,0,0.08);padding:1px 4px;border-radius:3px;font-size:12px}}',
+        ].join('');
+        shadowRoot.appendChild(st);
+      }}
+    }} catch(e) {{}}
+
     // Save refs
     _autoSidebarEl = sidebar;
     _autoMsgsEl    = msgs;
@@ -4868,6 +5043,9 @@ def get_chat_bubble_js(
   }}
 
   function closeAutomationSidebar() {{
+    if (_autoSidebarEl && _autoSidebarEl.__amiraModObserver) {{
+      _autoSidebarEl.__amiraModObserver.disconnect();
+    }}
     const el = document.getElementById(AMIRA_SIDEBAR_ID);
     if (el) el.remove();
     if (_autoSidebarEl) _autoSidebarEl.remove();
@@ -4898,6 +5076,48 @@ def get_chat_bubble_js(
 
   // ---- Auto-resize textarea ----
   input.addEventListener('input', () => {{ input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 80) + 'px'; }});
+
+  // ---- Skill slash-command autocomplete (bubble main) ----
+  (function() {{
+    const menu = document.getElementById('haChatSlashMenu');
+    let skills = [], activeIdx = -1;
+    fetch(API_BASE + '/api/skills').then(r => r.json()).then(d => {{ skills = (d.skills || []).filter(s => s.installed !== false); }}).catch(() => {{}});
+    function desc(s) {{ const d = s.description; return (typeof d === 'object' ? d[UI_LANG] || d['en'] || Object.values(d)[0] : d) || ''; }}
+    function show(filter) {{
+      const m = skills.filter(s => s.name.startsWith(filter.toLowerCase()));
+      if (!m.length) {{ hide(); return; }}
+      activeIdx = -1;
+      menu.innerHTML = m.map(s =>
+        `<div class="ha-slash-item" data-cmd="/${{s.name}}">` +
+        `<span class="ha-slash-cmd">/${{s.name}}</span>` +
+        `<span class="ha-slash-desc">${{desc(s)}}</span></div>`
+      ).join('');
+      menu.querySelectorAll('.ha-slash-item').forEach(el => {{
+        el.addEventListener('mousedown', e => {{ e.preventDefault(); insert(el.dataset.cmd); }});
+      }});
+      menu.style.display = 'block';
+    }}
+    function hide() {{ menu.style.display = 'none'; activeIdx = -1; }}
+    function insert(cmd) {{ input.value = cmd + ' '; input.focus(); hide(); input.dispatchEvent(new Event('input')); }}
+    function setActive(idx) {{
+      const items = menu.querySelectorAll('.ha-slash-item');
+      items.forEach((el, i) => el.classList.toggle('active', i === idx));
+      activeIdx = idx;
+    }}
+    input.addEventListener('input', function() {{
+      const v = this.value;
+      if (v.startsWith('/') && !v.includes(' ')) show(v.slice(1)); else hide();
+    }});
+    input.addEventListener('keydown', function(e) {{
+      if (menu.style.display === 'none') return;
+      const items = menu.querySelectorAll('.ha-slash-item');
+      if (e.key === 'ArrowDown') {{ e.preventDefault(); setActive(Math.min(activeIdx+1, items.length-1)); }}
+      else if (e.key === 'ArrowUp') {{ e.preventDefault(); setActive(Math.max(activeIdx-1, -1)); }}
+      else if ((e.key === 'Enter' || e.key === 'Tab') && activeIdx >= 0) {{ e.preventDefault(); insert(items[activeIdx].dataset.cmd); }}
+      else if (e.key === 'Escape') hide();
+    }});
+    document.addEventListener('click', e => {{ if (!menu.contains(e.target) && e.target !== input) hide(); }});
+  }})();
 
   // ---- Voice Input (MediaRecorder + server-side transcription) ----
   let isRecording = false;
@@ -5056,6 +5276,8 @@ def get_chat_bubble_js(
 
   // ---- Send / Abort ----
   input.addEventListener('keydown', (e) => {{
+    const slashMenu = document.getElementById('haChatSlashMenu');
+    if (slashMenu && slashMenu.style.display !== 'none') return;
     if (e.key === 'Enter' && !e.shiftKey) {{ e.preventDefault(); sendMessage(); }}
   }});
 

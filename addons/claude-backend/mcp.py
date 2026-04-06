@@ -431,39 +431,187 @@ class MCPServer:
             logger.error(f"MCP {self.name}: Tool discovery failed: {e}")
             return False
     
+    def _http_headers(self, session_id: str = "") -> Dict:
+        """Build HTTP headers for MCP requests, injecting OAuth token if available."""
+        hdrs = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            **self.config.get("headers", {}),
+        }
+        # Inject OAuth Bearer token only when no static Authorization header is set
+        if "Authorization" not in hdrs and "authorization" not in hdrs:
+            try:
+                import mcp_oauth
+                oauth_hdrs = mcp_oauth.get_oauth_headers(self.name)
+                hdrs.update(oauth_hdrs)
+            except Exception:
+                pass
+        if session_id:
+            hdrs["Mcp-Session-Id"] = session_id
+        return hdrs
+
+    @staticmethod
+    def _parse_sse_jsonrpc(text: str) -> Optional[Dict]:
+        """Extract the first JSON-RPC result from an SSE response body."""
+        for line in text.splitlines():
+            if line.startswith("data:"):
+                payload = line[5:].strip()
+                if payload and payload != "[DONE]":
+                    try:
+                        return json.loads(payload)
+                    except Exception:
+                        pass
+        return None
+
     def _discover_tools_http(self) -> bool:
-        """Discover available tools from HTTP server (standard MCP JSON-RPC)."""
+        """Discover available tools via MCP HTTP transport.
+
+        Tries in order:
+          1. Streamable HTTP (POST, MCP 2025-03-26)
+          2. HTTP+SSE (GET /sse → endpoint event → POST, MCP 2024-11-05)
+        """
+        url = self.config.get("url").rstrip("/")
+
+        # ── 1. Try Streamable HTTP (POST to base URL) ────────────────────────
         try:
-            url = self.config.get("url").rstrip("/")
-            headers = {"Content-Type": "application/json", **self.config.get("headers", {})}
+            init_payload = {
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "amira", "version": "1.0"},
+                },
+            }
+            init_resp = requests.post(url, json=init_payload, headers=self._http_headers(), timeout=8)
+            session_id = init_resp.headers.get("Mcp-Session-Id", "")
+            logger.info(f"MCP {self.name}: Streamable init → HTTP {init_resp.status_code}, session={session_id!r}")
 
-            # MCP standard: initialize first
-            init_payload = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
-                            "params": {"protocolVersion": "2024-11-05"}}
-            requests.post(url, json=init_payload, headers=headers, timeout=5)
-
-            # Then list tools via JSON-RPC POST
-            tools_payload = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
-            resp = requests.post(url, json=tools_payload, headers=headers, timeout=5)
-
-            if resp.status_code == 200:
-                data = resp.json()
-                tools_list = data.get("result", {}).get("tools", [])
-
-                for tool in tools_list:
-                    self.tools[tool["name"]] = {
-                        "description": tool.get("description", ""),
-                        "inputSchema": tool.get("inputSchema", {})
-                    }
-
-                logger.info(f"MCP {self.name}: Discovered {len(self.tools)} tools via HTTP")
-                return True
-            else:
-                logger.warning(f"MCP {self.name}: HTTP tools/list returned {resp.status_code}")
-                return False
+            if init_resp.status_code == 200:
+                requests.post(url, json={"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+                              headers=self._http_headers(session_id), timeout=5)
+                tools_resp = requests.post(url, json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+                                           headers=self._http_headers(session_id), timeout=10)
+                if tools_resp.status_code == 200:
+                    ct = tools_resp.headers.get("Content-Type", "")
+                    data = self._parse_sse_jsonrpc(tools_resp.text) if "text/event-stream" in ct else tools_resp.json()
+                    if data:
+                        for tool in data.get("result", {}).get("tools", []):
+                            self.tools[tool["name"]] = {"description": tool.get("description", ""), "inputSchema": tool.get("inputSchema", {})}
+                        if session_id:
+                            self.config["_session_id"] = session_id
+                        logger.info(f"MCP {self.name}: Discovered {len(self.tools)} tools via Streamable HTTP")
+                        return True
         except Exception as e:
-            logger.error(f"MCP {self.name}: HTTP tool discovery failed: {e}")
-            return False
+            logger.debug(f"MCP {self.name}: Streamable HTTP failed: {e}")
+
+        # ── 2. Try HTTP+SSE transport ─────────────────────────────────────────
+        # Single reader thread handles the entire SSE stream:
+        #   - first data event → endpoint URL (sent to endpoint_q)
+        #   - subsequent data events → JSON-RPC responses (sent to response_q)
+        import threading as _threading
+        import queue as _q
+        from urllib.parse import urlparse as _urlparse
+        parsed = _urlparse(url)
+        base = f"{parsed.scheme}://{parsed.netloc}"
+
+        for sse_path in [url, url + "/sse", base + "/sse"]:
+            try:
+                sse_hdrs = {**self._http_headers(), "Accept": "text/event-stream"}
+                sse_conn = requests.get(sse_path, headers=sse_hdrs, timeout=10, stream=True)
+                if "text/event-stream" not in sse_conn.headers.get("Content-Type", ""):
+                    sse_conn.close()
+                    continue
+
+                endpoint_q: _q.Queue = _q.Queue()
+                response_q: _q.Queue = _q.Queue()
+
+                def _sse_reader(conn, eq, rq):
+                    endpoint_found = False
+                    try:
+                        for raw in conn.iter_lines(decode_unicode=True):
+                            line = (raw or "").strip()
+                            if not line.startswith("data:"):
+                                continue
+                            val = line[5:].strip()
+                            if not val or val == "[DONE]":
+                                continue
+                            if not endpoint_found:
+                                # First data event is always the endpoint URL
+                                eq.put(val)
+                                endpoint_found = True
+                            else:
+                                try:
+                                    rq.put(json.loads(val))
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+
+                reader = _threading.Thread(target=_sse_reader, args=(sse_conn, endpoint_q, response_q), daemon=True)
+                reader.start()
+
+                # Wait for endpoint URL from reader thread
+                try:
+                    endpoint_val = endpoint_q.get(timeout=8)
+                except _q.Empty:
+                    sse_conn.close()
+                    continue
+
+                if endpoint_val.startswith("http"):
+                    messages_url = endpoint_val
+                elif endpoint_val.startswith("/"):
+                    messages_url = base + endpoint_val
+                else:
+                    sse_conn.close()
+                    continue
+
+                logger.info(f"MCP {self.name}: SSE transport, messages endpoint: {messages_url}")
+                self.config["_messages_url"] = messages_url
+                self.config["_transport_mode"] = "sse"
+
+                def _post(payload, timeout=10):
+                    return requests.post(messages_url, json=payload, headers=self._http_headers(), timeout=timeout)
+
+                def _wait(req_id, timeout=10):
+                    import time as _t
+                    deadline = _t.time() + timeout
+                    while _t.time() < deadline:
+                        try:
+                            msg = response_q.get(timeout=0.3)
+                            if isinstance(msg, dict) and msg.get("id") == req_id:
+                                return msg
+                            response_q.put(msg)
+                        except _q.Empty:
+                            pass
+                    return None
+
+                _post({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                       "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                                  "clientInfo": {"name": "amira", "version": "1.0"}}})
+                _wait(1, timeout=6)
+                _post({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}})
+                _post({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+                data = _wait(2, timeout=10)
+
+                if data:
+                    for tool in data.get("result", {}).get("tools", []):
+                        self.tools[tool["name"]] = {
+                            "description": tool.get("description", ""),
+                            "inputSchema": tool.get("inputSchema", {}),
+                        }
+                    logger.info(f"MCP {self.name}: Discovered {len(self.tools)} tools via HTTP+SSE")
+                    self.config["_sse_conn"] = sse_conn
+                    self.config["_sse_queue"] = response_q
+                    return True
+
+                logger.warning(f"MCP {self.name}: SSE tools/list timeout (no response in 10s)")
+                sse_conn.close()
+
+            except Exception as e:
+                logger.debug(f"MCP {self.name}: SSE attempt {sse_path} failed: {e}")
+
+        logger.warning(f"MCP {self.name}: All HTTP transport attempts failed")
+        return False
     
     def _send_notification_stdio(self, notification: Dict) -> None:
         """Send a fire-and-forget notification via stdio (no response expected)."""
@@ -534,22 +682,23 @@ class MCPServer:
                     return json.dumps({"error": "Tool call failed"})
             
             elif self.transport_type == self.TRANSPORT_HTTP:
-                # Standard MCP HTTP: JSON-RPC POST to server root
-                url = self.config.get("url").rstrip("/")
-                headers = {"Content-Type": "application/json", **self.config.get("headers", {})}
-                payload = {
-                    "jsonrpc": "2.0",
-                    "id": 3,
-                    "method": "tools/call",
-                    "params": {"name": tool_name, "arguments": arguments}
-                }
-                resp = requests.post(url, json=payload, headers=headers, timeout=30)
+                if self.config.get("_transport_mode") == "sse":
+                    return self._call_tool_http_sse(tool_name, arguments)
+
+                # Streamable HTTP
+                url = self.config.get("url", "").rstrip("/")
+                session_id = self.config.get("_session_id", "")
+                payload = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                           "params": {"name": tool_name, "arguments": arguments}}
+                resp = requests.post(url, json=payload, headers=self._http_headers(session_id), timeout=30)
                 if resp.status_code == 200:
-                    data = resp.json()
-                    if "result" in data:
-                        return json.dumps(data["result"])
-                    elif "error" in data:
-                        return json.dumps({"error": data["error"].get("message", "Unknown error")})
+                    ct = resp.headers.get("Content-Type", "")
+                    data = self._parse_sse_jsonrpc(resp.text) if "text/event-stream" in ct else resp.json()
+                    if data:
+                        if "result" in data:
+                            return json.dumps(data["result"])
+                        elif "error" in data:
+                            return json.dumps({"error": data["error"].get("message", "Unknown error")})
                 return json.dumps({"error": f"HTTP {resp.status_code}"})
             
             else:
@@ -558,6 +707,96 @@ class MCPServer:
             logger.error(f"MCP {self.name}: Tool call error: {e}")
             return json.dumps({"error": str(e)})
     
+    def _call_tool_http_sse(self, tool_name: str, arguments: Dict) -> str:
+        """Call a tool via HTTP+SSE transport (fresh connection per call)."""
+        import threading as _threading
+        import queue as _q
+        import time as _t
+        from urllib.parse import urlparse as _up
+
+        base_url = self.config.get("url", "").rstrip("/")
+        parsed = _up(base_url)
+        base = f"{parsed.scheme}://{parsed.netloc}"
+
+        for sse_path in [base_url, base_url + "/sse", base + "/sse"]:
+            try:
+                sse_hdrs = {**self._http_headers(), "Accept": "text/event-stream"}
+                sse_conn = requests.get(sse_path, headers=sse_hdrs, timeout=10, stream=True)
+                if "text/event-stream" not in sse_conn.headers.get("Content-Type", ""):
+                    sse_conn.close()
+                    continue
+
+                endpoint_q: _q.Queue = _q.Queue()
+                response_q: _q.Queue = _q.Queue()
+
+                def _reader(conn, eq, rq):
+                    found = False
+                    try:
+                        for raw in conn.iter_lines(decode_unicode=True):
+                            line = (raw or "").strip()
+                            if not line.startswith("data:"):
+                                continue
+                            val = line[5:].strip()
+                            if not val or val == "[DONE]":
+                                continue
+                            if not found:
+                                eq.put(val)
+                                found = True
+                            else:
+                                try:
+                                    rq.put(json.loads(val))
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+
+                _threading.Thread(target=_reader, args=(sse_conn, endpoint_q, response_q), daemon=True).start()
+
+                try:
+                    ep_val = endpoint_q.get(timeout=8)
+                except _q.Empty:
+                    sse_conn.close()
+                    continue
+
+                messages_url = ep_val if ep_val.startswith("http") else base + ep_val
+
+                def _post(payload, timeout=10):
+                    return requests.post(messages_url, json=payload, headers=self._http_headers(), timeout=timeout)
+
+                def _wait(rid, timeout=20):
+                    deadline = _t.time() + timeout
+                    while _t.time() < deadline:
+                        try:
+                            msg = response_q.get(timeout=0.3)
+                            if isinstance(msg, dict) and msg.get("id") == rid:
+                                return msg
+                            response_q.put(msg)
+                        except _q.Empty:
+                            pass
+                    return None
+
+                _post({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                       "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                                  "clientInfo": {"name": "amira", "version": "1.0"}}})
+                _wait(1, timeout=6)
+                _post({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}})
+                _post({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                       "params": {"name": tool_name, "arguments": arguments}})
+                data = _wait(2, timeout=25)
+                sse_conn.close()
+
+                if data:
+                    if "result" in data:
+                        return json.dumps(data["result"])
+                    elif "error" in data:
+                        return json.dumps({"error": data["error"].get("message", "Unknown error")})
+                return json.dumps({"error": "SSE tool call timeout"})
+
+            except Exception as e:
+                logger.error(f"MCP {self.name}: SSE tool call failed: {e}")
+
+        return json.dumps({"error": "SSE tool call: no working endpoint"})
+
     def disconnect(self) -> None:
         """Disconnect from MCP server."""
         try:
@@ -914,7 +1153,8 @@ def initialize_mcp_servers(mcp_config: Dict[str, Dict]) -> int:
     
     for server_name, server_config in (mcp_config or {}).items():
         try:
-            transport = server_config.get("transport", "stdio")
+            # Auto-detect HTTP transport when "url" is present (no "transport" field needed)
+            transport = server_config.get("transport") or ("http" if server_config.get("url") else "stdio")
 
             # Prepare transport-specific config
             if transport == "stdio":

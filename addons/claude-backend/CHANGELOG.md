@@ -2,6 +2,230 @@
 
 > **⚠️ After updating, rebuild the add-on** (Settings → Add-ons → Amira → Rebuild) to apply new dependencies.
 
+## 4.6.95 — Fix: incoming message log now from api module with CHAT level
+
+### Bug fix
+- **`📨` log moved from `routes/chat_routes.py` to `api.py`** — both `chat_with_ai` and `stream_chat_with_ai` now log the incoming message at `CHAT` level (`💬`), consistent with the outgoing `📤` log. Previously the log appeared as `🟢 INFO: routes.chat_routes ->`, making it hard to visually trace request/response pairs. Now both lines read `💬 CHAT: api -> 📨 [provider]: ...` / `💬 CHAT: api -> 📤 [provider/model]: ...`.
+
+---
+
+## 4.6.94 — Remove duplicate Ollama URL from Settings UI
+
+### Improvement
+- **Ollama URL removed from Settings panel** — `ollama_base_url` is configured only in `config.yaml` (HA add-on UI), not duplicated in the Amira ⚙️ Settings panel. Removed: subsection rendering in `chat_ui.py`, LABELS entry, all IT/EN/ES/FR translations for Ollama settings, `SETTINGS_DEFAULTS`/`_SETTINGS_GLOBAL_MAP` entries in `settings_service.py`.
+- `GET /api/ollama/test` endpoint kept (usable for future tooling or manual probing).
+
+---
+
+## 4.6.93 — Ollama: empty URL by default, provider hidden until configured
+
+### Improvement
+- **`ollama_base_url` defaults to `""`** in `config.yaml`, `api.py`, and `settings_service.py`. An empty URL means: Ollama is not configured, the provider does not appear in the UI selector, no connection is attempted at startup. Set a URL (e.g. `http://192.168.1.x:11434`) to enable it.
+- **Skip startup model discovery** if `OLLAMA_BASE_URL` is empty — avoids a useless 2s connection timeout on every add-on start.
+- `catalog_routes.py` already conditioned on `OLLAMA_BASE_URL` being non-empty — no change needed there.
+
+---
+
+## 4.6.92 — Ollama: URL configurable from Settings UI + Test connection button
+
+### Improvement
+- **Ollama URL in Settings** — `ollama_base_url` is now a runtime setting: editable in the ⚙️ Settings panel under AI → Ollama, saved to `settings.json`, applied immediately without add-on restart. Previously only configurable via `config.yaml` (required restart).
+- **Test connection button** — next to the URL field a Test button pings `GET /api/tags` on the configured Ollama server and shows: ✅ + model list if reachable, ❌ + error message if not. New endpoint: `GET /api/ollama/test?url=<url>`.
+- Translations: IT/EN/ES/FR for all new strings.
+
+---
+
+## 4.6.91 — Fix: embedded SSE error (HTTP 200 + error body) now retries properly
+
+### Bug fix
+- **Double-call on HTTP 200 with upstream error** — OpenRouter (and other providers) sometimes return HTTP 200 with an embedded SSE error event (e.g. `{"error": {...}}`) when the upstream model is rate-limited. Previously this bypassed `enhanced.py`'s retry logic (which only triggers on exceptions), causing the full fallback chain to run again as a "direct call" — effectively doubling all retry delays (~15s total for a simple "ciao"). Fix: when an embedded SSE error is received with no content yet emitted, `_openai_compat_stream` now raises `RuntimeError` instead of yielding an error event. This lets `stream_chat_with_caching` retry it automatically, and since the error message contains "rate limit", `_should_retry_error` correctly classifies it as retryable.
+
+---
+
+## 4.6.90 — Sticky copy button on code blocks
+
+### Improvement
+- **Sticky copy button in code blocks** — the Copy button now uses `position:sticky;top:0` inside a header bar instead of `position:absolute`. When scrolling through a long code block in the chat, the button stays anchored to the top of the visible area at all times — no need to scroll back to the top to copy. Works in both the bubble and the main chat UI. Dark mode supported.
+
+---
+
+## 4.6.89 — Fix: YAML context re-injection for claude_web + removed entity validation
+
+### Bug fix
+- **Bubble card panel: YAML re-injected on every message with claude_web** — for no-tool providers (claude_web, etc.) tokens arrive all at once in the `done` event as `full_text` instead of individual `token` events. `_cardContextConfirmed` was never set to `true`, causing the full YAML context to be re-injected on every follow-up message. Fix: the flag is now set on `done` events as well (both in the main loop and the flush section).
+- **Removed entity validation from card editor context** — the `ENTITY VALIDATION (hass.states)` block with `VALID`/`NOT FOUND` checks was removed from `buildContextPrefix()`. It was redundant (the bubble already handles it) and added verbose rules to the context. Card editing rules simplified from 10 to 6.
+
+---
+
+## 4.6.88 — claude_web conversation reuse + YAML deduplication nel card panel
+
+### Improvement
+- **`claude_web`: conversazione riutilizzata tra i turni** — invece di creare una nuova conversazione su claude.ai ad ogni request, il provider ora mantiene un `_conv_cache` (session_id → conv_uuid). Stessa session + stesso intent + stesso model → riusa l'UUID esistente e invia solo il nuovo messaggio (senza `[CONVERSATION HISTORY]`). Invalidazione automatica su: cambio intent, cambio model, TTL 12h, o errore 404 (conv scaduta su claude.ai, con retry automatico e nuova conv).
+- **`api.py`: session_id propagato ai provider** — `intent_info["session_id"] = session_id` iniettato prima del tool loop, così i provider possono identificare la sessione corrente per la cache.
+- **Bubble card panel: deduplicazione YAML** — il `[CONTEXT: User is editing a Lovelace card...{yaml}...]` viene inviato solo al primo messaggio della sessione o quando lo YAML cambia (hash tracking). I messaggi successivi con lo stesso YAML inviano solo la domanda dell'utente. Reset su nuova sessione ("+" button) o quando lo YAML cambia (nuova card). Riduce drasticamente il payload per card con YAML grande (es. 82k char → solo poche decine di char per i follow-up).
+
+### Provider check
+- **`grok_web`**: già riutilizza conversazioni esistenti (cerca `conversations[0]`) ✓
+- **`chatgpt_web`**: usa `conversation_id: null` ogni volta — reuse possibile ma richiede `history_and_training_disabled: false` (salverebbe in account ChatGPT), lasciato per ora
+- **`gemini_web`**: API stateless per sua natura, nessun cambiamento necessario
+
+---
+
+## 4.6.87 — Fix: smart context noise per card_editor + stripping CONTEXT block
+
+### Bug fix
+- **Smart context inutile per card_editor** — quando l'intent era `card_editor`, `build_smart_context` riceveva il messaggio con il blocco `[CONTEXT: User is editing a Lovelace card...{yaml}...]` e cercava entità basandosi su parole dentro lo YAML (es. `sensor`, `button`, `bolletta`, `from`, `card`, ecc.), aggiungendo ~15k char di context irrilevante e sprecando token. Fix: se `intent == "card_editor"`, `build_smart_context` ritorna stringa vuota immediatamente — il YAML è già nel messaggio.
+- **Stripping del blocco `[CONTEXT: ...]`** — aggiunto strip del blocco `[CONTEXT: ...]` in `build_smart_context` (parallelo all'esistente strip di `[FILE:...]`), per evitare che contenuti YAML/HTML iniettati dalla bubble inquinino il matching dei keyword nelle ricerche entità.
+
+---
+
+## 4.6.86 — Fix: card editor dialog si espande a tutto schermo quando si apre il pannello Amira
+
+### Bug fix
+- **Dialog card editor espanso a tutto schermo** — quando si cliccava il pulsante 🤖 Amira nel footer dell'editor card, la surface del dialog riceveva `max-height:90vh !important` che sovrascriveva il sizing nativo di HA e forzava il dialog a occupare quasi l'intera viewport. Fix: la height viene ora calcolata come `min(altezza_attuale + 360px, 90vh)`, così il dialog cresce solo di quanto necessario per ospitare il pannello Amira. Aggiunto anche `height:''` in `closeCardPanel()` per pulire correttamente il valore al momento della chiusura.
+
+---
+
+## 4.6.85 — Conversational routing: bypass tools for casual chat
+
+### Improvement
+- **Natural conversational routing** — added `_is_conversational()` heuristic in `intent.py` that detects casual chat (greetings, "chi sei", "come stai", "dimmi una barzelletta", "cosa pensi", etc.) and routes directly to `chat` intent (no tools, no HA context). HA action/entity keywords act as blockers so real HA requests are never mis-routed.
+- **Increased chat keyword window** — legacy keyword check raised from ≤ 5 words to ≤ 8 words.
+- **MCP injection guard** — MCP tools are no longer injected when `intent == "chat"` (tools=[]). Prevents the model from unexpectedly calling Supermemory or other MCP tools during chitchat.
+- **Improved chat prompt** — `INTENT_PROMPTS["chat"]` rewritten to be more natural: friendly, no entity_id mentions, explains capabilities if asked.
+
+---
+
+## 4.6.84 — Fix: automation 404 error and false context injection when file is open
+
+### Bug fix
+- **`HA API error 404` + spurious automation context when a file is open** — `build_smart_context` used `user_message.lower()` as `msg_lower` without stripping `[FILE:...]` blocks. A package YAML containing `automation:` triggered the automation keyword check; the fuzzy name-matching then found automation names whose words appeared in the file content (e.g. "raccolta differenziata"). The resulting REST call `GET config/automation/config/{id}` returned 404 because the automation was matched by coincidence, not intent. Fix: strip `[FILE:...]...[/FILE]` blocks from `msg_lower` at the top of `build_smart_context` (same pattern already used in `detect_intent`).
+
+---
+
+## 4.6.83 — Fix: AI defaulting to html-js-card without being asked
+
+### Bug fix
+- **AI generating `type: custom:html-js-card` without explicit request** — when asked to create a Lovelace card for a complex package, the AI would spontaneously choose html-js-card even without the skill being active. Root cause: no rule in the system prompt prevented it. Fix: added a "Lovelace Card Format (CRITICAL)" rule to the system prompt explicitly stating that `custom:html-js-card` must only be used when the user explicitly asks for it (e.g. "fammela con html-js-card", "/html-js-card"). Default card format is standard Lovelace YAML (`type: entities`, `type: grid`, `type: tile`, Mushroom, etc.).
+
+---
+
+## 4.6.82 — Skill banner: deactivate button
+
+### New feature
+- **"✕ Disattiva" button in skill banner** — when a skill is active (e.g. `/html-js-card`), a new outlined button appears next to "New chat" to deactivate the skill in the current session without opening a new chat. Calls `POST /api/chat/skill/deactivate` and hides the banner. Useful when the user wants to switch from a skill-specific mode (e.g. html-js-card) back to generic Lovelace YAML generation in the same session.
+- **`POST /api/chat/skill/deactivate`** — new backend endpoint that removes the session from `session_active_skill`, stopping skill re-injection for subsequent messages.
+
+---
+
+## 4.6.81 — Fix: Lovelace YAML false positive with file context
+
+### Bug fix
+- **Wrong `card_editor` routing when asking for a card with a package file open** — `has_lovelace_yaml` used `re.search(r"(?mi)^\s*type\s*:\s*", user_message)` on the raw message including `[FILE:...]` content. Package/automation YAML files contain `type:` keys (e.g. automation actions), triggering "Lovelace YAML detected" and routing to `card_editor` instead of the correct intent. Fix: when `_has_file_context` is True, the raw-message regex check is skipped; only the stripped `msg` (without file content) is checked for YAML keywords.
+
+---
+
+## 4.6.80 — Fix: _has_file_context not defined in build_smart_context
+
+### Bug fix
+- **`NameError: name '_has_file_context' is not defined`** — `_has_file_context` was defined only inside `detect_intent` but used also in `build_smart_context` (a separate function). Fix: detect `[FILE:...]` blocks locally at the top of `build_smart_context` as well.
+
+---
+
+## 4.6.79 — File context: extract entities directly from file content
+
+### New feature
+- **File-based entity lookup** — when a file is open in the file panel, the smart context now extracts HA entity IDs directly from the file content (regex on all known domains: `input_boolean`, `input_select`, `sensor`, `automation`, etc.) and looks up their current states in HA. The result replaces the generic keyword search entirely, so the AI gets exactly the entities used in the file (e.g. `input_boolean.raccolta_differenziata_da_notificare`) instead of unrelated update/package entities. Logged as `## ENTITA DEL FILE`.
+
+---
+
+## 4.6.78 — File context: larger limit + cleaner entity search
+
+### Improvements
+- **File context limit raised from 3000 to 15000 chars** — HA package files are often 5-20 KB; the previous 3000-char limit caused the AI to see only a fraction of the file and ask clarifying questions about entities it should have already seen.
+- **Suppress generic Lovelace/YAML stop-words from entity search when file context is present** — words like `card`, `package`, `lovelace`, `type`, `name` now join the stop-word list when a `[FILE:...]` block is in the message, preventing dozens of irrelevant update/package entities from polluting the smart context.
+
+---
+
+## 4.6.77 — Fix: file context incorrectly routed to create_html_dashboard
+
+### Bug fix
+- **Wrong intent when asking for a card with a file open** — when the file panel injected `[FILE:...]` blocks, the word "card" in the user message (or "card" matching an existing `.html` filename in `www/dashboards`) triggered `has_html_ref = True`, routing the request to `create_html_dashboard` with only 5 tools and an HTML-only prompt. Fix: strip `[FILE:...]` blocks from `clean_msg` before intent keyword matching; when file context is present, require explicit HTML/JS keywords (`has_html_kw`) to route to `create_html_dashboard` — `has_html_ref` alone is not enough.
+
+---
+
+## 4.6.76 — Fix: bubble JS syntax error (font-family escaped quotes)
+
+### Bug fix
+- **`SyntaxError: missing ] after element list` in bubble JS** — the new diff-table CSS style block used `\'SF Mono\'` inside a Python f-string (`f"""..."""`). Python consumed the backslashes and output bare `'`, which terminated the surrounding JS single-quoted string early and broke the entire script. Fix: use double-quoted font names (`"SF Mono"`) in the CSS value so they don't interfere with the JS string delimiter.
+
+---
+
+## 4.6.75 — Fix: no-tool safety check false positives with file context
+
+### Bug fix
+- **Safety check blocked card/code generation replies** — when a file was open in the file panel, the `[FILE:...]` block in the user message contained YAML keywords (`enable`, `disable`, `open`, `close`) that triggered `_ACTION_REQUEST_RE`, causing the no-tool provider safety check to wrongly replace valid code-generation responses with the "action not executed" warning. Fix: strip `[FILE:...]` blocks before evaluating `_user_asked_action`.
+- **Code-block responses never blocked** — added `not _assembled_has_code` to the safety check condition: a response containing a ` ``` ` code block is always code generation, never a hallucinated action confirmation.
+
+---
+
+## 4.6.74 — Fix: skip entity keyword search on file context content
+
+### Bug fix
+- **Spurious entity searches when a file is open** — when the file panel injected `[FILE: ...]...[/FILE]` blocks into the user message, the smart context keyword extractor scanned every word in the YAML/JSON file as a potential entity keyword, triggering dozens of useless HA entity searches. Fix: strip `[FILE:...]` blocks from the message before keyword extraction, the same way `[CURRENT_DASHBOARD_HTML]` blocks are already stripped.
+
+---
+
+## 4.6.73 — File panel: anti-truncation guard on save
+
+### Bug fix
+- **Write truncation guard** — `POST /api/files/write` now rejects writes where the new content is less than 60% of the original file size (files > 200 B), returning a `truncation_warning` error with original/new sizes. Pass `force: true` to override.
+- **Edit mode loads full file** — clicking Edit when a file is only partially loaded (chunked) now fetches the complete content before opening the textarea, preventing partial overwrites on save.
+- **Truncation confirm dialog** — if the server returns a truncation warning, the UI shows a confirm dialog with the size difference before allowing a forced save.
+
+---
+
+## 4.6.72 — File panel: line numbers, inline editing and save
+
+### New features
+- **Line numbers in file viewer** — each line shows its number on the left, non-selectable, in code-editor style.
+- **Edit button** — opens an inline textarea with the full file content; Tab key inserts 2 spaces.
+- **Save button** — sends the updated content via `POST /api/files/write` and refreshes the view; Cancel restores the read-only view without saving.
+- **New `POST /api/files/write` endpoint** — writes a file in the HA config dir (existing files only, relative paths).
+
+---
+
+## 4.6.71 — Fix sync lista modelli al cambio provider nel sidebar automazioni
+
+### Bug fix
+- **Sidebar automazioni: lista modelli non aggiornata al cambio provider** — quando si cambiava provider nel sidebar, il selettore modelli continuava a mostrare i modelli del provider precedente finché non si ricaricava la pagina. Fix: `MutationObserver` sul selettore modelli principale che sincronizza automaticamente le opzioni nel sidebar ogni volta che vengono aggiornate.
+
+---
+
+## 4.6.70 — Fix stili code block e diff nel sidebar automazioni
+
+### Bug fix
+- **Sidebar automazioni: code block e diff senza stili** — il sidebar Amira nell'editor automazioni è inserito dentro lo shadow DOM di `hass-subpage`, quindi i CSS globali (in `document.head`) non erano applicati. Code block apparivano senza background scuro/box, e il diff prima/dopo non mostrava i colori rosso/verde. Fix: iniettare un `<style>` direttamente nello shadow root al momento dell'apertura del sidebar.
+
+---
+
+## 4.6.69 — Skill slash-autocomplete in chat_ui, bubble e card panel
+
+### Nuova funzionalità
+- **Tendina autocomplete skill con `/`**: digitare `/` in qualsiasi campo di chat mostra una tendina con le skill installate. Filtra in tempo reale (es. `/mu` → mushroom). Click o Enter/Tab (con item selezionato) inserisce `/nome-skill `.
+- Navigazione da tastiera: `↑`/`↓` per selezionare, `Enter`/`Tab` per confermare, `Escape` per chiudere.
+- Disponibile in: chat_ui principale, bubble Amira (main), card panel della bubble.
+
+---
+
+## 4.6.68 — Card panel: status progressivo + fix safety warning su card_editor
+
+### Bug fix
+- **Card panel: messaggi di status progressivi** — durante l'elaborazione, il panel card ora mostra gli step accumulati (⏳ messaggio corrente + • step precedenti) invece di sovrascrivere con solo l'ultimo messaggio "Contesto precaricato…". Allineato al comportamento della chat_ui principale.
+- **Fix falso safety warning su `card_editor`** — l'intent `card_editor` era erroneamente soggetto al safety check "no-tool provider", che sostituiva la risposta corretta (suggerimenti YAML) con il warning ⚠️ nella storia della conversazione. Aggiunto `card_editor` agli intent esclusi (come `chat` e `create_html_dashboard`), dato che per questo intent il testo è la risposta attesa.
+
+---
+
 ## 4.6.48 — Skill YAML auto-repair for weak-format outputs (e.g. NVIDIA)
 
 ### Bug fix

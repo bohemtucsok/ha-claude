@@ -61,6 +61,7 @@ COPY tool_optimizer.py .
 COPY semantic_cache.py .
 COPY mcp.py .
 COPY mcp_auth.py .
+COPY mcp_oauth.py .
 COPY scheduled_tasks.py .
 COPY voice_transcription.py .
 COPY prompt_caching.py .

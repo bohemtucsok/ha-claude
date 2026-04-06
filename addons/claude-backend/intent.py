@@ -173,8 +173,12 @@ GENERAL RULES:
 # Most intents use HA_SYSTEM_GUIDANCE (unified prompt). Only override here for
 # contexts that need highly specific instructions the LLM can't infer from tool descriptions.
 INTENT_PROMPTS = {
-    "chat": """You are a friendly Home Assistant assistant. The user is simply greeting or chatting.
-Reply briefly and warmly. Do NOT call any tools. ALWAYS follow the configured response language instruction.""",
+    "chat": """You are a helpful, warm AI assistant embedded in Home Assistant. The user is having a casual conversation — not requesting device control or HA actions.
+Respond naturally, like a knowledgeable friend. Be concise, friendly, and human.
+— Do NOT call any tools.
+— Do NOT mention entity_ids, technical HA concepts, or device states unless the user specifically asks.
+— If asked what you can do: mention controlling HA devices, creating automations, answering questions, chatting, and more.
+— ALWAYS reply in the configured language.""",
 
     "card_editor": """You are a Home Assistant Lovelace card expert.
 The user is editing a card in the HA visual editor and wants you to check/fix the YAML.
@@ -458,6 +462,68 @@ DESIGN FREEDOM — vary these across dashboards:
 Follow the configured response language instruction."""
 
 
+def _is_conversational(msg: str) -> bool:
+    """Return True if the message is clearly casual conversation with no HA action needed.
+
+    Logic:
+    1. If the message contains HA action/entity keywords → False (route to auto)
+    2. If the message matches conversational signals → True (route to chat)
+    3. Otherwise → False (let the existing keyword/LLM logic handle it)
+    """
+    # --- HA blocker: these keywords strongly indicate a HA request ---
+    HA_BLOCKERS = (
+        # Italian action verbs
+        "accendi", "spegni", "apri", "chiudi", "alza", "abbassa", "attiva", "disattiva",
+        "imposta", "regola", "metti", "porta a", "portalo", "impostalo", "riavvia",
+        "crea un'automazione", "crea automation", "crea script", "crea una scena",
+        # English action verbs
+        "turn on", "turn off", "switch on", "switch off", "dim ", "brighten",
+        "lock ", "unlock", "arm ", "disarm", "restart",
+        # French/Spanish action verbs
+        "allume ", "éteins", "ouvre ", "ferme ", "enciende", "apaga", "abre ", "cierra",
+        # HA-specific domain nouns (would only appear in HA requests)
+        "tapparella", "persiana", "tenda da sole", "termostato", "climatizzatore",
+        "irrigazione", "allarme", "serratura", "cancello", "pulsante",
+        # Query state signals
+        "lo stato di", "lo stato del", "stato della", "quante luci",
+        "qual è la temperatura", "quant'è la", "quanto consuma",
+        "entity_id",
+    )
+    if any(b in msg for b in HA_BLOCKERS):
+        return False
+    # HA entity_id pattern (sensor.xxx, light.xxx, etc.)
+    if re.search(r"\b(sensor|light|switch|climate|cover|binary_sensor|input_boolean|input_number|input_select|automation|script|camera|alarm_control_panel|media_player|device_tracker)\.", msg):
+        return False
+
+    # --- Conversational signals: these clearly mean "just chatting" ---
+    CONV_SIGNALS = (
+        # Identity / capabilities
+        "chi sei", "cosa sei", "cosa sai fare", "cosa puoi fare", "cosa sai",
+        "come ti chiami", "qual è il tuo nome", "presentati", "chi ti ha creato",
+        "who are you", "what are you", "what can you do", "your name", "who made you",
+        "qui es-tu", "que puedes hacer", "comment tu t'appelles",
+        # Wellbeing
+        "come stai", "come va", "come ti senti", "tutto bene",
+        "how are you", "how r u", "how's it going", "what's up",
+        "ça va", "comment tu vas", "cómo estás",
+        # Fun / creative
+        "barzelletta", "burletta", "scherzo", "indovinello",
+        "dimmi una storia", "dimmi una barzelletta", "raccontami una storia",
+        "raccontami qualcosa", "dimmi qualcosa di interessante",
+        "tell me a joke", "tell me a story",
+        "blague", "raconte-moi",
+        # Philosophical / opinion
+        "cosa pensi", "cosa ne pensi", "hai un'opinione", "secondo te",
+        "what do you think", "your opinion", "que penses-tu", "qué piensas",
+        # Praise / gratitude (standalone, not part of HA command)
+        "sei bravo", "sei ottimo", "sei fantastico", "sei utilissimo", "mi hai aiutato",
+        "you're great", "you're amazing", "you're helpful",
+        # Just being friendly
+        "parliamo di", "dimmi di", "parlami di qualcosa",
+    )
+    return any(s in msg for s in CONV_SIGNALS)
+
+
 def _init_dynamic_prompts():
     """Initialize prompts that depend on api.get_lang_text (called after api module is loaded)."""
     # Add language instruction to chat prompt
@@ -494,6 +560,13 @@ def detect_intent(user_message: str, smart_context: str, previous_intent: str | 
 
     # Strip bubble context prefix and embedded HTML before keyword matching
     clean_msg = user_message
+    # Detect file context: [FILE:...]...[/FILE] blocks injected by the file panel.
+    # When present, the user is working on a specific file — suppress HTML dashboard
+    # auto-routing unless they explicitly use HTML/JS keywords.
+    _has_file_context = bool(re.search(r'\[FILE:[^\]]*\]', clean_msg, re.IGNORECASE))
+    # Remove [FILE:...]...[/FILE] blocks before keyword matching to avoid false positives
+    if _has_file_context:
+        clean_msg = re.sub(r'\[FILE:[^\]]*\][\s\S]*?\[/FILE\]', '', clean_msg, flags=re.IGNORECASE)
     # Remove [CURRENT_DASHBOARD_HTML]...[/CURRENT_DASHBOARD_HTML] block
     if "[CURRENT_DASHBOARD_HTML]" in clean_msg:
         clean_msg = re.sub(r'\[CURRENT_DASHBOARD_HTML\][\s\S]*?\[/CURRENT_DASHBOARD_HTML\]', '', clean_msg)
@@ -523,7 +596,10 @@ def detect_intent(user_message: str, smart_context: str, previous_intent: str | 
             or "entity:" in msg
             or "- type:" in msg
         )
-    ) or bool(re.search(r"(?mi)^\s*type\s*:\s*", user_message))
+    ) or (
+        not _has_file_context
+        and bool(re.search(r"(?mi)^\s*type\s*:\s*", user_message))
+    )
     explicit_html_request = any(
         k in msg for k in [
             "/local/dashboards",
@@ -626,9 +702,10 @@ def detect_intent(user_message: str, smart_context: str, previous_intent: str | 
     # Get keywords for current language, fallback to English if not available
     lang_keywords = api.KEYWORDS.get(api.LANGUAGE, api.KEYWORDS.get("en", {}))
 
-    # --- CHAT (greetings, chitchat) --- short messages that don't need tools
+    # --- CHAT (greetings, chitchat) --- messages that don't need HA tools
     chat_kw = lang_keywords.get("chat", [])
     words = msg.strip().rstrip("!?.,").split()
+
     def _contains_chat_kw(_msg: str, _kw: str) -> bool:
         _kw = (_kw or "").strip().lower()
         if not _kw:
@@ -638,9 +715,19 @@ def detect_intent(user_message: str, smart_context: str, previous_intent: str | 
             return bool(re.search(rf"(?<![a-z0-9_]){re.escape(_kw)}(?![a-z0-9_])", _msg))
         return _kw in _msg
 
-    if len(words) <= 5 and any(_contains_chat_kw(msg, k) for k in chat_kw):
+    def _route_chat():
         return {"intent": "chat", "tools": INTENT_TOOL_SETS["chat"],
                 "prompt": INTENT_PROMPTS["chat"], "specific_target": False, "max_rounds": 1}
+
+    if not _is_skill_cmd:
+        # 1. Extended conversational heuristics (pattern-based, any length)
+        if _is_conversational(msg):
+            logger.info("Conversational message detected — routing to chat intent (no tools)")
+            return _route_chat()
+        # 2. Legacy: short greeting/keyword messages (≤ 8 words, chat keywords from keywords.json)
+        if len(words) <= 8 and any(_contains_chat_kw(msg, k) for k in chat_kw):
+            logger.info("Chat keyword detected — routing to chat intent (no tools)")
+            return _route_chat()
 
     # --- LOVELACE YAML CARD (manual paste) ---
     # Already handled above with high priority, before follow-up continuity.
@@ -674,7 +761,11 @@ def detect_intent(user_message: str, smart_context: str, previous_intent: str | 
                     has_dash = True
         except Exception:
             pass
-    if not _is_skill_cmd and (has_html_kw or has_html_ref or (has_dash and has_html_kw)):
+    # When the user has a file open ([FILE:...] context), only route to HTML dashboard
+    # if they explicitly use HTML/JS keywords — not just because "card" or "dashboard"
+    # appear in the message (those words are common in YAML files and in Lovelace requests).
+    _html_dash_gate = has_html_kw if _has_file_context else (has_html_kw or has_html_ref)
+    if not _is_skill_cmd and (_html_dash_gate or (has_dash and has_html_kw)):
         logger.info("HTML dashboard keywords detected — routing to create_html_dashboard")
         return {"intent": "create_html_dashboard", "tools": INTENT_TOOL_SETS["create_html_dashboard"],
                 "prompt": INTENT_PROMPTS.get("create_html_dashboard"), "specific_target": False}
@@ -815,8 +906,32 @@ def build_smart_context(user_message: str, intent: str = None, max_chars: int = 
                    already contains large blocks (e.g. [CURRENT_DASHBOARD_HTML]) so the
                    combined payload stays within model context limits.
     """
-    msg_lower = user_message.lower()
     context_parts = []
+
+    # --- CARD EDITOR: skip smart context entirely ---
+    # The full card YAML is already in [CONTEXT: User is editing a Lovelace card...] block.
+    # Building smart context on top of it would search entities using YAML keywords
+    # (sensor, button, type, card, bolletta, etc.) producing irrelevant noise + wasted tokens.
+    if intent == "card_editor":
+        return ""
+
+    # Detect file context locally (also checked in detect_intent, but build_smart_context
+    # is called independently so it needs its own detection).
+    _has_file_context = bool(re.search(r'\[FILE:[^\]]*\]', user_message, re.IGNORECASE))
+    # Strip [FILE:...]...[/FILE] blocks AND [CONTEXT: ...] blocks before keyword matching
+    # so file/card content does not falsely trigger entity searches on YAML keywords.
+    _msg_stripped = user_message
+    if _has_file_context:
+        _msg_stripped = re.sub(r'\[FILE:[^\]]*\][\s\S]*?\[/FILE\]', '', _msg_stripped, flags=re.IGNORECASE)
+    # Strip [CONTEXT: ...] block — may contain YAML, HTML, or other injected content
+    if _msg_stripped.startswith("[CONTEXT:"):
+        _ctx_end = _msg_stripped.rfind("] ")
+        if _ctx_end == -1:
+            _ctx_end = _msg_stripped.rfind("]")
+        if _ctx_end != -1:
+            _msg_stripped = _msg_stripped[_ctx_end + 1:]
+    _msg_stripped = _msg_stripped.strip()
+    msg_lower = _msg_stripped.lower()
 
     try:
         # --- AUTOMATION CONTEXT ---
@@ -915,10 +1030,12 @@ def build_smart_context(user_message: str, intent: str = None, max_chars: int = 
                         score = 90
                         break
 
-                # Check 3: Score by matching meaningful words
+                # Check 3: Score by matching meaningful words.
+                # Use exact word match only (no substring): "zigbee" must not
+                # match "zigbee4ch", "luce" must not match "luce1", etc.
                 if score == 0:
-                    fname_words = set(fname.lower().split())
-                    matching_words = [w for w in msg_words if w in fname or any(w in fw for fw in fname_words)]
+                    fname_words = set(fname.lower().replace("/", " ").replace("-", " ").split())
+                    matching_words = [w for w in msg_words if w in fname_words]
                     if matching_words:
                         score = sum(len(w) for w in matching_words)
                         if len(matching_words) >= 2:
@@ -1069,13 +1186,90 @@ def build_smart_context(user_message: str, intent: str = None, max_chars: int = 
                 pass
 
         # --- ENTITY/DEVICE CONTEXT ---
-        entity_keywords = ["luce", "luci", "light", "temperatura", "temperature", "sensore", "sensor",
-                          "clima", "climate", "switch", "interruttore", "media_player", "cover", "tapparella"]
+        entity_keywords = [
+            # light — IT/EN/ES/FR
+            "luce", "luci", "light", "lights", "lampe", "lampes", "lumiere", "luz", "luces",
+            # sensor — IT/EN/ES/FR
+            "temperatura", "temperature", "sensore", "sensor", "capteur", "sensor",
+            "humedad", "humidite", "humidity",
+            # climate — IT/EN/ES/FR
+            "clima", "climate", "termostato", "thermostat", "riscaldamento", "heating",
+            "calefaccion", "chauffage", "climatisation", "raffreddamento", "cooling",
+            # switch — IT/EN/ES/FR
+            "switch", "interruttore", "interrupteur", "interruptor",
+            # media player
+            "media_player",
+            # cover (blinds/shutters/gates) — IT/EN/ES/FR
+            "tapparella", "tapparelle", "persiana", "tenda",
+            "blind", "curtain", "shutter", "cover",
+            "volet", "rideau", "store",
+            "persiana", "estor", "toldo",
+            "cancello", "gate", "garage",
+            # lock — IT/EN/ES/FR
+            "serratura", "lock", "cerradura", "serrure",
+            # camera — IT/EN/ES/FR
+            "telecamera", "camera", "videocamera",
+            "camara", "surveillance",
+            # alarm — IT/EN/ES/FR
+            "allarme", "alarm", "sirena", "siren",
+            "alarma", "alarme",
+            # fan — IT/EN/ES/FR
+            "ventilatore", "fan", "ventilador", "ventilateur",
+            # vacuum — IT/EN/ES/FR
+            "aspirapolvere", "aspiratore", "vacuum", "robot",
+            "aspiradora", "aspirateur",
+            # irrigation/pump — IT/EN/ES/FR
+            "irrigazione", "irrigation", "pompa", "pump",
+            "riego", "pompe",
+        ]
         matched_domains = []
-        domain_map = {"luce": "light", "luci": "light", "light": "light", "lights": "light",
-                     "temperatura": "sensor", "temperature": "sensor", "sensore": "sensor", "sensor": "sensor",
-                     "clima": "climate", "climate": "climate", "switch": "switch", "interruttore": "switch",
-                     "media_player": "media_player", "cover": "cover", "tapparella": "cover"}
+        domain_map = {
+            # light
+            "luce": "light", "luci": "light",
+            "light": "light", "lights": "light",
+            "lampe": "light", "lampes": "light",
+            "lumiere": "light", "lumières": "light",
+            "luz": "light", "luces": "light",
+            # sensor
+            "temperatura": "sensor", "temperature": "sensor",
+            "sensore": "sensor", "sensor": "sensor",
+            "capteur": "sensor",
+            "humedad": "sensor", "humidite": "sensor", "humidity": "sensor",
+            # climate
+            "clima": "climate", "climate": "climate",
+            "termostato": "climate", "thermostat": "climate",
+            "riscaldamento": "climate", "heating": "climate",
+            "calefaccion": "climate", "chauffage": "climate",
+            "climatisation": "climate", "raffreddamento": "climate",
+            # switch
+            "switch": "switch", "interruttore": "switch",
+            "interrupteur": "switch", "interruptor": "switch",
+            # media_player
+            "media_player": "media_player",
+            # cover
+            "tapparella": "cover", "tapparelle": "cover",
+            "persiana": "cover", "tenda": "cover",
+            "blind": "cover", "curtain": "cover", "shutter": "cover", "cover": "cover",
+            "volet": "cover", "rideau": "cover", "store": "cover",
+            "estor": "cover", "toldo": "cover",
+            "cancello": "cover", "gate": "cover", "garage": "cover",
+            # lock
+            "serratura": "lock", "lock": "lock",
+            "cerradura": "lock", "serrure": "lock",
+            # camera
+            "telecamera": "camera", "camera": "camera", "videocamera": "camera",
+            "camara": "camera", "surveillance": "camera",
+            # alarm
+            "allarme": "alarm_control_panel", "alarm": "alarm_control_panel",
+            "alarma": "alarm_control_panel", "alarme": "alarm_control_panel",
+            # fan
+            "ventilatore": "fan", "fan": "fan",
+            "ventilador": "fan", "ventilateur": "fan",
+            # vacuum
+            "aspirapolvere": "vacuum", "aspiratore": "vacuum",
+            "vacuum": "vacuum", "robot": "vacuum",
+            "aspiradora": "vacuum", "aspirateur": "vacuum",
+        }
         for kw, domain in domain_map.items():
             if kw in msg_lower and domain not in matched_domains:
                 matched_domains.append(domain)
@@ -1097,6 +1291,12 @@ def build_smart_context(user_message: str, intent: str = None, max_chars: int = 
             r'\[CURRENT_DASHBOARD_HTML\][\s\S]*?\[/CURRENT_DASHBOARD_HTML\]', '',
             _clean_user_msg, flags=re.IGNORECASE
         )
+        # Strip [FILE: ...]...[/FILE] blocks — file content contains YAML/JSON keys
+        # that would generate hundreds of false-positive entity keyword matches.
+        _clean_user_msg = re.sub(
+            r'\[FILE:[^\]]*\][\s\S]*?\[/FILE\]', '',
+            _clean_user_msg, flags=re.IGNORECASE
+        )
         _clean_msg_lower = _clean_user_msg.lower()
 
         _ctx_stop = {"mi", "crei", "crea", "una", "un", "la", "il", "con", "i", "de", "dei", "degli",
@@ -1106,7 +1306,34 @@ def build_smart_context(user_message: str, intent: str = None, max_chars: int = 
                      "fotovoltaico", "energia", "energy", "solar", "solare", "impianto", "sono",
                      "voglio", "vorrei", "puoi", "fammi", "bello", "bella", "mostra", "vedi",
                      "which", "that", "this", "show", "see", "have", "about",
-                     "aggiungi", "aggiunge", "modify", "modifica", "anche", "pure"}
+                     "aggiungi", "aggiunge", "modify", "modifica", "anche", "pure",
+                     # Action verbs IT/EN/ES/FR — match no entity names, only add noise
+                     "accende", "accendi", "spegne", "spegni", "apre", "apri", "chiude", "chiudi",
+                     "alza", "abbassa", "attiva", "disattiva", "turn", "open", "close", "toggle",
+                     "imposta", "setta", "metti", "porta", "portami", "dimmi", "dicci",
+                     "enciende", "apaga", "abre", "cierra", "sube", "baja", "activa", "desactiva",
+                     "allume", "eteins", "ouvre", "ferme", "monte", "descend", "active", "desactive",
+                     # Time/schedule words IT/EN/ES/FR
+                     "alle", "ogni", "quando", "dopo", "prima", "orario", "minuti", "secondi",
+                     "dalle", "fino", "sino", "alba", "tramonto", "sunrise", "sunset", "daily",
+                     "cada", "cuando", "despues", "antes", "amanecer", "atardecer", "diario",
+                     "chaque", "quand", "apres", "avant", "aube", "crepuscule", "quotidien",
+                     # Generic request words IT/EN/ES/FR
+                     "vorrei", "potrebbe", "dovrebbe", "potresti", "bisogno", "serve", "riesci",
+                     "please", "help", "want", "need", "give", "tell", "send",
+                     "quiero", "quisiera", "podrias", "necesito", "ayuda", "enviar",
+                     "veux", "voudrais", "pourrais", "besoin", "aide", "envoyer",
+                     # Automation/script/generic structure words IT/EN/ES/FR
+                     "automazione", "automation", "automatizacion", "automatisation",
+                     "script", "trigger", "condition", "action",
+                     "notifica", "notify", "notification", "alert", "avviso",
+                     "notificacion", "alerte", "avertissement"}
+        # When working on a file, also exclude Lovelace-generic words that match hundreds
+        # of unrelated update/package entities (card, package, lovelace, questo, file, yaml…).
+        if _has_file_context:
+            _ctx_stop |= {"card", "cards", "package", "packages", "questo", "questi", "queste",
+                          "file", "yaml", "json", "type", "name", "icon", "list", "item",
+                          "lovelace", "view", "config", "data", "info", "value", "state"}
         _msg_words = [w for w in re.sub(r'[^\w\s]', ' ', _clean_msg_lower).split()
                       if len(w) >= 4 and w not in _ctx_stop]
 
@@ -1145,6 +1372,61 @@ def build_smart_context(user_message: str, intent: str = None, max_chars: int = 
             "presenza": ["motion", "occupancy", "presence"],
             "occupancy": ["occupancy"],
         }
+        # ---- FILE-BASED ENTITY LOOKUP ----
+        # When the user has a file open, extract HA entity IDs directly from the file
+        # content and look up their current states. This replaces the generic keyword
+        # search with precise, zero-noise entity resolution for the file being worked on.
+        if _has_file_context:
+            try:
+                _file_blocks = re.findall(
+                    r'\[FILE:[^\]]*\]([\s\S]*?)\[/FILE\]', user_message, flags=re.IGNORECASE
+                )
+                _file_text = '\n'.join(_file_blocks)
+                _ha_domains = (
+                    r'(?:input_boolean|input_number|input_select|input_datetime|input_text|'
+                    r'sensor|binary_sensor|switch|light|media_player|automation|script|'
+                    r'timer|counter|number|select|text|button|scene|climate|cover|fan|'
+                    r'calendar|device_tracker|person|zone|weather|camera|vacuum|remote|'
+                    r'alarm_control_panel|lock|notify|group|template)'
+                )
+                _file_entity_ids = sorted(set(re.findall(
+                    rf'\b({_ha_domains}\.[a-z][a-z0-9_]+)\b', _file_text
+                )))
+                if _file_entity_ids:
+                    _all_st = api.get_all_states()
+                    _state_map = {s.get("entity_id"): s for s in _all_st}
+                    _file_matched = []
+                    for eid in _file_entity_ids:
+                        s = _state_map.get(eid)
+                        if s:
+                            _file_matched.append({
+                                "entity_id": eid,
+                                "state": s.get("state", "unavailable"),
+                                "friendly_name": s.get("attributes", {}).get("friendly_name", ""),
+                                "unit": s.get("attributes", {}).get("unit_of_measurement", ""),
+                                "device_class": s.get("attributes", {}).get("device_class", ""),
+                            })
+                    if _file_matched:
+                        _found_header = {
+                            "it": "## ENTITA DEL FILE",
+                            "es": "## ENTIDADES DEL ARCHIVO",
+                            "fr": "## ENTITES DU FICHIER",
+                        }.get(api.LANGUAGE, "## FILE ENTITIES")
+                        context_parts.append(
+                            f"{_found_header} ({len(_file_matched)} of {len(_file_entity_ids)} found in HA)\n"
+                            + json.dumps(_file_matched, ensure_ascii=False, indent=1)
+                        )
+                        api._last_smart_context_entity_ids = [
+                            e["entity_id"] for e in _file_matched if e.get("entity_id")
+                        ]
+                        logger.info(
+                            f"Smart context: file entity lookup — {len(_file_entity_ids)} IDs in file, "
+                            f"{len(_file_matched)} found in HA states"
+                        )
+                        _msg_words = []  # skip generic keyword search — file entities take precedence
+            except Exception as _fe:
+                logger.warning(f"Smart context: file entity extraction failed: {_fe}")
+
         if _msg_words and (intent == "create_html_dashboard" or any(k in msg_lower for k in entity_keywords)):
             try:
                 all_states = api.get_all_states()
@@ -1283,13 +1565,37 @@ def build_smart_context(user_message: str, intent: str = None, max_chars: int = 
             # when the AI passes garbage in the entities[] tool argument
             api._last_smart_context_entity_ids = [e["entity_id"] for e in _capped if e.get("entity_id")]
         elif matched_domains:
-            # Fallback: generic domain entities (for non-integration requests)
+            # Fallback: domain entities filtered by room/location words if present.
+            # e.g. "luce sala" → only light entities with "sala" in entity_id or friendly_name.
             states = api.get_all_states()
-            for domain in matched_domains[:3]:  # Max 3 domains
-                domain_entities = [{"entity_id": s.get("entity_id"),
-                                   "state": s.get("state"),
-                                   "friendly_name": s.get("attributes", {}).get("friendly_name", "")}
-                                  for s in states if s.get("entity_id", "").startswith(f"{domain}.")][:30]
+            # Collect location words from the message (words not in entity_keywords or domain_map)
+            _location_words = [
+                w for w in _msg_words
+                if w not in domain_map and w not in entity_keywords
+                and w not in {"luce", "luci", "light", "lights"}
+                and len(w) >= 4
+            ]
+            for domain in matched_domains[:3]:
+                domain_states = [s for s in states if s.get("entity_id", "").startswith(f"{domain}.")]
+                # If location words are present, filter by them first
+                if _location_words:
+                    filtered = [
+                        s for s in domain_states
+                        if any(
+                            lw in s.get("entity_id", "").lower()
+                            or lw in s.get("attributes", {}).get("friendly_name", "").lower()
+                            or lw in s.get("attributes", {}).get("area_id", "").lower()
+                            for lw in _location_words
+                        )
+                    ]
+                    # Use filtered if it found something; otherwise fall back to all domain entities
+                    domain_states = filtered if filtered else domain_states
+                domain_entities = [
+                    {"entity_id": s.get("entity_id"),
+                     "state": s.get("state"),
+                     "friendly_name": s.get("attributes", {}).get("friendly_name", "")}
+                    for s in domain_states
+                ][:30]
                 if domain_entities:
                     _domain_header = {
                         "it": f"## ENTITA {domain.upper()}",

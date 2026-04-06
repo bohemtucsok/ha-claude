@@ -12,6 +12,10 @@ Endpoints:
 - POST /api/mcp/install
 - GET /api/mcp/server/<server_name>/tools
 - GET /api/mcp/conversations/<session_id>/messages
+- GET /api/mcp/server/<server_name>/oauth/start
+- GET /api/mcp/oauth/callback
+- GET /api/mcp/server/<server_name>/oauth/status
+- POST /api/mcp/server/<server_name>/oauth/revoke
 """
 
 import json
@@ -438,6 +442,113 @@ def api_mcp_server_tools(server_name):
     except Exception as e:
         logger.error(f"MCP server tools error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# MCP OAuth 2.0 endpoints
+# ---------------------------------------------------------------------------
+
+@mcp_bp.route('/api/mcp/server/<server_name>/oauth/start', methods=['GET'])
+def api_mcp_oauth_start(server_name):
+    """Begin the OAuth Authorization Code + PKCE flow for an MCP server.
+
+    Returns {authorize_url, state} — the UI opens authorize_url in a popup/tab.
+    """
+    import api as _api
+    try:
+        raw_cfg = _api._load_mcp_config_servers()
+        srv_cfg = raw_cfg.get(server_name) or {}
+        # Accept URL from query param (UI not yet saved) or from saved config
+        mcp_url = request.args.get("url", "").strip() or srv_cfg.get("url") or ""
+        if not mcp_url:
+            return jsonify({"ok": False, "error": f"Server '{server_name}' has no URL or is not HTTP"}), 400
+
+        scope = srv_cfg.get("oauth_scope", "")
+
+        # Use redirect_uri from frontend (browser knows the correct absolute URL)
+        redirect_uri = request.args.get("redirect_uri", "").strip()
+        if not redirect_uri:
+            # Fallback: build from ingress URL
+            ingress_url = (_api.get_addon_ingress_url() or "").rstrip("/")
+            redirect_uri = f"{ingress_url}/api/mcp/oauth/callback"
+
+        import mcp_oauth
+        result = mcp_oauth.start_oauth_flow(server_name, mcp_url, redirect_uri, scope)
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"MCP OAuth start error for '{server_name}': {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@mcp_bp.route('/api/mcp/oauth/callback', methods=['GET'])
+def api_mcp_oauth_callback():
+    """OAuth redirect callback — exchanges the authorization code for tokens.
+
+    The OAuth provider redirects here after the user grants access.
+    Returns an HTML page that closes itself (popup flow) or shows status.
+    """
+    from flask import make_response
+    code = request.args.get("code", "").strip()
+    state = request.args.get("state", "").strip()
+    error = request.args.get("error", "").strip()
+
+    if error:
+        html = f"""<!DOCTYPE html><html><body>
+<h2>OAuth error: {error}</h2>
+<p>{request.args.get('error_description','')}</p>
+<script>window.close();</script>
+</body></html>"""
+        return make_response(html, 400)
+
+    if not code or not state:
+        html = """<!DOCTYPE html><html><body>
+<h2>Missing code or state</h2>
+<script>window.close();</script>
+</body></html>"""
+        return make_response(html, 400)
+
+    import mcp_oauth
+    result = mcp_oauth.handle_callback(code, state)
+
+    if result.get("ok"):
+        server_name = result.get("server_name", "")
+        scope = result.get("scope", "")
+        html = f"""<!DOCTYPE html><html><body>
+<h2>&#10003; Connected: {server_name}</h2>
+<p>Scope: {scope or '(default)'}</p>
+<p>You can close this window.</p>
+<script>
+  if (window.opener) {{
+    window.opener.postMessage({{type:'mcp_oauth_done', server:'{server_name}', ok:true}}, '*');
+  }}
+  setTimeout(()=>window.close(), 2000);
+</script>
+</body></html>"""
+        return make_response(html, 200)
+    else:
+        err = result.get("error", "Unknown error")
+        html = f"""<!DOCTYPE html><html><body>
+<h2>&#10007; OAuth failed</h2>
+<p>{err}</p>
+<script>window.close();</script>
+</body></html>"""
+        return make_response(html, 400)
+
+
+@mcp_bp.route('/api/mcp/server/<server_name>/oauth/status', methods=['GET'])
+def api_mcp_oauth_status(server_name):
+    """Return current OAuth token status for an MCP server."""
+    import mcp_oauth
+    status = mcp_oauth.get_token_status(server_name)
+    return jsonify(status), 200
+
+
+@mcp_bp.route('/api/mcp/server/<server_name>/oauth/revoke', methods=['POST'])
+def api_mcp_oauth_revoke(server_name):
+    """Revoke (delete) stored OAuth token for an MCP server."""
+    import mcp_oauth
+    mcp_oauth.delete_token(server_name)
+    return jsonify({"ok": True, "server_name": server_name}), 200
 
 
 @mcp_bp.route('/api/mcp/conversations/<session_id>/messages', methods=['GET'])

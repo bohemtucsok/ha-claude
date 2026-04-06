@@ -209,7 +209,7 @@ OPENAI_CODEX_TOKEN = os.getenv("OPENAI_CODEX_TOKEN", "")
 CUSTOM_API_KEY = os.getenv("CUSTOM_API_KEY", "")
 CUSTOM_API_BASE = os.getenv("CUSTOM_API_BASE", "")
 CUSTOM_MODEL_NAME = os.getenv("CUSTOM_MODEL_NAME", "")
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "")
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "")
 
 
@@ -915,8 +915,13 @@ try:
     for _pid in list(_PROVIDER_CLASSES):
         try:
             _cls = _get_provider_class(_pid)
-            # Ollama needs the user-configured base_url to reach the server
+            # Ollama needs the user-configured base_url to reach the server.
+            # Skip entirely if no URL is configured — avoids a useless connection attempt.
             if _pid == "ollama":
+                if not OLLAMA_BASE_URL:
+                    continue
+                import logging as _log2
+                _log2.getLogger(__name__).info(f"Ollama: probing {OLLAMA_BASE_URL} ...")
                 _inst = _cls(base_url=OLLAMA_BASE_URL)
             else:
                 _inst = _cls()
@@ -928,8 +933,13 @@ try:
                 if not FIXED_PROVIDER_MODELS.get(_pid):
                     FIXED_PROVIDER_MODELS[_pid] = list(_live)
                 _dynamic_ok.append(f"{_pid}({len(_live)})")
+            elif _pid == "ollama":
+                import logging as _log2
+                _log2.getLogger(__name__).warning(
+                    f"Ollama: no models found at {OLLAMA_BASE_URL} — server unreachable or no models installed"
+                )
         except Exception as _e:
-            _dynamic_fail.append(f"{_pid}:{_e.__class__.__name__}")
+            _dynamic_fail.append(f"{_pid}:{_e.__class__.__name__}:{_e}")
     import logging as _log
     _dlog = _log.getLogger(__name__)
     if _dynamic_ok:
@@ -3173,6 +3183,7 @@ def _is_mcp_data_request(text: str) -> bool:
 
 def chat_with_ai(user_message: str, session_id: str = "default") -> str:
     """Send a message to the configured AI provider with HA tools."""
+    logger.chat(f"📨 [{AI_PROVIDER}]: {_strip_context_for_log(user_message)}")
     # Debug: log which system prompt source is active
     _sp_override = AGENT_SYSTEM_PROMPT_OVERRIDE
     _sp_custom   = CUSTOM_SYSTEM_PROMPT
@@ -3544,6 +3555,7 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
     saved_user_message = saved_user_message.strip()
 
     # ── Early check: is the SDK for the chosen provider actually installed? ────
+    from routes.ui_routes import _check_provider_sdk
     _sdk_ok, _sdk_msg = _check_provider_sdk(AI_PROVIDER)
     if not _sdk_ok:
         yield {"type": "error", "message": f"⚠️ {_sdk_msg}"}
@@ -3564,6 +3576,11 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
 
     if session_id not in conversations:
         conversations[session_id] = []
+
+    if image_data:
+        logger.chat(f"📨 [{AI_PROVIDER}] with image: {_strip_context_for_log(user_message)[:50]}...")
+    else:
+        logger.chat(f"📨 [{AI_PROVIDER}]: {_strip_context_for_log(user_message)}")
 
     _lean_mode = str(CHAT_INTERACTION_MODE).lower().strip() == "lean"
 
@@ -4022,31 +4039,53 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
             # Ensure dynamic MCP tools are always visible to the model, even when
             # ToolRegistry is active (registry is initialized from legacy static tools
             # and does not include runtime-discovered MCP tools by default).
-            try:
-                if MCP_AVAILABLE:
-                    _schemas = intent_info.get("tool_schemas") or []
-                    _existing_names = {
-                        t.get("function", {}).get("name", "")
-                        for t in _schemas
-                    }
-                    _mcp_dynamic = []
-                    _mgr = mcp.get_mcp_manager()
-                    for _tool_name, _tool_info in (_mgr.get_all_tools() or {}).items():
-                        if _tool_name in _existing_names:
-                            continue
-                        _mcp_dynamic.append({
-                            "type": "function",
-                            "function": {
-                                "name": _tool_name,
-                                "description": f"{_tool_info.get('description', '')} (MCP: {_tool_info.get('server', 'unknown')})",
-                                "parameters": _tool_info.get("inputSchema", {"type": "object", "properties": {}}),
-                            }
-                        })
-                    if _mcp_dynamic:
-                        intent_info["tool_schemas"] = _schemas + _mcp_dynamic
-                        logger.info(f"MCP tools injected into tool_schemas: +{len(_mcp_dynamic)}")
-            except Exception as _mcp_inject_err:
-                logger.warning(f"MCP tool schema injection failed: {_mcp_inject_err}")
+            # Skip injection for chat intent (tools=[]) — no tools should be available.
+            if intent_info.get("tools") != []:
+                try:
+                    if MCP_AVAILABLE:
+                        _schemas = intent_info.get("tool_schemas") or []
+                        _existing_names = {
+                            t.get("function", {}).get("name", "")
+                            for t in _schemas
+                        }
+                        _mcp_dynamic = []
+                        _mgr = mcp.get_mcp_manager()
+                        for _tool_name, _tool_info in (_mgr.get_all_tools() or {}).items():
+                            if _tool_name in _existing_names:
+                                continue
+                            _desc = _tool_info.get('description', '')
+                            _server_name = _tool_info.get('server', 'unknown')
+                            # For filesystem tools, add root path hint so the LLM
+                            # doesn't double-prefix paths (e.g. /config/config).
+                            if "filesystem" in _tool_name:
+                                _srv_obj = (_mgr.servers or {}).get(_server_name)
+                                if _srv_obj:
+                                    _srv_args = _srv_obj.config.get("args", [])
+                                    _fs_root = next(
+                                        (a for a in reversed(_srv_args)
+                                         if isinstance(a, str) and a.startswith("/")),
+                                        None
+                                    )
+                                    if _fs_root:
+                                        _desc = (
+                                            f"{_desc} "
+                                            f"[filesystem root: '{_fs_root}'; "
+                                            f"pass paths relative to this root, "
+                                            f"e.g. '/packages' NOT '{_fs_root}/packages']"
+                                        )
+                            _mcp_dynamic.append({
+                                "type": "function",
+                                "function": {
+                                    "name": _tool_name,
+                                    "description": f"{_desc} (MCP: {_server_name})",
+                                    "parameters": _tool_info.get("inputSchema", {"type": "object", "properties": {}}),
+                                }
+                            })
+                        if _mcp_dynamic:
+                            intent_info["tool_schemas"] = _schemas + _mcp_dynamic
+                            logger.info(f"MCP tools injected into tool_schemas: +{len(_mcp_dynamic)}")
+                except Exception as _mcp_inject_err:
+                    logger.warning(f"MCP tool schema injection failed: {_mcp_inject_err}")
 
             # When a skill is active the model only needs to generate content (YAML cards,
             # HTML, etc.) — HA control tools are irrelevant and waste tokens.
@@ -4090,6 +4129,11 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
         except Exception:
             _mcp_tool_count = 0
         _mcp_guard_enabled = _mcp_guard_maybe_needed and _mcp_tool_count > 0
+
+        # Pass session_id to providers so they can maintain native conversation state
+        # (e.g. claude_web reuses the same claude.ai conversation across turns).
+        if intent_info is not None:
+            intent_info["session_id"] = session_id
 
         # Tool execution loop: providers surface tool_calls in the done event;
         # we execute them here and loop until the model produces a final answer.
@@ -5678,7 +5722,13 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                 r"turn\s*on|turn\s*off|switch\s*on|switch\s*off|open|close|enable|disable)\b",
                 re.IGNORECASE,
             )
-            _user_asked_action = bool(_ACTION_REQUEST_RE.search(str(user_message or "")))
+            # Strip [FILE:...]...[/FILE] blocks before checking — YAML/JSON files
+            # often contain keywords like enable/disable/open that are not user actions.
+            _um_for_action_check = re.sub(
+                r'\[FILE:[^\]]*\][\s\S]*?\[/FILE\]', '', str(user_message or ''),
+                flags=re.IGNORECASE
+            )
+            _user_asked_action = bool(_ACTION_REQUEST_RE.search(_um_for_action_check))
             # Fallback for no-tool providers:
             # if user asked a simple on/off action and the model produced text only,
             # execute via backend tools to avoid "no action performed" dead-ends.
@@ -5750,13 +5800,16 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
                         logger.warning(f"No-tool fallback action failed: {_fb_e}")
 
             _looks_like_fake_success = any(p in assembled.lower() for p in _HALLUCINATED_SUCCESS_PHRASES)
+            # A response containing a code block is code generation, never a fake action.
+            _assembled_has_code = '```' in assembled
             if (
                 _is_no_tool_provider
                 and assembled
                 and not _write_tools_executed
                 and not _preview_generated_this_turn
                 and not _lean_mode
-                and intent_name not in ("chat", "create_html_dashboard")
+                and not _assembled_has_code
+                and intent_name not in ("chat", "create_html_dashboard", "card_editor")
                 and (_looks_like_fake_success or _user_asked_action)
             ):
                 _warn = get_lang_text("warn_no_tool_called_with_guidance") or get_lang_text("warn_no_tool_called") or (
@@ -6108,268 +6161,14 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
 # ---- Flask Routes ----
 
 
-@app.route('/')
-def index():
-    """Serve the chat UI."""
-    try:
-        logger.info("Generating chat UI...")
-        html = chat_ui.get_chat_ui()
-        logger.info("Chat UI generated successfully")
-        
-        # Sanitize surrogates that cause UnicodeEncodeError
-        html = html.encode('utf-8', errors='replace').decode('utf-8', errors='replace')
-        
-        return Response(
-            html,
-            mimetype='text/html; charset=utf-8',
-            headers={
-                'Cache-Control': 'no-store, max-age=0',
-                'Pragma': 'no-cache',
-                'Expires': '0',
-            }
-        )
-    except Exception as e:
-        logger.error(f"Error generating chat UI: {type(e).__name__}: {str(e)}", exc_info=True)
-        # Return JSON error instead of HTML to see the actual message
-        return {"error": f"Error generating UI: {type(e).__name__}: {str(e)}"}, 500
-
-
-@app.route('/ui_bootstrap.js')
-def ui_bootstrap_js():
-    """Small bootstrap script loaded before the main inline UI.
-
-    Purpose: if the large inline script fails to parse/execute (Ingress/CSP/cache/etc.),
-    we still get a server log signal and a visible error when pressing Send.
-    """
-    js = r"""
-(function () {
-    function appendSystem(text) {
-        try {
-            var container = document.getElementById('chat');
-            if (!container) return;
-            var div = document.createElement('div');
-            div.className = 'message system';
-            div.textContent = String(text || '');
-            container.appendChild(div);
-            container.scrollTop = container.scrollHeight;
-        } catch (e) {}
-    }
-
-    // Lightweight ping so the add-on logs show the browser executed JS.
-    try {
-        fetch('./api/ui_ping', { cache: 'no-store' }).catch(function () {});
-    } catch (e) {}
-
-    function onSendAttempt(evt) {
-        try {
-            // If the main UI didn't load, explain it directly.
-            if (typeof window.handleButtonClick !== 'function') {
-                appendSystem('❌ UI error: main script not loaded (handleButtonClick missing).');
-                try { fetch('./api/ui_ping?send=1', { cache: 'no-store' }).catch(function () {}); } catch (e) {}
-                if (evt && evt.preventDefault) evt.preventDefault();
-                return false;
-            }
-        } catch (e) {}
-        return true;
-    }
-
-    function bind() {
-        try {
-            var btn = document.getElementById('sendBtn');
-            if (btn && !btn._bootstrapBound) {
-                btn._bootstrapBound = true;
-                btn.addEventListener('click', onSendAttempt, true);
-            }
-            var input = document.getElementById('input');
-            if (input && !input._bootstrapKeyBound) {
-                input._bootstrapKeyBound = true;
-                input.addEventListener('keydown', function (e) {
-                    if (e && e.key === 'Enter' && !e.shiftKey) {
-                        onSendAttempt(e);
-                    }
-                }, true);
-            }
-        } catch (e) {}
-    }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', bind);
-    } else {
-        bind();
-    }
-})();
-"""
-    return js, 200, {
-        'Content-Type': 'application/javascript; charset=utf-8',
-        'Cache-Control': 'no-store, max-age=0',
-        'Pragma': 'no-cache',
-        'Expires': '0',
-    }
-
-
-@app.route('/ui_main.js')
-def ui_main_js():
-    """Serve the main UI script as an external JS file.
-
-    Home Assistant Ingress commonly enforces a strict CSP that blocks inline
-    scripts and inline event handlers. Serving the same code as an external
-    script allows the UI to boot.
-
-    Implementation detail: we extract the inline `<script>...</script>` from
-    the HTML so there's a single source of truth.
-    """
-    html = chat_ui.get_chat_ui()
-    # Use negative lookahead to exclude <script src="..."> tags
-    m = re.search(r"<script(?!\s+src\s*=)[^>]*>\s*(.*?)\s*</script>", html, flags=re.S | re.I)
-    js = (m.group(1) if m else "")
-    if not js:
-        logger.error("ui_main.js extraction failed: no inline <script> found")
-        return js, 200, {'Content-Type': 'application/javascript; charset=utf-8'}
-    
-    # Fix newlines that break regex patterns (from Python/source line wrapping)
-    # Only collapse newlines within regex delimiters: /...NEWLINE.../
-    # Must NOT match across lines with // comments
-    lines = js.split('\n')
-    result = []
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        # Check if line ends with / and next line could complete it
-        if i < len(lines) - 1 and line.rstrip().endswith('/') and not line.rstrip().endswith('//'):
-            # This line might be an incomplete regex - the / without closing /
-            next_line = lines[i + 1]
-            # If the next line starts with potential regex continuation
-            if re.match(r'^\s*[^/]*?/[igm]*', next_line):
-                # Likely a regex split across lines - join them
-                result.append(line.rstrip() + ' ' + next_line.lstrip())
-                i += 2
-                continue
-        result.append(line)
-        i += 1
-    js = '\n'.join(result)
-    
-    return js, 200, {
-        'Content-Type': 'application/javascript; charset=utf-8',
-        'Cache-Control': 'no-store, max-age=0',
-        'Pragma': 'no-cache',
-        'Expires': '0',
-    }
-
-
-# ── SDK availability helpers (used by /api/status, /api/system/features, chat) ──
-
-# Maps provider name → Python package needed to chat.
-# Providers not listed here use httpx (already in core).
-_PROVIDER_SDK_MAP = {
-    "anthropic": "anthropic",
-    "openai": "openai",
-    "google": None,   # uses httpx directly (no google-genai SDK needed at runtime)
-    "nvidia": None,    # OpenAI-compat via httpx
-    "github": None,    # OpenAI-compat via httpx
-    "groq": None,
-    "mistral": None,
-    "deepseek": None,
-    "xai": None,
-    "openrouter": None,
-    "ollama": None,
-    "custom": None,
-    "minimax": None,
-    "aihubmix": None,
-    "siliconflow": None,
-    "volcengine": None,
-    "dashscope": None,
-    "moonshot": None,
-    "zhipu": None,
-    "perplexity": None,
-    "github_copilot": None,
-    "openai_codex": None,
-    "claude_web": None,
-    "chatgpt_web": None,
-    "gemini_web": None,
-    "perplexity_web": None,
-}
-
-def _check_optional_sdks() -> dict:
-    """Quick import-check for every optional dependency. Returns {name: bool}."""
-    pkgs = ["anthropic", "openai", "google.genai", "mcp", "telegram", "twilio", "discord", "PyPDF2", "docx"]
-    out = {}
-    for name in pkgs:
-        try:
-            __import__(name)
-            out[name] = True
-        except ImportError:
-            out[name] = False
-    return out
-
-
-def _check_provider_sdk(provider: str) -> tuple:
-    """Check if the SDK needed by the given provider is installed.
-
-    Returns:
-        (True, "")           – SDK available or not needed.
-        (False, human_msg)   – SDK missing, human_msg explains what to do.
-    """
-    sdk = _PROVIDER_SDK_MAP.get(provider)
-    if sdk is None:
-        return (True, "")
-    try:
-        __import__(sdk)
-        return (True, "")
-    except ImportError:
-        _msgs = {
-            "en": f"The '{sdk}' package is not installed. Provider '{provider}' cannot work. "
-                  f"This can happen on ARM/Raspberry Pi devices where some packages fail to compile.",
-            "it": f"Il pacchetto '{sdk}' non è installato. Il provider '{provider}' non può funzionare. "
-                  f"Questo può succedere su dispositivi ARM/Raspberry Pi dove alcuni pacchetti non si compilano.",
-            "es": f"El paquete '{sdk}' no está instalado. El proveedor '{provider}' no puede funcionar. "
-                  f"Esto puede ocurrir en dispositivos ARM/Raspberry Pi.",
-            "fr": f"Le package '{sdk}' n'est pas installé. Le fournisseur '{provider}' ne peut pas fonctionner. "
-                  f"Cela peut se produire sur les appareils ARM/Raspberry Pi.",
-        }
-        return (False, _msgs.get(LANGUAGE, _msgs["en"]))
-
-
-@app.route('/api/ui_ping', methods=['GET'])
-def api_ui_ping():
-    """No-op endpoint used only to confirm that the browser executed JS."""
-    # Intentionally returns empty 204; request/response are logged by middleware.
-    return ("", 204)
-
-
-@app.route('/api/status')
-def api_status():
-    """Debug endpoint to check HA connection status."""
-    token = get_ha_token()
-    ha_ok = False
-    ha_msg = ""
-    try:
-        resp = requests.get(f"{HA_URL}/api/", headers=get_ha_headers(), timeout=10)
-        ha_ok = resp.status_code == 200
-        ha_msg = f"{resp.status_code}: {resp.text[:200]}"
-    except Exception as e:
-        ha_msg = str(e)
-
-    # Check optional SDK availability
-    pkg_status = _check_optional_sdks()
-    missing = [k for k, v in pkg_status.items() if not v]
-    provider_sdk_ok, provider_sdk_msg = _check_provider_sdk(AI_PROVIDER)
-
-    return jsonify({
-        "version": VERSION,
-        "provider": AI_PROVIDER,
-        "model": get_active_model(),
-        "api_key_set": bool(get_api_key()),
-        "ha_url": HA_URL,
-        "supervisor_token_present": bool(token),
-        "supervisor_token_length": len(token),
-        "ha_connection_ok": ha_ok,
-        "ha_response": ha_msg,
-        "provider_sdk_available": provider_sdk_ok,
-        "provider_sdk_message": provider_sdk_msg,
-        "optional_packages": pkg_status,
-        "missing_packages": missing,
-        "platform": __import__('platform').machine(),
-    })
+# moved to routes/ui_routes.py: index
+# moved to routes/ui_routes.py: ui_bootstrap_js
+# moved to routes/ui_routes.py: ui_main_js
+# moved to routes/ui_routes.py: _PROVIDER_SDK_MAP
+# moved to routes/ui_routes.py: _check_optional_sdks
+# moved to routes/ui_routes.py: _check_provider_sdk
+# moved to routes/ui_routes.py: api_ui_ping
+# moved to routes/ui_routes.py: api_status
 
 
 
@@ -6629,674 +6428,35 @@ def cleanup_chat_bubble():
         logger.warning(f"Chat bubble cleanup failed: {e}")
 
 
-@app.route('/api/bubble/status', methods=['GET'])
-def api_bubble_status():
-    """Diagnostic endpoint: check chat bubble registration status."""
-    loader_path = os.path.join(HA_CONFIG_DIR, "www", "ha-claude-chat-bubble.js")
-    module_paths = {
-        "loader": loader_path,
-        "bubble": os.path.join(HA_CONFIG_DIR, "www", "ha-claude-chat-bubble.bubble.js"),
-        "card": os.path.join(HA_CONFIG_DIR, "www", "ha-claude-chat-bubble.card.js"),
-        "automation": os.path.join(HA_CONFIG_DIR, "www", "ha-claude-chat-bubble.automation.js"),
-    }
-    module_files = {}
-    for name, p in module_paths.items():
-        ex = os.path.isfile(p)
-        module_files[name] = {
-            "path": p,
-            "exists": ex,
-            "size_bytes": (os.path.getsize(p) if ex else 0),
-        }
-
-    ingress_url = get_addon_ingress_url()
-
-    # Check Lovelace resource registration
-    resource_info = None
-    try:
-        ws_result = call_ha_websocket("lovelace/resources/list")
-        if isinstance(ws_result, dict) and ws_result.get("success") is False:
-            resource_info = {"error": "resources API unavailable (YAML mode?)", "raw": str(ws_result)}
-        else:
-            resources = ws_result
-            if isinstance(ws_result, dict):
-                resources = ws_result.get("result", [])
-            found = []
-            if isinstance(resources, list):
-                for res in resources:
-                    if isinstance(res, dict) and "ha-claude-chat-bubble" in res.get("url", ""):
-                        found.append({"id": res.get("id"), "url": res.get("url"), "type": res.get("type")})
-            resource_info = {"registered": len(found) > 0, "entries": found, "total_resources": len(resources) if isinstance(resources, list) else 0}
-    except Exception as e:
-        resource_info = {"error": str(e)}
-
-    return jsonify({
-        "bubble_enabled": ENABLE_CHAT_BUBBLE,
-        "card_button_enabled": ENABLE_AMIRA_CARD_BUTTON,
-        "automation_button_enabled": ENABLE_AMIRA_AUTOMATION_BUTTON,
-        "registered_flag": _chat_bubble_registered,
-        "ingress_url": ingress_url or "(empty)",
-        "js_file": module_files["loader"],  # backward-compat for old UI
-        "module_files": module_files,
-        "lovelace_resource": resource_info,
-        "hint": "After registering, do a FULL browser refresh (Ctrl+Shift+R) on your HA dashboard. Loader + 3 modules must all be present.",
-    })
+# moved to routes/bubble_routes.py: api_bubble_status
 
 
-@app.route('/api/bubble/register', methods=['POST'])
-def api_bubble_register():
-    """Force re-registration of the chat bubble Lovelace resource."""
-    global _chat_bubble_registered
-    _chat_bubble_registered = False
-    # Clear ingress URL cache so it's fetched fresh
-    global _ingress_url_cache
-    _ingress_url_cache = None
-    setup_chat_bubble()
-    return jsonify({"ok": _chat_bubble_registered, "message": "Re-registration attempted. Check /api/bubble/status for details."})
+# moved to routes/bubble_routes.py: api_bubble_register
 
 
-@app.route('/api/set_model', methods=['POST'])
-def api_set_model():
-    global AI_PROVIDER, AI_MODEL, SELECTED_MODEL, SELECTED_PROVIDER, ai_client
-
-    data = request.json or {}
-
-    if "provider" in data:
-        AI_PROVIDER = data["provider"]
-
-        # When changing provider without specifying a model: reset selection and use provider default.
-        if "model" not in data:
-            SELECTED_MODEL = ""
-            SELECTED_PROVIDER = ""
-            default_model = PROVIDER_DEFAULTS.get(AI_PROVIDER, {}).get("model")
-            if default_model:
-                AI_MODEL = default_model
-            logger.info(f"Provider changed to {AI_PROVIDER}, reset to default model: {AI_MODEL}")
-
-    if "model" in data:
-        normalized = normalize_model_name(data["model"])
-
-        # Solo Anthropic, OpenAI e Google hanno modelli esclusivi propri.
-        # Tutti gli altri provider (NVIDIA, GitHub, Groq, Mistral, OpenRouter, SiliconFlow, ecc.)
-        # ospitano modelli di vendor diversi → accettare qualsiasi modello selezionato dall'utente
-        # per quel provider senza checks di compatibilità.
-        _STRICT_PROVIDERS = {"anthropic", "openai", "google"}
-
-        # Enforce compatibility only for strict single-vendor providers.
-        if "provider" in data and AI_PROVIDER in _STRICT_PROVIDERS:
-            model_provider = get_model_provider(normalized)
-            if model_provider not in ("unknown", AI_PROVIDER):
-                SELECTED_MODEL = ""
-                SELECTED_PROVIDER = ""
-                default_model = PROVIDER_DEFAULTS.get(AI_PROVIDER, {}).get("model")
-                if default_model:
-                    AI_MODEL = default_model
-                logger.warning(
-                    f"Ignoring incompatible model '{normalized}' for provider '{AI_PROVIDER}'. Using default '{AI_MODEL}'."
-                )
-            else:
-                AI_MODEL = normalized
-                SELECTED_MODEL = normalized
-                SELECTED_PROVIDER = AI_PROVIDER
-        else:
-            AI_MODEL = normalized
-            SELECTED_MODEL = normalized
-            SELECTED_PROVIDER = AI_PROVIDER
-
-    logger.info(f"Runtime model changed → {AI_PROVIDER} / {AI_MODEL}")
-
-    # Reinitialize client so provider switches don't keep a stale client instance
-    try:
-        initialize_ai_client()
-    except Exception as e:
-        logger.exception(f"Failed to reinitialize AI client after model/provider change: {e}")
-        return jsonify({
-            "success": False,
-            "error": "Failed to initialize AI client for selected provider/model",
-            "provider": AI_PROVIDER,
-            "model": AI_MODEL,
-        }), 500
-
-    # Persist selection so it becomes the single source of truth
-    try:
-        save_runtime_selection(AI_PROVIDER, AI_MODEL)
-    except Exception:
-        pass
-
-    # Clear model fallback cooldown for the new provider (fresh start)
-    if MODEL_FALLBACK_AVAILABLE:
-        try:
-            model_fallback.clear_cooldown(AI_PROVIDER)
-        except Exception:
-            pass
-
-    # Compute tool tier for the new provider/model so the UI can warn the user
-    try:
-        _tier = tools._get_tool_tier()
-        _TIER_MISSING = {
-            # compact: includes create/update/preview automation + create_dashboard, but lacks
-            # script management, dashboard editing, file access, delete ops, and many advanced tools
-            "compact": ["update_dashboard", "delete_automation", "create_script", "update_script",
-                        "list_config_files", "read_config_file", "get_scripts", "get_dashboards", "get_areas"],
-            # extended: adds file/listing tools over compact but still lacks write-heavy ops
-            "extended": ["update_dashboard", "delete_automation", "create_script", "update_script"],
-        }
-        _missing = _TIER_MISSING.get(_tier, [])
-        if _tier in ("compact", "extended") and _missing:
-            _tpl = get_lang_text("warn_tier_limited") or "\u26a0\ufe0f Limited mode ({tier}): advanced features not available ({missing}). Switch to a more capable model."
-            _tier_warning_msg = _tpl.format(tier=_tier, missing=", ".join(_missing))
-        else:
-            _tier_warning_msg = ""
-    except Exception:
-        _tier = "full"
-        _missing = []
-        _tier_warning_msg = ""
-
-    # Build response with agent identity if available
-    resp = {
-        "success": True,
-        "provider": AI_PROVIDER,
-        "model": AI_MODEL,
-        "tier": _tier,
-        "tier_limited": _tier in ("compact", "extended"),
-        "tier_missing_tools": _missing,
-        "tier_warning_msg": _tier_warning_msg,
-    }
-    if AGENT_CONFIG_AVAILABLE:
-        try:
-            mgr = agent_config.get_agent_manager()
-            identity = mgr.resolve_identity()
-            resp["agent_identity"] = {
-                "name": identity.name,
-                "emoji": identity.emoji,
-            }
-        except Exception:
-            pass
-
-    return jsonify(resp)
+# moved to routes/bubble_routes.py: api_set_model
 
 
-@app.route('/api/bubble/device-id', methods=['POST'])
-def api_bubble_device_id():
-    """Set or generate a unique device ID for bubble device-specific configuration.
-    
-    This endpoint allows storing a device identifier in localStorage so that
-    custom bubble visibility rules can identify specific phones/tablets/devices.
-    
-    Body (optional): {"device_id": "my-phone", "device_name": "Eleonor's iPhone"}
-    Returns: {"device_id": "...", "device_type": "phone|tablet|desktop"}
-    """
-    try:
-        data = request.get_json() or {}
-        device_id = data.get("device_id", "").strip()
-        device_name = data.get("device_name", "").strip()
-        fingerprint = str(data.get("fingerprint") or "").strip()
-        
-        # Generate device ID if not provided
-        if not device_id:
-            import hashlib
-            import uuid
-            # Prefer deterministic ID from provided fingerprint
-            if fingerprint:
-                device_id = hashlib.md5(fingerprint.encode("utf-8")).hexdigest()[:12]
-            else:
-                device_id = hashlib.md5(str(uuid.uuid4()).encode()).hexdigest()[:12]
-        
-        # Validate: only allow alphanum, dash, underscore
-        if not all(c.isalnum() or c in '-_' for c in device_id):
-            return jsonify({"success": False, "error": "Device ID can only contain alphanumeric, dash, and underscore"}), 400
-        
-        # Log device registration (for admin purposes)
-        logger.info(f"Bubble device registered: id={device_id}, name={device_name}")
-        
-        return jsonify({
-            "success": True,
-            "device_id": device_id,
-            "device_name": device_name or "Device",
-            "instruction": "Store this device_id in your browser's localStorage as 'ha-claude-device-id' to enable device-specific bubble control"
-        }), 200
-    except Exception as e:
-        logger.error(f"Error setting device ID: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+# moved to routes/bubble_routes.py: api_bubble_device_id
+# moved to routes/bubble_routes.py: api_bubble_config
 
 
-@app.route('/api/bubble/config', methods=['GET'])
-def api_bubble_config():
-    """Get current bubble configuration and device visibility rules.
-    
-    Returns information about how the bubble is configured across devices.
-    """
-    try:
-        return jsonify({
-            "success": True,
-            "enabled": ENABLE_CHAT_BUBBLE
-        }), 200
-    except Exception as e:
-        logger.error(f"Error getting bubble config: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+# moved to routes/bubble_routes.py: api_bubble_devices_list
+# moved to routes/bubble_routes.py: api_bubble_devices_register
+# moved to routes/bubble_routes.py: api_bubble_device_update
+# moved to routes/bubble_routes.py: api_bubble_device_delete
 
 
-@app.route('/api/bubble/devices', methods=['GET'])
-def api_bubble_devices_list():
-    """Get list of discovered devices and their bubble visibility settings.
-    
-    Returns all devices that have accessed the bubble, with their settings.
-    Format: {"device_id": {"name": "...", "device_type": "phone|tablet|desktop", "enabled": true, "last_seen": "..."}}
-    """
-    try:
-        devices = load_device_config()
-        return jsonify({
-            "success": True,
-            "devices": devices
-        }), 200
-    except Exception as e:
-        logger.error(f"Error listing devices: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+# moved to routes/settings_routes.py: api_get_config
+# moved to routes/settings_routes.py: api_set_config
+# moved to routes/settings_routes.py: api_get_system_prompt
+# moved to routes/settings_routes.py: api_set_system_prompt
 
 
-@app.route('/api/bubble/devices', methods=['POST'])
-def api_bubble_devices_register():
-    """Register or update a device in the bubble tracking system.
-    
-    Browser calls this on first bubble load to register itself.
-    Body: {"device_id": "...", "device_name": "...", "device_type": "phone|tablet|desktop"}
-    """
-    try:
-        data = request.get_json() or {}
-        device_id = (data.get("device_id") or "").strip()
-        device_name = (data.get("device_name") or "").strip()
-        device_type = (data.get("device_type") or "desktop").lower()
-        fingerprint = str(data.get("fingerprint") or "").strip()
-        if len(fingerprint) > 512:
-            fingerprint = fingerprint[:512]
-        
-        if not device_id or len(device_id) < 4:
-            return jsonify({"success": False, "error": "Invalid device_id"}), 400
-        
-        if device_type not in ("phone", "tablet", "desktop"):
-            device_type = "desktop"
-        
-        devices = load_device_config()
-
-        # Canonicalize by fingerprint to avoid duplicate registrations of same browser/device
-        canonical_id = None
-        if fingerprint:
-            for did, meta in devices.items():
-                if not isinstance(meta, dict):
-                    continue
-                if (meta.get("fingerprint") == fingerprint) and (meta.get("device_type") == device_type):
-                    canonical_id = did
-                    break
-        if canonical_id and canonical_id != device_id:
-            logger.info(f"Device dedupe by fingerprint: {device_id} -> {canonical_id}")
-            device_id = canonical_id
-        
-        # If device doesn't exist yet, add it with default enabled state based on mode
-        is_new_device = device_id not in devices
-        if is_new_device:
-            # Device always enabled by default (management from UI)
-            devices[device_id] = {
-                "name": device_name or f"{device_type.capitalize()}",
-                "device_type": device_type,
-                "fingerprint": fingerprint,
-                "enabled": True,
-                "first_seen": datetime.now().isoformat(),
-                "last_seen": datetime.now().isoformat(),
-            }
-        else:
-            # Update last_seen and name if provided
-            devices[device_id]["last_seen"] = datetime.now().isoformat()
-            if device_name:
-                devices[device_id]["name"] = device_name
-            if fingerprint and not devices[device_id].get("fingerprint"):
-                devices[device_id]["fingerprint"] = fingerprint
-        
-        save_device_config(devices)
-        if is_new_device:
-            logger.info(f"Device registered: {device_id} ({device_type})")
-        else:
-            logger.debug(f"Device updated: {device_id}")
-        
-        # Return whether bubble should be enabled for this device
-        is_enabled = devices[device_id].get("enabled", False)
-        
-        return jsonify({
-            "success": True,
-            "device_id": device_id,
-            "enabled": is_enabled,
-            "message": f"Device registered (enabled: {is_enabled})"
-        }), 200
-    except Exception as e:
-        logger.error(f"Error registering device: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/bubble/devices/<device_id>', methods=['PATCH'])
-def api_bubble_device_update(device_id):
-    """Enable or disable bubble for a specific device.
-    
-    Body: {"enabled": true/false, "name": "..."}
-    """
-    try:
-        device_id = device_id.strip()
-        data = request.get_json() or {}
-        
-        devices = load_device_config()
-        if device_id not in devices:
-            return jsonify({"success": False, "error": "Device not found"}), 404
-        
-        if "enabled" in data:
-            if data["enabled"] is None:
-                # Toggle: invert current state
-                devices[device_id]["enabled"] = not devices[device_id].get("enabled", False)
-            else:
-                devices[device_id]["enabled"] = bool(data["enabled"])
-        
-        if "name" in data and data["name"]:
-            devices[device_id]["name"] = str(data["name"]).strip()
-        
-        save_device_config(devices)
-        logger.info(f"Device updated: {device_id} (enabled: {devices[device_id].get('enabled')})")
-        
-        return jsonify({
-            "success": True,
-            "device": devices[device_id]
-        }), 200
-    except Exception as e:
-        logger.error(f"Error updating device: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/bubble/devices/<device_id>', methods=['DELETE'])
-def api_bubble_device_delete(device_id):
-    """Remove a device from tracking.
-    
-    The device will re-register on next access.
-    """
-    try:
-        device_id = device_id.strip()
-        devices = load_device_config()
-        
-        if device_id in devices:
-            del devices[device_id]
-            save_device_config(devices)
-            logger.info(f"Device deleted: {device_id}")
-            return jsonify({"success": True, "message": f"Device '{device_id}' removed"}), 200
-        
-        return jsonify({"success": False, "error": "Device not found"}), 404
-    except Exception as e:
-        logger.error(f"Error deleting device: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/config', methods=['GET'])
-def api_get_config():
-    """Get current runtime configuration."""
-    return jsonify({
-        "success": True,
-        "config": {
-            "ai_provider": AI_PROVIDER,
-            "ai_model": get_active_model(),
-            "language": LANGUAGE,
-            "debug_mode": DEBUG_MODE,
-            "enable_file_access": ENABLE_FILE_ACCESS,
-            "version": VERSION
-        }
-    })
-
-
-@app.route('/api/config', methods=['POST'])
-def api_set_config():
-    """Update runtime configuration dynamically."""
-    global LANGUAGE, DEBUG_MODE, ENABLE_FILE_ACCESS
-    
-    try:
-        data = request.get_json()
-        updated = []
-        
-        # Update language
-        if 'language' in data:
-            new_lang = data['language'].lower()
-            if new_lang in ['en', 'it', 'es', 'fr']:
-                LANGUAGE = new_lang
-                set_current_language(new_lang)
-                updated.append(f"language={LANGUAGE}")
-                logger.info(f"Language changed to: {LANGUAGE}")
-            else:
-                return jsonify({"success": False, "error": f"Invalid language: {new_lang}. Supported: en, it, es, fr"}), 400
-        
-        # Update debug mode
-        if 'debug_mode' in data:
-            DEBUG_MODE = bool(data['debug_mode'])
-            updated.append(f"debug_mode={DEBUG_MODE}")
-            logger.info(f"Debug mode changed to: {DEBUG_MODE}")
-            logging.getLogger().setLevel(logging.DEBUG if DEBUG_MODE else logging.INFO)
-        
-        # Update file access
-        if 'enable_file_access' in data:
-            ENABLE_FILE_ACCESS = bool(data['enable_file_access'])
-            updated.append(f"enable_file_access={ENABLE_FILE_ACCESS}")
-            logger.info(f"File access changed to: {ENABLE_FILE_ACCESS}")
-        
-        return jsonify({
-            "success": True,
-            "message": f"Configuration updated: {', '.join(updated)}",
-            "config": {
-                "language": LANGUAGE,
-                "debug_mode": DEBUG_MODE,
-                "enable_file_access": ENABLE_FILE_ACCESS
-            }
-        })
-    except Exception as e:
-        logger.error(f"Error updating config: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/system_prompt', methods=['GET'])
-def api_get_system_prompt():
-    """Get the current system prompt."""
-    try:
-        prompt = tools.get_system_prompt()
-        return jsonify({
-            "success": True,
-            "system_prompt": prompt,
-            "length": len(prompt)
-        })
-    except Exception as e:
-        logger.error(f"Error getting system prompt: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/system_prompt', methods=['POST'])
-def api_set_system_prompt():
-    """Override the system prompt dynamically. Use 'reset' to restore default."""
-    global CUSTOM_SYSTEM_PROMPT
-    
-    try:
-        data = request.get_json()
-        new_prompt = data.get('system_prompt')
-        
-        if not new_prompt:
-            return jsonify({"success": False, "error": "system_prompt parameter required"}), 400
-        
-        if new_prompt.lower() == 'reset':
-            CUSTOM_SYSTEM_PROMPT = None
-            _persist_custom_system_prompt_to_disk(None)
-            logger.info("System prompt reset to default")
-            return jsonify({
-                "success": True,
-                "message": "System prompt reset to default",
-                "system_prompt": tools.get_system_prompt()
-            })
-        
-        CUSTOM_SYSTEM_PROMPT = new_prompt
-        _persist_custom_system_prompt_to_disk(CUSTOM_SYSTEM_PROMPT)
-        logger.info(f"System prompt overridden ({len(new_prompt)} chars)")
-        
-        return jsonify({
-            "success": True,
-            "message": "System prompt updated successfully",
-            "system_prompt": CUSTOM_SYSTEM_PROMPT,
-            "length": len(CUSTOM_SYSTEM_PROMPT)
-        })
-    except Exception as e:
-        logger.error(f"Error setting system prompt: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/chat', methods=['POST'])
-def api_chat():
-    """Chat endpoint."""
-    data = request.get_json(silent=True)
-    if data is None or not isinstance(data, dict):
-        logger.warning(
-            f"Invalid JSON body for /api/chat (content_type={request.content_type}, len={request.content_length})",
-            extra={"context": "REQUEST"},
-        )
-        return jsonify({"error": "Invalid JSON"}), 400
-    message = data.get("message", "").strip()
-    session_id = data.get("session_id", "default")
-    if not message:
-        return jsonify({"error": "Empty message"}), 400
-    logger.chat(f"📩 [{AI_PROVIDER}]: {_strip_context_for_log(message)}")
-    global _last_sync_usage
-    _last_sync_usage = {}  # Reset before call
-    response_text = chat_with_ai(message, session_id)
-    # Enrich usage data with cost breakdown (same pipeline as streaming)
-    usage_data = None
-    if _last_sync_usage:
-        try:
-            norm = pricing.normalize_usage(_last_sync_usage)
-            input_tokens = norm["input_tokens"]
-            output_tokens = norm["output_tokens"]
-            cache_read_tokens = norm["cache_read_tokens"]
-            cache_write_tokens = norm["cache_write_tokens"]
-            model_name = _last_sync_usage.get("model") or get_active_model()
-            provider_name = _last_sync_usage.get("provider") or AI_PROVIDER
-            cost_bd = pricing.calculate_cost_breakdown(
-                model_name, provider_name,
-                input_tokens, output_tokens,
-                cache_read_tokens, cache_write_tokens,
-                COST_CURRENCY,
-            )
-            usage_data = {
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "cache_read_tokens": cache_read_tokens,
-                "cache_write_tokens": cache_write_tokens,
-                "cost": cost_bd["total_cost"],
-                "cost_breakdown": {
-                    "input": cost_bd["input_cost"],
-                    "output": cost_bd["output_cost"],
-                    "cache_read": cost_bd["cache_read_cost"],
-                    "cache_write": cost_bd["cache_write_cost"],
-                },
-                "currency": COST_CURRENCY,
-                "model": model_name,
-                "provider": provider_name,
-            }
-            # Log cost
-            _cost_val = cost_bd["total_cost"]
-            _sym = {"USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥"}.get(COST_CURRENCY, COST_CURRENCY)
-            if _cost_val > 0:
-                logger.info(f"💰 {provider_name}/{model_name}: {input_tokens} in + {output_tokens} out → {_sym}{_cost_val:.6f}")
-            else:
-                logger.info(f"💰 {provider_name}/{model_name}: {input_tokens} in + {output_tokens} out → free")
-            # Persist to disk
-            try:
-                from usage_tracker import get_tracker
-                get_tracker().record(usage_data)
-            except Exception:
-                pass
-        except Exception as e:
-            logger.debug(f"Cost enrichment for /api/chat failed: {e}")
-    result = {"response": response_text}
-    if usage_data:
-        result["usage"] = usage_data
-    return jsonify(result), 200
-
-
-@app.route('/api/chat/stream', methods=['POST'])
-def api_chat_stream():
-    """Streaming chat endpoint using Server-Sent Events with image support."""
-    data = request.get_json(silent=True)
-    if data is None or not isinstance(data, dict):
-        logger.warning(
-            f"Invalid JSON body for /api/chat/stream (content_type={request.content_type}, len={request.content_length})",
-            extra={"context": "REQUEST"},
-        )
-        return jsonify({"error": "Invalid JSON"}), 400
-    message = data.get("message", "").strip()
-    session_id = data.get("session_id", "default")
-    image_data = data.get("image", None)  # Base64 image data
-    read_only = data.get("read_only", False)  # Read-only mode flag
-    voice_mode = data.get("voice_mode", False)  # Voice mode: short spoken responses
-    req_language = (data.get("language") or "").lower()[:2] or None  # Per-request language (bubble)
-    if not message:
-        return jsonify({"error": "Empty message"}), 400
-    if image_data:
-        logger.chat(f"📩 [{AI_PROVIDER}] with image: {message[:50]}...")
-    else:
-        log_msg = _strip_context_for_log(message)
-        logger.chat(f"📩 [{AI_PROVIDER}]: {log_msg}")
-    if read_only:
-        logger.info(f"Read-only mode active for session {session_id}")
-    abort_streams[session_id] = False  # Reset abort flag
-
-    def generate():
-        import threading as _threading
-        import queue as _queue
-        q: _queue.Queue = _queue.Queue()
-        _SENTINEL = object()
-
-        def _producer():
-            try:
-                for event in stream_chat_with_ai(message, session_id, image_data, read_only=read_only, voice_mode=voice_mode, req_language=req_language):
-                    q.put(("event", event))
-            except Exception as exc:
-                logger.error(
-                    f"❌ Stream error in stream_chat_with_ai: {type(exc).__name__}: {exc}",
-                    extra={"context": "REQUEST"},
-                )
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}", extra={"context": "REQUEST"})
-                q.put(("error", exc))
-            finally:
-                q.put(("done", _SENTINEL))
-
-        t = _threading.Thread(target=_producer, daemon=True)
-        t.start()
-
-        while True:
-            try:
-                kind, val = q.get(timeout=10)
-            except _queue.Empty:
-                # Keep connection alive while waiting for slow providers (e.g. NVIDIA)
-                yield ": keep-alive\n\n"
-                continue
-
-            if kind == "event":
-                yield f"data: {json.dumps(val, ensure_ascii=False)}\n\n"
-            elif kind == "error":
-                yield f"data: {json.dumps({'type': 'error', 'message': str(val)}, ensure_ascii=False)}\n\n"
-                break
-            else:  # "done"
-                break
-
-    return Response(
-        stream_with_context(generate()),
-        mimetype='text/event-stream',
-        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
-    )
-
-
-@app.route('/api/chat/abort', methods=['POST'])
-def api_chat_abort():
-    """Abort a running stream."""
-    data = request.get_json() or {}
-    session_id = data.get("session_id", "default")
-    abort_streams[session_id] = True
-    logger.info(f"Abort requested for session {session_id}")
-    return jsonify({"status": "abort_requested"}), 200
+# moved to routes/chat_routes.py: api_chat
+# moved to routes/chat_routes.py: api_chat_stream
+# moved to routes/chat_routes.py: api_chat_abort
+# moved to routes/chat_routes.py: api_skill_deactivate
 
 
 # moved to routes/memory_routes.py: api_memory_clear
@@ -7332,212 +6492,17 @@ def _load_mcp_config_servers() -> Dict[str, Dict[str, Any]]:
 
 # ============ Scheduled Tasks Endpoints ============
 
-@app.route('/api/scheduled/stats', methods=['GET'])
-def api_scheduled_stats():
-    """Get scheduled tasks statistics."""
-    try:
-        if not SCHEDULED_TASKS_AVAILABLE:
-            return jsonify({"status": "error", "message": "Scheduled tasks not available"}), 501
-        scheduler = scheduled_tasks.get_scheduler()
-        return jsonify({"status": "success", "scheduler_stats": scheduler.get_stats()}), 200
-    except Exception as e:
-        logger.error(f"Scheduled stats error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route('/api/scheduled/tasks', methods=['GET'])
-def api_scheduled_tasks_list():
-    """List all registered scheduled tasks."""
-    try:
-        if not SCHEDULED_TASKS_AVAILABLE:
-            return jsonify({"status": "error", "message": "Scheduled tasks not available"}), 501
-        scheduler = scheduled_tasks.get_scheduler()
-        tasks = [
-            {
-                "task_id": t.task_id,
-                "name": t.name,
-                "cron": t.cron_expression,
-                "description": t.description,
-                "enabled": t.enabled,
-                "run_count": t.run_count,
-                "last_run": t.last_run,
-                "next_run": t.next_run,
-                "message": t.message,
-                "builtin": t.builtin,
-            }
-            for t in scheduler.tasks.values()
-        ]
-        return jsonify({"status": "success", "tasks": tasks, "count": len(tasks)}), 200
-    except Exception as e:
-        logger.error(f"Scheduled tasks list error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route('/api/scheduled/tasks', methods=['POST'])
-def api_scheduled_tasks_create():
-    """Create a new scheduled task (nanobot-style: cron + message inviato all'agente).
-    JSON body: { "name": "...", "cron": "0 9 * * *", "message": "...", "description": "...", "enabled": true }
-    """
-    try:
-        if not SCHEDULED_TASKS_AVAILABLE:
-            return jsonify({"status": "error", "message": "Scheduled tasks not available"}), 501
-        data = request.json or {}
-        name = data.get("name", "").strip()
-        cron = data.get("cron", "").strip()
-        message = data.get("message", "").strip()
-        if not name or not cron or not message:
-            return jsonify({"status": "error", "message": tr(
-                "scheduler_create_required_fields",
-                "name, cron and message are required",
-            )}), 400
-        task_id = data.get("task_id") or f"task_{uuid.uuid4().hex[:8]}"
-        scheduler = scheduled_tasks.get_scheduler()
-        if task_id in scheduler.tasks:
-            return jsonify({"status": "error", "message": tr(
-                "scheduler_task_already_exists",
-                "Task '{task_id}' already exists",
-                task_id=task_id,
-            )}), 409
-        task = scheduler.add_message_task(
-            task_id=task_id, name=name, cron_expression=cron, message=message,
-            description=data.get("description", ""), enabled=data.get("enabled", True),
-        )
-        return jsonify({"status": "success", "task_id": task.task_id,
-                        "message": tr(
-                            "scheduler_task_created",
-                            "Task '{name}' created ({cron})",
-                            name=name,
-                            cron=cron,
-                        )}), 201
-    except ValueError as e:
-        return jsonify({"status": "error", "message": str(e)}), 400
-    except Exception as e:
-        logger.error(f"Scheduled task create error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route('/api/scheduled/tasks/<task_id>', methods=['DELETE'])
-def api_scheduled_task_delete(task_id):
-    """Elimina un task pianificato (non built-in)."""
-    try:
-        if not SCHEDULED_TASKS_AVAILABLE:
-            return jsonify({"status": "error", "message": "Scheduled tasks not available"}), 501
-        scheduler = scheduled_tasks.get_scheduler()
-        t = scheduler.tasks.get(task_id)
-        if t and t.builtin:
-            return jsonify({"status": "error", "message": tr(
-                "scheduler_task_delete_builtin_forbidden",
-                "Cannot delete a built-in task",
-            )}), 403
-        ok = scheduler.remove_task(task_id)
-        if not ok:
-            return jsonify({"status": "error", "message": tr(
-                "scheduler_task_not_found",
-                "Task '{task_id}' not found",
-                task_id=task_id,
-            )}), 404
-        return jsonify({"status": "success", "message": tr(
-            "scheduler_task_deleted",
-            "Task '{task_id}' deleted",
-            task_id=task_id,
-        )}), 200
-    except Exception as e:
-        logger.error(f"Scheduled task delete error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route('/api/scheduled/tasks/<task_id>/toggle', methods=['POST'])
-def api_scheduled_task_toggle(task_id):
-    """Enable or disable a scheduled task."""
-    try:
-        if not SCHEDULED_TASKS_AVAILABLE:
-            return jsonify({"status": "error", "message": "Scheduled tasks not available"}), 501
-        data = request.json or {}
-        enabled = data.get("enabled", True)
-        scheduler = scheduled_tasks.get_scheduler()
-        if task_id not in scheduler.tasks:
-            return jsonify({"status": "error", "message": f"Task '{task_id}' not found"}), 404
-        scheduler.tasks[task_id].enabled = enabled
-        scheduler.save_tasks()
-        action = "enabled" if enabled else "disabled"
-        return jsonify({"status": "success", "message": f"Task '{task_id}' {action}"}), 200
-    except Exception as e:
-        logger.error(f"Scheduled task toggle error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
+# moved to routes/scheduled_routes.py: api_scheduled_stats
+# moved to routes/scheduled_routes.py: api_scheduled_tasks_list
+# moved to routes/scheduled_routes.py: api_scheduled_tasks_create
+# moved to routes/scheduled_routes.py: api_scheduled_task_delete
+# moved to routes/scheduled_routes.py: api_scheduled_task_toggle
 
 # ============ SchedulerAgent Endpoints ============
 
-@app.route('/api/agent/scheduler', methods=['POST'])
-def api_scheduler_agent_chat():
-    """Chat con lo SchedulerAgent per creare/elencare/gestire task pianificati in linguaggio naturale.
-
-    JSON body: { "message": "...", "session_id": "..." (optional) }
-    """
-    try:
-        if not SCHEDULER_AGENT_AVAILABLE:
-            return jsonify({"status": "error", "message": tr(
-                "scheduler_agent_not_available",
-                "SchedulerAgent not available",
-            )}), 501
-        data = request.json or {}
-        user_message = (data.get("message") or "").strip()
-        if not user_message:
-            return jsonify({"status": "error", "message": tr(
-                "scheduler_message_required",
-                "Field 'message' is required",
-            )}), 400
-        session_id = data.get("session_id") or "default"
-        reply = scheduler_agent.chat(user_message, session_id=session_id)
-        history = scheduler_agent.get_session_history(session_id)
-        # Conta solo i messaggi role=user/assistant (non tool_result)
-        msg_count = sum(
-            1 for m in history
-            if m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str)
-        )
-        return jsonify({
-            "status": "success",
-            "reply": reply,
-            "session_id": session_id,
-            "message_count": len(history),
-        }), 200
-    except Exception as e:
-        logger.error(f"SchedulerAgent chat error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route('/api/agent/scheduler/sessions', methods=['GET'])
-def api_scheduler_agent_sessions():
-    """Elenca tutte le sessioni attive dello SchedulerAgent."""
-    try:
-        if not SCHEDULER_AGENT_AVAILABLE:
-            return jsonify({"status": "error", "message": tr(
-                "scheduler_agent_not_available",
-                "SchedulerAgent not available",
-            )}), 501
-        sessions = scheduler_agent.list_sessions()
-        return jsonify({"status": "success", "sessions": sessions, "count": len(sessions)}), 200
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route('/api/agent/scheduler/session/<session_id>', methods=['DELETE'])
-def api_scheduler_agent_clear_session(session_id):
-    """Cancella la cronologia di una sessione SchedulerAgent."""
-    try:
-        if not SCHEDULER_AGENT_AVAILABLE:
-            return jsonify({"status": "error", "message": tr(
-                "scheduler_agent_not_available",
-                "SchedulerAgent not available",
-            )}), 501
-        scheduler_agent.clear_session(session_id)
-        return jsonify({"status": "success", "message": tr(
-            "scheduler_session_deleted",
-            "Session '{session_id}' deleted",
-            session_id=session_id,
-        )}), 200
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+# moved to routes/scheduled_routes.py: api_scheduler_agent_chat
+# moved to routes/scheduled_routes.py: api_scheduler_agent_sessions
+# moved to routes/scheduled_routes.py: api_scheduler_agent_clear_session
 
 
 # ============ Browser Console Errors Endpoint ============
@@ -7593,263 +6558,18 @@ def api_fallback_clear():
 
 # ============ Messaging Integration Endpoints ============
 
-@app.route('/api/messaging/stats', methods=['GET'])
-def api_messaging_stats():
-    """Get messaging system statistics."""
-    try:
-        from messaging import get_messaging_manager
-        mgr = get_messaging_manager()
-        stats = mgr.get_stats()
-        return jsonify({
-            "status": "success",
-            "messaging_stats": stats,
-        }), 200
-    except Exception as e:
-        logger.error(f"Messaging stats error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+# moved to routes/messaging_routes.py: api_messaging_stats
+# moved to routes/messaging_routes.py: _ai_banner
+# moved to routes/messaging_routes.py: _strip_markdown_for_telegram
 
 
-def _ai_banner() -> str:
-    """Return a short intro line showing the active AI provider and model."""
-    provider = AI_PROVIDER
-    model = get_active_model()
-    display = MODEL_DISPLAY_MAPPING.get(model, model)
-    # Use display name if it contains the provider prefix, else build one
-    if display and any(display.startswith(p) for p in ("Claude", "OpenAI", "Google", "GitHub", "NVIDIA", "Groq", "Mistral", "DeepSeek", "Ollama")):
-        label = display
-    else:
-        label = f"{provider.replace('_', ' ').title()} • {display or model}"
-    return f"🤖 Amira • {label}"
+# moved to routes/messaging_routes.py: api_telegram_message
+# moved to routes/messaging_routes.py: api_discord_message
+# moved to routes/messaging_routes.py: api_messaging_chats
+# moved to routes/messaging_routes.py: api_messaging_chat
 
 
-def _strip_markdown_for_telegram(text: str) -> str:
-    """Strip Markdown formatting for plain-text Telegram messages."""
-    import re
-    # Headers → plain text
-    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
-    # Bold/italic: **text**, *text*, __text__, _text_
-    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
-    text = re.sub(r'__(.+?)__', r'\1', text)
-    text = re.sub(r'\*(.+?)\*', r'\1', text)
-    text = re.sub(r'_(.+?)_', r'\1', text)
-    # Inline code → plain
-    text = re.sub(r'`(.+?)`', r'\1', text)
-    # Fenced code blocks → keep content
-    text = re.sub(r'```[a-z]*\n?', '', text)
-    # Links [text](url) → text
-    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
-    # Horizontal rules
-    text = re.sub(r'^---+$', '', text, flags=re.MULTILINE)
-    return text.strip()
-
-
-@app.route('/api/telegram/message', methods=['POST'])
-def api_telegram_message():
-    """Process incoming Telegram message and return AI response."""
-    if not ENABLE_TELEGRAM:
-        return jsonify({"status": "error", "message": "Telegram is disabled"}), 503
-    try:
-        data = request.get_json()
-        user_id = data.get("user_id")
-        chat_id = data.get("chat_id")
-        text = data.get("text", "").strip()
-        logger.chat(f"📩 Telegram from user {user_id}: {text[:60]}")
-
-        if not text:
-            return jsonify({"status": "error", "message": "Empty message"}), 400
-
-        # Get AI response — session history is already managed by chat_with_ai
-        response_text = ""
-        try:
-            with _apply_channel_agent("telegram"):
-                response_text = chat_with_ai(text, f"telegram_{user_id}")
-        except Exception as e:
-            logger.error(f"Telegram AI response error: {e}")
-            response_text = tr(
-                "telegram_error_prefix",
-                "⚠️ Error: {error}",
-                error=str(e)[:100],
-            )
-
-        # Strip Markdown so Telegram can send plain text without parse errors
-        response_text = _strip_markdown_for_telegram(response_text)
-
-        # Trim to Telegram's limit
-        response_text = response_text[:4096]
-
-        return jsonify({
-            "status": "success",
-            "response": response_text
-        }), 200
-    except Exception as e:
-        logger.error(f"Telegram message error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route('/api/discord/message', methods=['POST'])
-def api_discord_message():
-    """Process incoming Discord message and return AI response."""
-    if not ENABLE_DISCORD:
-        return jsonify({"status": "error", "message": "Discord is disabled"}), 503
-    try:
-        data = request.get_json() or {}
-        user_id = data.get("user_id")
-        channel_id = data.get("channel_id")
-        text = str(data.get("text", "")).strip()
-        logger.chat(f"📩 Discord from user {user_id} in channel {channel_id}: {text[:60]}")
-
-        if not text:
-            return jsonify({"status": "error", "message": "Empty message"}), 400
-
-        response_text = ""
-        try:
-            with _apply_channel_agent("discord"):
-                response_text = chat_with_ai(text, f"discord_{user_id}")
-        except Exception as e:
-            logger.error(f"Discord AI response error: {e}")
-            response_text = f"⚠️ Error: {str(e)[:120]}"
-
-        # Discord max message size: 2000 chars
-        response_text = response_text[:2000]
-        return jsonify({"status": "success", "response": response_text}), 200
-    except Exception as e:
-        logger.error(f"Discord message error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route('/api/messaging/chats', methods=['GET'])
-def api_messaging_chats():
-    """Get all messaging chats grouped by channel."""
-    try:
-        from messaging import get_messaging_manager
-        mgr = get_messaging_manager()
-        chats = mgr.get_all_chats()
-        return jsonify({
-            "status": "success",
-            "chats": chats
-        }), 200
-    except Exception as e:
-        logger.error(f"Get messaging chats error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route('/api/messaging/chat/<channel>/<user_id>', methods=['GET', 'DELETE'])
-def api_messaging_chat(channel, user_id):
-    """Get or delete chat history for a user."""
-    try:
-        from messaging import get_messaging_manager
-        mgr = get_messaging_manager()
-        
-        if request.method == 'GET':
-            history = mgr.get_chat_history(channel, user_id, limit=50)
-            return jsonify({
-                "status": "success",
-                "channel": channel,
-                "user_id": user_id,
-                "messages": history
-            }), 200
-        
-        elif request.method == 'DELETE':
-            mgr.clear_chat(channel, user_id)
-            return jsonify({
-                "status": "success",
-                "message": f"Chat {channel}:{user_id} cleared"
-            }), 200
-    except Exception as e:
-        logger.error(f"Chat endpoint error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route('/api/whatsapp/webhook', methods=['POST'])
-def api_whatsapp_webhook():
-    """Handle incoming WhatsApp messages via Twilio webhook."""
-    if not ENABLE_WHATSAPP:
-        return jsonify({"status": "error", "message": "WhatsApp is disabled"}), 503
-    try:
-        from whatsapp_bot import get_whatsapp_bot
-        from messaging import get_messaging_manager
-        
-        # Get WhatsApp bot and manager
-        whatsapp = get_whatsapp_bot(
-            os.getenv("TWILIO_ACCOUNT_SID", ""),
-            os.getenv("TWILIO_AUTH_TOKEN", ""),
-            os.getenv("TWILIO_WHATSAPP_FROM", "")
-        )
-        
-        if not whatsapp or not whatsapp.enabled:
-            return jsonify({"status": "error", "message": "WhatsApp not configured"}), 501
-        
-        # Validate signature.
-        # Behind a reverse proxy (Nginx, Nabu Casa, ngrok) Flask rebuilds the
-        # URL from internal headers which may differ from the public URL that
-        # Twilio signed.  Reconstruct the public URL using X-Forwarded-* headers
-        # when available so the HMAC check uses the same string Twilio used.
-        signature = request.headers.get("X-Twilio-Signature", "")
-        fwd_proto = request.headers.get("X-Forwarded-Proto", "")
-        fwd_host  = request.headers.get("X-Forwarded-Host", "")
-        if fwd_proto and fwd_host:
-            public_url = (
-                f"{fwd_proto}://{fwd_host}"
-                f"{request.path}"
-                + (f"?{request.query_string.decode()}" if request.query_string else "")
-            )
-        else:
-            public_url = request.url
-        if not whatsapp.validate_webhook_signature(
-            public_url,
-            request.form.to_dict(),
-            signature,
-        ):
-            logger.warning(
-                f"WhatsApp webhook signature invalid (url tried: {public_url!r})"
-            )
-            return jsonify({"status": "error", "message": "Signature invalid"}), 403
-        
-        # Parse message
-        msg = whatsapp.parse_webhook(request.form.to_dict())
-        if not msg or not msg.get("text"):
-            # Likely a status update or media message, just acknowledge
-            return jsonify({"status": "ok"}), 200
-        
-        from_number = msg.get("from")
-        text = msg.get("text")
-        
-        logger.chat(f"📩 WhatsApp from {from_number}: {text[:50]}...")
-
-        # Check if first message BEFORE adding to history
-        mgr = get_messaging_manager()
-        is_first = len(mgr.get_chat_history("whatsapp", from_number, limit=1)) == 0
-
-        # Add to chat history
-        mgr.add_message("whatsapp", from_number, text, role="user")
-        
-        # Get AI response — chat_with_ai reuses the persistent whatsapp_{number}
-        # session which already accumulates history; no need to inject "Recent context:"
-        response_text = ""
-        try:
-            with _apply_channel_agent("whatsapp"):
-                response_text = chat_with_ai(text, f"whatsapp_{from_number}")
-        except Exception as e:
-            logger.error(f"WhatsApp AI response error: {e}")
-            response_text = f"⚠️ Error: {str(e)[:100]}"
-
-        # Prepend AI banner on first message of this conversation
-        if is_first:
-            response_text = f"{_ai_banner()}\n\n{response_text}"
-
-        # Trim to WhatsApp limit (1600 chars)
-        response_text = response_text[:1600]
-        
-        # Save response and send
-        mgr.add_message("whatsapp", from_number, response_text, role="assistant")
-        whatsapp.send_message(from_number, response_text)
-        
-        # Return OK to Twilio (prevents retry)
-        return jsonify({"status": "ok"}), 200
-        
-    except Exception as e:
-        logger.error(f"WhatsApp webhook error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+# moved to routes/messaging_routes.py: api_whatsapp_webhook
 
 
 # --------------------------------------------------------------------------- #
@@ -7868,147 +6588,7 @@ def api_whatsapp_webhook():
 #  and responds with Alexa-compatible JSON.                                    #
 # --------------------------------------------------------------------------- #
 
-@app.route('/api/alexa/webhook', methods=['POST'])
-def api_alexa_webhook():
-    """Handle incoming Alexa Custom Skill requests.
-
-    Supports:
-    - LaunchRequest: greeting
-    - IntentRequest with AskAmiraIntent: pass user speech to Amira
-    - AMAZON.HelpIntent, AMAZON.StopIntent, AMAZON.CancelIntent
-    - SessionEndedRequest: cleanup
-    """
-    data = request.get_json(silent=True) or {}
-    req = data.get("request", {})
-    req_type = req.get("type", "")
-    session = data.get("session", {})
-    session_id = f"alexa_{session.get('sessionId', 'default')}"
-
-    logger.info(f"[Alexa] {req_type} session={session_id[:30]}")
-
-    def _alexa_response(speech: str, end_session: bool = False, reprompt: str = None) -> dict:
-        """Build an Alexa-compatible response envelope."""
-        resp = {
-            "version": "1.0",
-            "sessionAttributes": session.get("attributes", {}),
-            "response": {
-                "outputSpeech": {
-                    "type": "PlainText",
-                    "text": speech,
-                },
-                "shouldEndSession": end_session,
-            }
-        }
-        if reprompt:
-            resp["response"]["reprompt"] = {
-                "outputSpeech": {"type": "PlainText", "text": reprompt}
-            }
-        return resp
-
-    try:
-        if req_type == "LaunchRequest":
-            greeting = {
-                "it": "Ciao! Sono Amira, la tua assistente di casa. Chiedimi qualsiasi cosa!",
-                "en": "Hi! I'm Amira, your home assistant. Ask me anything!",
-                "es": "¡Hola! Soy Amira, tu asistente del hogar. ¡Pregúntame lo que quieras!",
-                "fr": "Salut ! Je suis Amira, ton assistante maison. Demande-moi ce que tu veux !",
-            }.get(LANGUAGE, "Hi! I'm Amira. Ask me anything!")
-            return jsonify(_alexa_response(greeting, end_session=False, reprompt=greeting)), 200
-
-        elif req_type == "IntentRequest":
-            intent_name = req.get("intent", {}).get("name", "")
-
-            if intent_name in ("AMAZON.StopIntent", "AMAZON.CancelIntent"):
-                bye = {
-                    "it": "Ciao ciao! A presto!",
-                    "en": "Bye bye! See you soon!",
-                    "es": "¡Adiós! ¡Hasta pronto!",
-                    "fr": "Au revoir ! À bientôt !",
-                }.get(LANGUAGE, "Bye!")
-                return jsonify(_alexa_response(bye, end_session=True)), 200
-
-            elif intent_name == "AMAZON.HelpIntent":
-                help_text = {
-                    "it": "Puoi chiedermi di controllare luci, temperatura, elettrodomestici o qualsiasi cosa sulla tua casa. Ad esempio: accendi la luce del salotto, che temperatura c'è in camera?",
-                    "en": "You can ask me to control lights, temperature, appliances, or anything about your home. For example: turn on the living room light, what's the bedroom temperature?",
-                    "es": "Puedes pedirme que controle luces, temperatura, electrodomésticos o cualquier cosa sobre tu casa.",
-                    "fr": "Tu peux me demander de contrôler les lumières, la température, les appareils ou tout ce qui concerne ta maison.",
-                }.get(LANGUAGE, "Ask me anything about your home!")
-                return jsonify(_alexa_response(help_text, end_session=False)), 200
-
-            elif intent_name == "AMAZON.FallbackIntent":
-                # Fallback — try to process as free text if available
-                fallback = {
-                    "it": "Non ho capito. Puoi ripetere?",
-                    "en": "I didn't understand. Can you repeat?",
-                    "es": "No entendí. ¿Puedes repetir?",
-                    "fr": "Je n'ai pas compris. Peux-tu répéter ?",
-                }.get(LANGUAGE, "I didn't understand. Can you repeat?")
-                return jsonify(_alexa_response(fallback, end_session=False, reprompt=fallback)), 200
-
-            elif intent_name == "AskAmiraIntent":
-                # Get the user's spoken query from the slot
-                slots = req.get("intent", {}).get("slots", {})
-                user_query = slots.get("query", {}).get("value", "")
-                if not user_query:
-                    prompt = {
-                        "it": "Dimmi pure, cosa vuoi sapere?",
-                        "en": "Go ahead, what would you like to know?",
-                        "es": "Dime, ¿qué quieres saber?",
-                        "fr": "Dis-moi, que veux-tu savoir ?",
-                    }.get(LANGUAGE, "What would you like to know?")
-                    return jsonify(_alexa_response(prompt, end_session=False, reprompt=prompt)), 200
-
-                logger.chat(f"📩 [Alexa] AskAmiraIntent: {user_query[:80]}")
-
-                # Get AI response (voice_mode for concise answers)
-                try:
-                    response_text = chat_with_ai(user_query, session_id)
-                    # Clean for speech: strip markdown, emoji, etc.
-                    import re as _re
-                    response_text = _re.sub(r'```[\s\S]*?```', '', response_text)
-                    response_text = _re.sub(r'`[^`]+`', '', response_text)
-                    response_text = _re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', response_text)
-                    response_text = _re.sub(r'[#*_~>|]', '', response_text)
-                    response_text = _re.sub(r'\s+', ' ', response_text).strip()
-                    # Alexa has a 8000 char speech limit
-                    if len(response_text) > 6000:
-                        response_text = response_text[:6000] + "... Per il resto, puoi chiedermi di continuare."
-                    logger.chat(f"📤 [Alexa] Response ({len(response_text)} chars): {response_text[:200]}")
-                except Exception as e:
-                    logger.error(f"[Alexa] AI error: {e}")
-                    response_text = tr(
-                        "alexa_ai_error",
-                        "Sorry, I couldn't process the response.",
-                    )
-
-                return jsonify(_alexa_response(
-                    response_text,
-                    end_session=False,
-                    reprompt=tr("alexa_reprompt_anything_else", "Would you like to ask anything else?"),
-                )), 200
-
-            else:
-                # Unknown intent — try to handle as free-form
-                logger.warning(f"[Alexa] Unknown intent: {intent_name}")
-                return jsonify(_alexa_response(
-                    tr("alexa_unknown_intent", "I didn't understand the request."),
-                    end_session=False,
-                )), 200
-
-        elif req_type == "SessionEndedRequest":
-            logger.info(f"[Alexa] Session ended: {req.get('reason', 'unknown')}")
-            return jsonify(_alexa_response("", end_session=True)), 200
-
-        else:
-            return jsonify(_alexa_response("", end_session=True)), 200
-
-    except Exception as e:
-        logger.error(f"[Alexa] Webhook error: {e}")
-        return jsonify(_alexa_response(
-            tr("alexa_generic_error_retry", "An error occurred. Please try again shortly."),
-            end_session=False,
-        )), 200
+# moved to routes/messaging_routes.py: api_alexa_webhook
 
 
 # moved to routes/system_routes.py: api_system_features
@@ -8071,544 +6651,13 @@ def _is_tool_call_artifact(content: str, msg: dict) -> bool:
 # moved to routes/conversation_routes.py: api_download_snapshot
 
 
-@app.route('/api/nvidia/test_model', methods=['POST'])
-def api_nvidia_test_model():
-    """Quick NVIDIA chat test for the currently selected model.
-
-    Uses a minimal non-streaming /v1/chat/completions call with a short prompt.
-    If the model returns 404 (not available) or 400 (not chat-compatible), it is blocklisted.
-    """
-    if not NVIDIA_API_KEY:
-        return jsonify({"success": False, "error": tr("err_nvidia_api_key")}), 400
-
-    model_id = get_active_model()
-    if not isinstance(model_id, str) or not model_id.strip():
-        return jsonify({"success": False, "error": tr("err_nvidia_model_invalid")}), 400
-
-    url = "https://integrate.api.nvidia.com/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {NVIDIA_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": model_id,
-        "messages": [{"role": "user", "content": "ciao"}],
-        "stream": False,
-        "max_tokens": 32,
-        "temperature": 0.2,
-    }
-
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=15)
-
-        if resp.status_code >= 400:
-            if resp.status_code in (404, 400, 422):
-                blocklist_nvidia_model(model_id)
-                if resp.status_code == 404:
-                    reason = "not available (404)"
-                elif resp.status_code == 400:
-                    reason = "not chat-compatible (400)"
-                else:
-                    reason = "not chat-compatible (422)"
-                return jsonify({
-                    "success": False,
-                    "blocklisted": True,
-                    "model": model_id,
-                    "message": tr("err_nvidia_model_removed", reason=reason, model_id=model_id),
-                }), 200
-
-            return jsonify({
-                "success": False,
-                "blocklisted": False,
-                "model": model_id,
-                "message": tr("provider_test_failed_http", provider_name="NVIDIA", code=resp.status_code),
-            }), 200
-
-        data = resp.json() if resp.content else {}
-        ok = bool(isinstance(data, dict) and (data.get("choices") or data.get("id")))
-        if ok:
-            mark_nvidia_model_tested_ok(model_id)
-        return jsonify({"success": ok, "blocklisted": False, "model": model_id}), 200
-
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "blocklisted": False,
-            "model": model_id,
-            "message": f"NVIDIA test error: {type(e).__name__}: {e}",
-        }), 200
+# moved to routes/nvidia_routes.py: api_nvidia_test_model
 
 
-@app.route('/api/nvidia/test_models', methods=['POST'])
-def api_nvidia_test_models():
-    """General NVIDIA model scan.
-
-    Tries multiple model IDs (from /v1/models when available) using a minimal non-streaming
-    chat completion. Models that return 404/400 are blocklisted and removed from the list.
-
-    This endpoint is intentionally bounded (time + max models per run) to avoid long UI hangs
-    and rate-limit issues. Users can run it again to continue.
-    """
-    if not NVIDIA_API_KEY:
-        return jsonify({"success": False, "error": tr("err_nvidia_api_key")}), 400
-
-    body = request.get_json(silent=True) or {}
-    logger.info("NVIDIA test_models invoked")
-    try:
-        max_models = int(body.get("max_models") or 0)
-    except Exception:
-        max_models = 0
-
-    try:
-        cursor = int(body.get("cursor") or 0)
-    except Exception:
-        cursor = 0
-
-    # max_models <= 0 => "test all" in one run (bounded by time safety below).
-    # Positive value keeps legacy bounded-batch behavior.
-    unlimited_scan = max_models <= 0
-    if not unlimited_scan:
-        max_models = max(1, min(200, max_models))
-
-    # In full scan mode allow longer execution to cover the whole catalog.
-    max_seconds = 300.0 if unlimited_scan else 55.0
-    per_model_timeout = 10
-
-    # Use a fresh live list when possible.
-    all_models = _fetch_nvidia_models_live(NVIDIA_API_KEY) or get_nvidia_models_cached(NVIDIA_API_KEY) or PROVIDER_MODELS.get("nvidia", [])
-    all_models = [m for m in (all_models or []) if isinstance(m, str) and m.strip()]
-    # Full retest mode: include also previously blocked/tested/uncertain models.
-    candidates = list(dict.fromkeys(
-        all_models + sorted(NVIDIA_MODEL_BLOCKLIST) + sorted(NVIDIA_MODEL_TESTED_OK) + sorted(NVIDIA_MODEL_UNCERTAIN)
-    ))
-
-    if cursor < 0:
-        cursor = 0
-    if candidates and cursor >= len(candidates):
-        cursor = 0
-
-    url = "https://integrate.api.nvidia.com/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {NVIDIA_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    started = time.time()
-    tested: list[str] = []
-    ok: list[str] = []
-    removed: list[str] = []
-    uncertain: list[str] = []
-    events: list[str] = []
-    stopped_reason = None
-    timeouts = 0
-
-    idx = cursor
-
-    def _is_model_invalid_4xx(status_code: int, body_text: str) -> bool:
-        """Return True only when 4xx clearly indicates model incompatibility."""
-        if status_code in (404, 422):
-            return True
-        if status_code != 400:
-            return False
-        low = (body_text or "").lower()
-        invalid_markers = (
-            "model_not_found",
-            "unknown model",
-            "model not found",
-            "unsupported model",
-            "model is not supported",
-            "invalid model",
-            "no such model",
-            "not chat-compatible",
-        )
-        # Do NOT treat billing/auth/rate-limit payloads as invalid model.
-        non_model_markers = (
-            "insufficient",
-            "quota",
-            "credit",
-            "balance",
-            "billing",
-            "auth",
-            "unauthorized",
-            "forbidden",
-            "rate limit",
-            "too many requests",
-        )
-        if any(m in low for m in non_model_markers):
-            return False
-        return any(m in low for m in invalid_markers)
-
-    while idx < len(candidates):
-        model_id = candidates[idx]
-        if (not unlimited_scan) and (len(tested) >= max_models):
-            # Normal end-of-batch (UI paginates in small chunks): do not mark as "stopped".
-            break
-        if (time.time() - started) > max_seconds:
-            stopped_reason = f"timeout ({int(max_seconds)}s)"
-            break
-
-        tested.append(model_id)
-        logger.info(f"NVIDIA test_models: [{idx + 1}/{len(candidates)}] testing '{model_id}'")
-        payload = {
-            "model": model_id,
-            "messages": [{"role": "user", "content": "ciao"}],
-            "stream": False,
-            "max_tokens": 16,
-            "temperature": 0.0,
-        }
-
-        try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=per_model_timeout)
-        except requests.exceptions.ReadTimeout:
-            # Don't abort the whole scan on a single slow model.
-            logger.info(f"NVIDIA test_models: timeout on '{model_id}'")
-            events.append(f"⏱ timeout: {model_id}")
-            uncertain.append(model_id)
-            mark_nvidia_model_uncertain(model_id)
-            timeouts += 1
-            idx += 1
-            continue
-        except Exception as e:
-            logger.warning(f"NVIDIA test_models: network error on '{model_id}': {type(e).__name__}: {e}")
-            uncertain.append(model_id)
-            mark_nvidia_model_uncertain(model_id)
-            events.append(f"⚠️ network {type(e).__name__}: {model_id}")
-            idx += 1
-            continue
-
-        if resp.status_code == 200:
-            logger.info(f"NVIDIA test_models: OK '{model_id}'")
-            events.append(f"✅ ok: {model_id}")
-            ok.append(model_id)
-            mark_nvidia_model_tested_ok(model_id)
-            idx += 1
-            continue
-
-        _resp_text = ""
-        try:
-            _resp_text = resp.text or ""
-        except Exception:
-            _resp_text = ""
-
-        if _is_model_invalid_4xx(resp.status_code, _resp_text):
-            logger.info(f"NVIDIA test_models: blocklist '{model_id}' (HTTP {resp.status_code})")
-            events.append(f"⛔ blocklist (HTTP {resp.status_code}): {model_id}")
-            blocklist_nvidia_model(model_id)
-            removed.append(model_id)
-            idx += 1
-            continue
-
-        if resp.status_code == 429:
-            logger.warning(f"NVIDIA test_models: rate limit on '{model_id}' (continuing)")
-            uncertain.append(model_id)
-            mark_nvidia_model_uncertain(model_id)
-            events.append(f"⚠️ rate-limit 429: {model_id}")
-            idx += 1
-            continue
-
-        if resp.status_code in (401, 403):
-            logger.warning(f"NVIDIA test_models: auth/perm error on '{model_id}' HTTP {resp.status_code} (continuing)")
-            uncertain.append(model_id)
-            mark_nvidia_model_uncertain(model_id)
-            events.append(f"⚠️ auth {resp.status_code}: {model_id}")
-            idx += 1
-            continue
-
-        # Other 4xx client errors: do not stop full scan, just skip model.
-        # Typical cases: non-chat/embedding-only endpoints exposed in catalog.
-        if 400 <= resp.status_code < 500:
-            logger.warning(f"NVIDIA test_models: non-fatal client error on '{model_id}' HTTP {resp.status_code} (continuing)")
-            uncertain.append(model_id)
-            mark_nvidia_model_uncertain(model_id)
-            events.append(f"⚠️ client {resp.status_code}: {model_id}")
-            idx += 1
-            continue
-
-        # Transient provider-side/server errors: skip current model and continue.
-        if 500 <= resp.status_code < 600:
-            logger.warning(f"NVIDIA test_models: transient server error on '{model_id}' HTTP {resp.status_code} (continuing)")
-            uncertain.append(model_id)
-            mark_nvidia_model_uncertain(model_id)
-            events.append(f"⚠️ server {resp.status_code}: {model_id}")
-            idx += 1
-            continue
-
-        logger.warning(f"NVIDIA test_models: non-fatal unknown status on '{model_id}' HTTP {resp.status_code} (continuing)")
-        uncertain.append(model_id)
-        mark_nvidia_model_uncertain(model_id)
-        events.append(f"⚠️ status {resp.status_code}: {model_id}")
-        idx += 1
-        continue
-
-    next_cursor = idx
-    remaining = max(0, len(candidates) - next_cursor)
-    return jsonify({
-        "success": True,
-        "tested": len(tested),
-        "total": len(candidates),
-        "ok": len(ok),
-        "removed": len(removed),
-        "uncertain": len(uncertain),
-        "tested_models": tested,
-        "ok_models": ok,
-        "removed_models": removed,
-        "uncertain_models": uncertain,
-        "events": events,
-        "blocklisted": bool(removed),
-        "stopped_reason": stopped_reason,
-        "remaining": remaining,
-        "next_cursor": next_cursor,
-        "timeouts": timeouts,
-    }), 200
+# moved to routes/nvidia_routes.py: api_nvidia_test_models
 
 
-@app.route('/api/provider/test_models', methods=['POST'])
-def api_provider_test_models():
-    """Generic model scan for selected API providers (OpenRouter, Mistral).
-
-    Uses a minimal non-streaming OpenAI-compatible chat completion call.
-    Models returning 404/400/422 are blocklisted for that provider.
-    """
-    body = request.get_json(silent=True) or {}
-    provider = str(body.get("provider") or "").strip().lower()
-    if provider not in {"openrouter", "mistral"}:
-        return jsonify({"success": False, "error": "Unsupported provider for batch test"}), 400
-
-    provider_keys = {
-        "openrouter": OPENROUTER_API_KEY,
-        "mistral": MISTRAL_API_KEY,
-    }
-    provider_urls = {
-        "openrouter": "https://openrouter.ai/api/v1/chat/completions",
-        "mistral": "https://api.mistral.ai/v1/chat/completions",
-    }
-    api_key = provider_keys.get(provider) or ""
-    if not api_key:
-        return jsonify({"success": False, "error": f"{provider}: API key not configured"}), 400
-
-    try:
-        max_models = int(body.get("max_models") or 0)
-    except Exception:
-        max_models = 0
-    try:
-        cursor = int(body.get("cursor") or 0)
-    except Exception:
-        cursor = 0
-
-    unlimited_scan = max_models <= 0
-    if not unlimited_scan:
-        max_models = max(1, min(200, max_models))
-
-    max_seconds = 300.0 if unlimited_scan else 55.0
-    per_model_timeout = 12
-
-    # Full retest mode: include current provider models + previously blocked + previously tested.
-    # This allows users to re-validate old failures after provider-side fixes.
-    all_models = [m for m in (PROVIDER_MODELS.get(provider) or []) if isinstance(m, str) and m.strip()]
-    blocked_from_file: list[str] = []
-    tested_from_file: list[str] = []
-    uncertain_from_file: list[str] = []
-    try:
-        if os.path.isfile(MODEL_BLOCKLIST_FILE):
-            with open(MODEL_BLOCKLIST_FILE, "r", encoding="utf-8") as fh:
-                _blk = json.load(fh) or {}
-            _pv = _blk.get(provider)
-            if isinstance(_pv, dict):
-                _b = _pv.get("blocked") or []
-                _t = _pv.get("tested_ok") or []
-                _u = _pv.get("uncertain") or []
-                if isinstance(_b, list):
-                    blocked_from_file = [m for m in _b if isinstance(m, str) and m.strip()]
-                if isinstance(_t, list):
-                    tested_from_file = [m for m in _t if isinstance(m, str) and m.strip()]
-                if isinstance(_u, list):
-                    uncertain_from_file = [m for m in _u if isinstance(m, str) and m.strip()]
-            elif isinstance(_pv, list):
-                blocked_from_file = [m for m in _pv if isinstance(m, str) and m.strip()]
-    except Exception as _e:
-        logger.warning(f"{provider} test_models: unable to read blocklist file: {_e}")
-    if provider in PROVIDER_MODEL_TESTED_OK:
-        tested_from_file.extend([m for m in PROVIDER_MODEL_TESTED_OK.get(provider, set()) if isinstance(m, str) and m.strip()])
-    if provider in PROVIDER_MODEL_UNCERTAIN:
-        uncertain_from_file.extend([m for m in PROVIDER_MODEL_UNCERTAIN.get(provider, set()) if isinstance(m, str) and m.strip()])
-    all_models = list(dict.fromkeys(all_models + blocked_from_file + tested_from_file + uncertain_from_file))
-    if cursor < 0:
-        cursor = 0
-    if all_models and cursor >= len(all_models):
-        cursor = 0
-
-    logger.info(f"{provider} test_models invoked")
-    url = provider_urls[provider]
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-
-    started = time.time()
-    tested: list[str] = []
-    ok: list[str] = []
-    removed: list[str] = []
-    uncertain: list[str] = []
-    events: list[str] = []
-    stopped_reason = None
-    timeouts = 0
-    idx = cursor
-
-    def _is_model_invalid_4xx(status_code: int, body_text: str) -> bool:
-        """Return True only when 4xx clearly indicates model incompatibility."""
-        if status_code in (404, 422):
-            return True
-        if status_code != 400:
-            return False
-        low = (body_text or "").lower()
-        invalid_markers = (
-            "model_not_found",
-            "unknown model",
-            "model not found",
-            "unsupported model",
-            "model is not supported",
-            "invalid model",
-            "no such model",
-            "unsupported_api_for_model",
-            "not accessible via the /chat/completions endpoint",
-            "not chat-compatible",
-        )
-        non_model_markers = (
-            "insufficient",
-            "quota",
-            "credit",
-            "balance",
-            "billing",
-            "auth",
-            "unauthorized",
-            "forbidden",
-            "rate limit",
-            "too many requests",
-        )
-        if any(m in low for m in non_model_markers):
-            return False
-        return any(m in low for m in invalid_markers)
-
-    while idx < len(all_models):
-        model_id = all_models[idx]
-        if (not unlimited_scan) and (len(tested) >= max_models):
-            # Normal end-of-batch (UI paginates in small chunks): do not mark as "stopped".
-            break
-        if (time.time() - started) > max_seconds:
-            stopped_reason = f"timeout ({int(max_seconds)}s)"
-            break
-
-        tested.append(model_id)
-        logger.info(f"{provider} test_models: [{idx + 1}/{len(all_models)}] testing '{model_id}'")
-        payload = {
-            "model": model_id,
-            "messages": [{"role": "user", "content": "ciao"}],
-            "stream": False,
-            "max_tokens": 16,
-            "temperature": 0.0,
-        }
-
-        try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=per_model_timeout)
-        except requests.exceptions.ReadTimeout:
-            logger.info(f"{provider} test_models: timeout on '{model_id}'")
-            events.append(f"⏱ timeout: {model_id}")
-            uncertain.append(model_id)
-            mark_provider_model_uncertain(provider, model_id)
-            timeouts += 1
-            idx += 1
-            continue
-        except Exception as e:
-            logger.warning(f"{provider} test_models: network error on '{model_id}': {type(e).__name__}: {e}")
-            uncertain.append(model_id)
-            mark_provider_model_uncertain(provider, model_id)
-            events.append(f"⚠️ network {type(e).__name__}: {model_id}")
-            idx += 1
-            continue
-
-        if resp.status_code == 200:
-            logger.info(f"{provider} test_models: OK '{model_id}'")
-            events.append(f"✅ ok: {model_id}")
-            ok.append(model_id)
-            mark_provider_model_tested_ok(provider, model_id)
-            idx += 1
-            continue
-
-        _resp_text = ""
-        try:
-            _resp_text = resp.text or ""
-        except Exception:
-            _resp_text = ""
-
-        if _is_model_invalid_4xx(resp.status_code, _resp_text):
-            logger.info(f"{provider} test_models: blocklist '{model_id}' (HTTP {resp.status_code})")
-            events.append(f"⛔ blocklist (HTTP {resp.status_code}): {model_id}")
-            blocklist_model(provider, model_id)
-            removed.append(model_id)
-            idx += 1
-            continue
-
-        if resp.status_code == 429:
-            logger.warning(f"{provider} test_models: rate limit on '{model_id}' (continuing)")
-            uncertain.append(model_id)
-            mark_provider_model_uncertain(provider, model_id)
-            events.append(f"⚠️ rate-limit 429: {model_id}")
-            idx += 1
-            continue
-        if resp.status_code in (401, 403):
-            logger.warning(f"{provider} test_models: auth/perm error on '{model_id}' HTTP {resp.status_code} (continuing)")
-            uncertain.append(model_id)
-            mark_provider_model_uncertain(provider, model_id)
-            events.append(f"⚠️ auth {resp.status_code}: {model_id}")
-            idx += 1
-            continue
-
-        # Other 4xx client errors: do not stop full scan, just skip model.
-        if 400 <= resp.status_code < 500:
-            logger.warning(f"{provider} test_models: non-fatal client error on '{model_id}' HTTP {resp.status_code} (continuing)")
-            uncertain.append(model_id)
-            mark_provider_model_uncertain(provider, model_id)
-            events.append(f"⚠️ client {resp.status_code}: {model_id}")
-            idx += 1
-            continue
-
-        # Transient provider-side/server errors: skip current model and continue.
-        if 500 <= resp.status_code < 600:
-            logger.warning(f"{provider} test_models: transient server error on '{model_id}' HTTP {resp.status_code} (continuing)")
-            uncertain.append(model_id)
-            mark_provider_model_uncertain(provider, model_id)
-            events.append(f"⚠️ server {resp.status_code}: {model_id}")
-            idx += 1
-            continue
-
-        logger.warning(f"{provider} test_models: non-fatal unknown status on '{model_id}' HTTP {resp.status_code} (continuing)")
-        uncertain.append(model_id)
-        mark_provider_model_uncertain(provider, model_id)
-        events.append(f"⚠️ status {resp.status_code}: {model_id}")
-        idx += 1
-        continue
-
-    next_cursor = idx
-    remaining = max(0, len(all_models) - next_cursor)
-    return jsonify({
-        "success": True,
-        "provider": provider,
-        "tested": len(tested),
-        "total": len(all_models),
-        "ok": len(ok),
-        "removed": len(removed),
-        "uncertain": len(uncertain),
-        "tested_models": tested,
-        "ok_models": ok,
-        "removed_models": removed,
-        "uncertain_models": uncertain,
-        "events": events,
-        "blocklisted": bool(removed),
-        "stopped_reason": stopped_reason,
-        "remaining": remaining,
-        "next_cursor": next_cursor,
-        "timeouts": timeouts,
-    }), 200
+# moved to routes/nvidia_routes.py: api_provider_test_models
 
 # ---- Memory API Endpoints ----
 
@@ -8617,77 +6666,14 @@ def api_provider_test_models():
 
 
 
-@app.route("/health", methods=["GET"])
-def health():
-    """Health check."""
-    return jsonify({
-        "status": "ok",
-        "version": VERSION,
-        "ai_provider": AI_PROVIDER,
-        "ai_model": get_active_model(),
-        "ai_configured": bool(get_api_key()),
-        "ha_connected": bool(get_ha_token()),
-    }), 200
-
-
-@app.route("/entities", methods=["GET"])
-def get_entities_route():
-    """Get all entities."""
-    domain = request.args.get("domain", "")
-    states = get_all_states()
-    if domain:
-        states = [s for s in states if s.get("entity_id", "").startswith(f"{domain}.")]
-    return jsonify({"entities": states, "count": len(states)}), 200
-
-
-@app.route("/entity/<entity_id>/state", methods=["GET"])
-def get_entity_state_route(entity_id: str):
-    """Get entity state."""
-    return jsonify(call_ha_api("GET", f"states/{entity_id}")), 200
-
-
-@app.route("/message", methods=["POST"])
-def send_message_legacy():
-    """Legacy message endpoint."""
-    data = request.get_json()
-    return jsonify({"status": "success", "response": chat_with_ai(data.get("message", ""))}), 200
-
-
-@app.route("/service/call", methods=["POST"])
-def call_service_route():
-    """Call a Home Assistant service."""
-    data = request.get_json()
-    service = data.get("service", "")
-    if not service or "." not in service:
-        return jsonify({"error": "Use 'domain.service' format"}), 400
-    domain, svc = service.split(".", 1)
-    return jsonify(call_ha_api("POST", f"services/{domain}/{svc}", data.get("data", {}))), 200
-
-
-@app.route("/execute/automation", methods=["POST"])
-def execute_automation():
-    """Execute an automation."""
-    data = request.get_json()
-    eid = data.get("entity_id", data.get("automation_id", ""))
-    if not eid.startswith("automation."):
-        eid = f"automation.{eid}"
-    return jsonify(call_ha_api("POST", "services/automation/trigger", {"entity_id": eid})), 200
-
-
-@app.route("/execute/script", methods=["POST"])
-def execute_script():
-    """Execute a script."""
-    data = request.get_json()
-    return jsonify(call_ha_api("POST", f"services/script/{data.get('script_id', '')}", data.get("variables", {}))), 200
-
-
-@app.route("/conversation/clear", methods=["POST"])
-def clear_conversation():
-    """Clear conversation history."""
-    sid = (request.get_json() or {}).get("session_id", "default")
-    conversations.pop(sid, None)
-    session_active_skill.pop(sid, None)
-    return jsonify({"status": "cleared"}), 200
+# moved to routes/legacy_routes.py: health
+# moved to routes/legacy_routes.py: get_entities_route
+# moved to routes/legacy_routes.py: get_entity_state_route
+# moved to routes/legacy_routes.py: send_message_legacy
+# moved to routes/legacy_routes.py: call_service_route
+# moved to routes/legacy_routes.py: execute_automation
+# moved to routes/legacy_routes.py: execute_script
+# moved to routes/legacy_routes.py: clear_conversation
 
 
 # ===== FILE UPLOAD ENDPOINTS =====
@@ -8714,146 +6700,14 @@ def clear_conversation():
 # These endpoints proxy HA API calls using the SUPERVISOR_TOKEN so that
 # dashboard iframes don't need browser-side authentication tokens.
 
-@app.route('/dashboard_api/states')
-def dashboard_api_states():
-    """Proxy GET /api/states using server-side SUPERVISOR_TOKEN."""
-    try:
-        resp = requests.get(
-            f"{HA_URL}/api/states",
-            headers=get_ha_headers(),
-            timeout=30
-        )
-        return resp.json(), resp.status_code, {"Content-Type": "application/json"}
-    except Exception as e:
-        logger.error(f"Dashboard API proxy /states error: {e}")
-        return jsonify({"error": str(e)}), 502
-
-
-@app.route('/dashboard_api/history')
-def dashboard_api_history():
-    """Proxy GET /api/history/period using server-side SUPERVISOR_TOKEN."""
-    try:
-        entity_ids = request.args.get('entity_ids', '')
-        hours = min(int(request.args.get('hours', 24)), 168)
-
-        if not entity_ids:
-            return jsonify({"error": "entity_ids parameter required"}), 400
-
-        # Validate entity_id format
-        for eid in entity_ids.split(','):
-            if not re.match(r'^[a-z_]+\.[a-z0-9_]+$', eid.strip()):
-                return jsonify({"error": f"Invalid entity_id: {eid}"}), 400
-
-        end_time = datetime.utcnow()
-        start_time = end_time - timedelta(hours=hours)
-
-        url = (f"{HA_URL}/api/history/period/{start_time.isoformat()}Z"
-               f"?filter_entity_id={entity_ids}"
-               f"&end_time={end_time.isoformat()}Z"
-               f"&minimal_response&no_attributes")
-
-        resp = requests.get(url, headers=get_ha_headers(), timeout=30)
-        return resp.json(), resp.status_code, {"Content-Type": "application/json"}
-    except Exception as e:
-        logger.error(f"Dashboard API proxy /history error: {e}")
-        return jsonify({"error": str(e)}), 502
-
-
-@app.route('/dashboard_api/services/<domain>/<service>', methods=['POST'])
-def dashboard_api_service(domain, service):
-    """Proxy POST /api/services/<domain>/<service> using server-side SUPERVISOR_TOKEN."""
-    try:
-        # Validate domain and service: only alphanumeric + underscore
-        if not re.match(r'^[a-z_]+$', domain) or not re.match(r'^[a-z_]+$', service):
-            return jsonify({"error": "Invalid domain or service name"}), 400
-
-        data = request.get_json(silent=True) or {}
-        resp = requests.post(
-            f"{HA_URL}/api/services/{domain}/{service}",
-            headers=get_ha_headers(),
-            json=data,
-            timeout=30
-        )
-        return resp.json(), resp.status_code, {"Content-Type": "application/json"}
-    except Exception as e:
-        logger.error(f"Dashboard API proxy /services/{domain}/{service} error: {e}")
-        return jsonify({"error": str(e)}), 502
-
+# moved to routes/dashboard_routes.py: dashboard_api_states
+# moved to routes/dashboard_routes.py: dashboard_api_history
+# moved to routes/dashboard_routes.py: dashboard_api_service
 
 # ===== CUSTOM HTML DASHBOARDS =====
-@app.route('/custom_dashboards/<name>')
-def serve_html_dashboard(name):
-    """Serve custom HTML dashboards (legacy route, kept for backward compat)."""
-    try:
-        safe_name = name.lower().replace(" ", "-").replace("_", "-").replace(".", "-")
-        if not safe_name.endswith(".html"):
-            safe_name += ".html"
-
-        if not all(c.isalnum() or c in '-.' for c in safe_name):
-            return jsonify({"error": "Invalid dashboard name"}), 400
-
-        # Load from www/dashboards/ (legacy .html_dashboards/ support removed)
-        dashboard_path = os.path.join(HA_CONFIG_DIR, "www", "dashboards", safe_name)
-
-        if not os.path.isfile(dashboard_path):
-            return jsonify({"error": f"Dashboard '{name}' not found"}), 404
-
-        with open(dashboard_path, "r", encoding="utf-8") as f:
-            html_content = f.read()
-
-        logger.info(f"📊 Serving custom dashboard: {safe_name}")
-        return html_content, 200, {"Content-Type": "text/html; charset=utf-8"}
-
-    except Exception as e:
-        logger.error(f"❌ Error serving dashboard: {e}")
-        return jsonify({"error": f"Failed to serve dashboard: {str(e)}"}), 500
-
-
-@app.route('/api/dashboard_html/<name>')
-def api_get_dashboard_html(name):
-    """Return HTML dashboard content as JSON (for bubble context / editing)."""
-    try:
-        safe_name = name.lower().replace(" ", "-").replace("_", "-").replace(".", "-")
-        if not safe_name.endswith(".html"):
-            safe_name += ".html"
-        for subdir in [os.path.join("www", "dashboards"), ".html_dashboards"]:
-            path = os.path.join(HA_CONFIG_DIR, subdir, safe_name)
-            if os.path.isfile(path):
-                with open(path, "r", encoding="utf-8") as f:
-                    html = f.read()
-                return jsonify({"name": name, "html": html, "size": len(html)}), 200
-        return jsonify({"error": f"Dashboard '{name}' not found"}), 404
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/custom_dashboards')
-def list_html_dashboards():
-    """List all available custom HTML dashboards."""
-    try:
-        dashboards = []
-
-        # Scan www/dashboards/ (legacy .html_dashboards/ support removed)
-        dashboards_dir = os.path.join(HA_CONFIG_DIR, "www", "dashboards")
-        if os.path.isdir(dashboards_dir):
-            for filename in os.listdir(dashboards_dir):
-                if filename.endswith(".html"):
-                    file_path = os.path.join(dashboards_dir, filename)
-                    dash_name = filename.replace(".html", "")
-                    dashboards.append({
-                        "name": dash_name,
-                        "filename": filename,
-                        "url": f"/local/dashboards/{filename}",
-                        "size": os.path.getsize(file_path),
-                        "modified": datetime.fromtimestamp(os.path.getmtime(file_path)).isoformat()
-                    })
-
-        logger.info(f"📊 Listed {len(dashboards)} custom dashboards")
-        return jsonify({"dashboards": dashboards, "count": len(dashboards)}), 200
-
-    except Exception as e:
-        logger.error(f"❌ Error listing dashboards: {e}")
-        return jsonify({"error": str(e)}), 500
+# moved to routes/dashboard_routes.py: serve_html_dashboard
+# moved to routes/dashboard_routes.py: api_get_dashboard_html
+# moved to routes/dashboard_routes.py: list_html_dashboards
 
 
 # moved to routes/document_routes.py: rag_stats
@@ -8866,294 +6720,29 @@ def list_html_dashboards():
 # moved to routes/usage_routes.py: usage_stats, usage_stats_today, usage_stats_reset
 
 
-# ---------------------------------------------------------------------------
-# OpenAI Codex OAuth flow endpoints
-# ---------------------------------------------------------------------------
-@app.route("/api/oauth/codex/start", methods=["GET"])
-def oauth_codex_start():
-    """Start the OpenAI Codex OAuth flow. Returns the authorization URL."""
-    try:
-        from providers.openai_codex import start_oauth_flow
-        authorize_url, state = start_oauth_flow()
-        return jsonify({"authorize_url": authorize_url, "state": state}), 200
-    except Exception as e:
-        logger.error(f"Codex OAuth start error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/oauth/codex/exchange", methods=["POST"])
-def oauth_codex_exchange():
-    """Exchange the redirect URL (or code) for an access token."""
-    try:
-        from providers.openai_codex import exchange_code
-        data = request.json or {}
-        redirect_url = data.get("redirect_url", "").strip()
-        state = data.get("state", "").strip()
-        if not redirect_url or not state:
-            return jsonify({"error": "Missing redirect_url or state"}), 400
-        token = exchange_code(redirect_url, state)
-        return jsonify({"ok": True, "account_id": token.get("account_id")}), 200
-    except Exception as e:
-        logger.error(f"Codex OAuth exchange error: {e}")
-        return jsonify({"error": str(e)}), 400
-
-
-@app.route("/api/oauth/codex/status", methods=["GET"])
-def oauth_codex_status():
-    """Return whether a valid Codex token is available."""
-    try:
-        from providers.openai_codex import get_token_status
-        return jsonify(get_token_status()), 200
-    except Exception as e:
-        return jsonify({"configured": False, "error": str(e)}), 200
-
-
-@app.route("/api/oauth/codex/revoke", methods=["POST"])
-def oauth_codex_revoke():
-    """Delete the stored Codex OAuth token (logout)."""
-    try:
-        import providers.openai_codex as _codex_mod
-        _codex_mod._stored_token = None
-        token_file = _codex_mod._TOKEN_FILE
-        try:
-            import os as _os
-            if _os.path.exists(token_file):
-                _os.remove(token_file)
-        except Exception:
-            pass
-        logger.info("Codex: OAuth token revoked by user.")
-        return jsonify({"ok": True}), 200
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
-# ---------------------------------------------------------------------------
-# GitHub Copilot Device Code OAuth flow endpoints
-# ---------------------------------------------------------------------------
-@app.route("/api/oauth/copilot/start", methods=["GET"])
-def oauth_copilot_start():
-    """Start the GitHub Device Code flow. Returns {user_code, verification_uri, interval}."""
-    try:
-        from providers.github_copilot import start_device_flow
-        result = start_device_flow()
-        return jsonify(result), 200
-    except Exception as e:
-        logger.error(f"Copilot OAuth start error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/oauth/copilot/poll", methods=["GET"])
-def oauth_copilot_poll():
-    """Poll GitHub for the access token. Returns {status: pending|success|error}."""
-    try:
-        from providers.github_copilot import poll_device_flow
-        return jsonify(poll_device_flow()), 200
-    except Exception as e:
-        logger.error(f"Copilot OAuth poll error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route("/api/oauth/copilot/status", methods=["GET"])
-def oauth_copilot_status():
-    """Return whether a valid Copilot token is available."""
-    try:
-        from providers.github_copilot import get_token_status
-        return jsonify(get_token_status()), 200
-    except Exception as e:
-        return jsonify({"configured": False, "error": str(e)}), 200
-
-
-@app.route("/api/oauth/copilot/revoke", methods=["POST"])
-def oauth_copilot_revoke():
-    """Clear the stored GitHub Copilot OAuth token."""
-    try:
-        from providers.github_copilot import clear_token
-        clear_token()
-        return jsonify({"ok": True}), 200
-    except Exception as e:
-        logger.error(f"Copilot: revoke error: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
-# ---------------------------------------------------------------------------
-# Claude Web session endpoints
-# ---------------------------------------------------------------------------
-@app.route("/api/session/claude_web/store", methods=["POST"])
-def session_claude_web_store():
-    """Store a Claude.ai session key."""
-    try:
-        from providers.claude_web import store_session_key
-        data = request.json or {}
-        session_key = data.get("session_key", "").strip()
-        if not session_key:
-            return jsonify({"error": "Missing session_key"}), 400
-        result = store_session_key(session_key)
-        return jsonify(result), 200
-    except Exception as e:
-        logger.error(f"Claude Web session store error: {e}")
-        return jsonify({"error": str(e)}), 400
-
-
-@app.route("/api/session/claude_web/status", methods=["GET"])
-def session_claude_web_status():
-    """Return Claude Web session status."""
-    try:
-        from providers.claude_web import get_session_status
-        return jsonify(get_session_status()), 200
-    except Exception as e:
-        return jsonify({"configured": False, "error": str(e)}), 200
-
-
-@app.route("/api/session/claude_web/clear", methods=["POST"])
-def session_claude_web_clear():
-    """Clear stored Claude Web session token."""
-    try:
-        from providers.claude_web import clear_session
-        clear_session()
-        return jsonify({"ok": True}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
-
-# ---------------------------------------------------------------------------
-# ChatGPT Web session endpoints
-# ---------------------------------------------------------------------------
-@app.route("/api/session/chatgpt_web/store", methods=["POST"])
-def session_chatgpt_web_store():
-    """Store a ChatGPT Web access token."""
-    try:
-        from providers.chatgpt_web import store_access_token
-        data = request.json or {}
-        access_token = data.get("access_token", "").strip()
-        cf_clearance = data.get("cf_clearance", "").strip()
-        if not access_token:
-            return jsonify({"error": "Missing access_token"}), 400
-        result = store_access_token(access_token, cf_clearance=cf_clearance)
-        return jsonify(result), 200
-    except Exception as e:
-        logger.error(f"ChatGPT Web session store error: {e}")
-        return jsonify({"error": str(e)}), 400
-
-
-@app.route("/api/session/chatgpt_web/status", methods=["GET"])
-def session_chatgpt_web_status():
-    """Return ChatGPT Web session status."""
-    try:
-        from providers.chatgpt_web import get_session_status
-        return jsonify(get_session_status()), 200
-    except Exception as e:
-        return jsonify({"configured": False, "error": str(e)}), 200
-
-
-@app.route("/api/session/chatgpt_web/clear", methods=["POST"])
-def session_chatgpt_web_clear():
-    """Clear stored ChatGPT Web access token."""
-    try:
-        from providers.chatgpt_web import clear_session
-        clear_session()
-        return jsonify({"ok": True}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
-
-# ---------------------------------------------------------------------------
-# Grok Web session endpoints
-# ---------------------------------------------------------------------------
-@app.route("/api/session/grok_web/store", methods=["POST"])
-def session_grok_web_store():
-    return jsonify({"error": "grok_web provider removed"}), 410
-
-
-@app.route("/api/session/grok_web/status", methods=["GET"])
-def session_grok_web_status():
-    return jsonify({"configured": False, "removed": True, "error": "grok_web provider removed"}), 200
-
-
-@app.route("/api/session/grok_web/clear", methods=["POST"])
-def session_grok_web_clear():
-    return jsonify({"ok": True, "removed": True}), 200
-
-
-# ---------------------------------------------------------------------------
-# Gemini Web session endpoints
-# ---------------------------------------------------------------------------
-@app.route("/api/session/gemini_web/store", methods=["POST"])
-def session_gemini_web_store():
-    """Store Gemini Web session cookies (__Secure-1PSID and __Secure-1PSIDTS)."""
-    try:
-        from providers.gemini_web import store_session
-        data = request.json or {}
-        psid   = data.get("psid", "").strip()
-        psidts = data.get("psidts", "").strip()
-        if not psid or not psidts:
-            return jsonify({"error": "Missing psid or psidts"}), 400
-        result = store_session(psid, psidts)
-        return jsonify(result), 200
-    except Exception as e:
-        logger.error(f"Gemini Web session store error: {e}")
-        return jsonify({"error": str(e)}), 400
-
-
-@app.route("/api/session/gemini_web/status", methods=["GET"])
-def session_gemini_web_status():
-    """Return Gemini Web session status."""
-    try:
-        from providers.gemini_web import get_session_status
-        return jsonify(get_session_status()), 200
-    except Exception as e:
-        return jsonify({"configured": False, "error": str(e)}), 200
-
-
-@app.route("/api/session/gemini_web/clear", methods=["POST"])
-def session_gemini_web_clear():
-    """Clear stored Gemini Web session."""
-    try:
-        from providers.gemini_web import clear_session
-        clear_session()
-        return jsonify({"ok": True}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
-
-# ---------------------------------------------------------------------------
-# Perplexity Web session endpoints
-# ---------------------------------------------------------------------------
-@app.route("/api/session/perplexity_web/store", methods=["POST"])
-def session_perplexity_web_store():
-    """Store Perplexity Web session cookies (next-auth.csrf-token + next-auth.session-token)."""
-    try:
-        from providers.perplexity_web import store_session
-        data = request.json or {}
-        csrf_token = (data.get("csrf_token") or "").strip()
-        session_token = (data.get("session_token") or "").strip()
-        if not csrf_token or not session_token:
-            return jsonify({"error": "Missing csrf_token or session_token"}), 400
-        result = store_session(csrf_token, session_token)
-        return jsonify(result), 200
-    except Exception as e:
-        logger.error(f"Perplexity Web session store error: {e}")
-        return jsonify({"error": str(e)}), 400
-
-
-@app.route("/api/session/perplexity_web/status", methods=["GET"])
-def session_perplexity_web_status():
-    """Return Perplexity Web session status."""
-    try:
-        from providers.perplexity_web import get_session_status
-        return jsonify(get_session_status()), 200
-    except Exception as e:
-        return jsonify({"configured": False, "error": str(e)}), 200
-
-
-@app.route("/api/session/perplexity_web/clear", methods=["POST"])
-def session_perplexity_web_clear():
-    """Clear stored Perplexity Web session."""
-    try:
-        from providers.perplexity_web import clear_session
-        clear_session()
-        return jsonify({"ok": True}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
+# moved to routes/oauth_routes.py: oauth_codex_start
+# moved to routes/oauth_routes.py: oauth_codex_exchange
+# moved to routes/oauth_routes.py: oauth_codex_status
+# moved to routes/oauth_routes.py: oauth_codex_revoke
+# moved to routes/oauth_routes.py: oauth_copilot_start
+# moved to routes/oauth_routes.py: oauth_copilot_poll
+# moved to routes/oauth_routes.py: oauth_copilot_status
+# moved to routes/oauth_routes.py: oauth_copilot_revoke
+# moved to routes/oauth_routes.py: session_claude_web_store
+# moved to routes/oauth_routes.py: session_claude_web_status
+# moved to routes/oauth_routes.py: session_claude_web_clear
+# moved to routes/oauth_routes.py: session_chatgpt_web_store
+# moved to routes/oauth_routes.py: session_chatgpt_web_status
+# moved to routes/oauth_routes.py: session_chatgpt_web_clear
+# moved to routes/oauth_routes.py: session_grok_web_store
+# moved to routes/oauth_routes.py: session_grok_web_status
+# moved to routes/oauth_routes.py: session_grok_web_clear
+# moved to routes/oauth_routes.py: session_gemini_web_store
+# moved to routes/oauth_routes.py: session_gemini_web_status
+# moved to routes/oauth_routes.py: session_gemini_web_clear
+# moved to routes/oauth_routes.py: session_perplexity_web_store
+# moved to routes/oauth_routes.py: session_perplexity_web_status
+# moved to routes/oauth_routes.py: session_perplexity_web_clear
 
 
 def start_messaging_bots() -> None:
@@ -9306,457 +6895,27 @@ def initialize_mcp() -> None:
         logger.warning(f"⚠️ MCP initialization error: {e}")
 
 
-# ===== CONFIG FILE EDITOR API =====
-
-@app.route('/api/config/read', methods=['GET'])
-def api_config_read():
-    """Read a whitelisted config file for the in-app editor."""
-    filepath = (request.args.get("file") or "").strip()
-    if not filepath or filepath not in CONFIG_EDITABLE_FILES:
-        return jsonify({"success": False, "error": "File not accessible"}), 403
-
-    full_path = os.path.join(HA_CONFIG_DIR, filepath)
-    if not os.path.isfile(full_path):
-        return jsonify({"success": True, "file": filepath, "content": "", "exists": False})
-
-    try:
-        with open(full_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        return jsonify({"success": True, "file": filepath, "content": content, "exists": True, "size": len(content)})
-    except Exception as e:
-        logger.error(f"api_config_read error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+# moved to routes/settings_routes.py: api_config_read
+# moved to routes/settings_routes.py: api_config_save
 
 
-@app.route('/api/config/save', methods=['POST'])
-def api_config_save():
-    """Save content to a whitelisted config file."""
-    global CUSTOM_SYSTEM_PROMPT
-
-    data = request.get_json() or {}
-    filepath = (data.get("file") or "").strip()
-    content = data.get("content")
-
-    if content is None:
-        return jsonify({"success": False, "error": "content is required"}), 400
-    if not filepath:
-        return jsonify({"success": False, "error": "file path is required"}), 400
-
-    # Security: only allow whitelisted files
-    if filepath not in CONFIG_EDITABLE_FILES:
-        return jsonify({"success": False, "error": f"File '{filepath}' is not editable"}), 403
-
-    # Validate JSON for .json files
-    if filepath.endswith(".json") and content.strip():
-        try:
-            json.loads(content)
-        except json.JSONDecodeError as e:
-            return jsonify({"success": False, "error": f"Invalid JSON: {e}"}), 400
-
-    # Size guard
-    if len(content) > 500_000:
-        return jsonify({"success": False, "error": "Content too large (max 500KB)"}), 413
-
-    full_path = os.path.join(HA_CONFIG_DIR, filepath)
-    try:
-        os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        with open(full_path, "w", encoding="utf-8") as f:
-            f.write(content)
-
-        # Post-save hooks
-        if filepath == "amira/agents.json":
-            load_agents_config()
-        elif filepath == "amira/custom_system_prompt.txt":
-            loaded = _load_custom_system_prompt_from_disk()
-            CUSTOM_SYSTEM_PROMPT = loaded
-
-        logger.info(f"Config file saved: {filepath} ({len(content)} chars)")
-        return jsonify({"success": True, "file": filepath, "size": len(content)})
-    except Exception as e:
-        logger.error(f"api_config_save error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+# moved to routes/settings_routes.py: _FALLBACK_CONFIG_FILE
+# moved to routes/settings_routes.py: _FALLBACK_PRIORITY_DEFAULT
+# moved to routes/settings_routes.py: _FALLBACK_KEY_ENV
+# moved to routes/settings_routes.py: api_fallback_config_get
 
 
-# ── Fallback configuration endpoint ─────────────────────────────────
-_FALLBACK_CONFIG_FILE = os.path.join(HA_CONFIG_DIR, "amira", "fallback_config.json")
-
-# Default provider priority (same as providers/manager.py)
-_FALLBACK_PRIORITY_DEFAULT = [
-    "anthropic", "openai", "google", "deepseek", "github",
-    "groq", "mistral", "openrouter", "xai", "nvidia", "perplexity",
-    "minimax", "aihubmix", "siliconflow", "volcengine",
-    "dashscope", "moonshot", "zhipu", "ollama", "custom",
-]
-
-# Maps provider → env var for API key detection
-_FALLBACK_KEY_ENV = {
-    "anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY",
-    "google": "GOOGLE_API_KEY", "github": "GITHUB_TOKEN",
-    "nvidia": "NVIDIA_API_KEY", "groq": "GROQ_API_KEY",
-    "mistral": "MISTRAL_API_KEY", "openrouter": "OPENROUTER_API_KEY",
-    "deepseek": "DEEPSEEK_API_KEY", "xai": "XAI_API_KEY", "perplexity": "PERPLEXITY_API_KEY",
-    "minimax": "MINIMAX_API_KEY", "aihubmix": "AIHUBMIX_API_KEY",
-    "siliconflow": "SILICONFLOW_API_KEY", "volcengine": "VOLCENGINE_API_KEY",
-    "dashscope": "DASHSCOPE_API_KEY", "moonshot": "MOONSHOT_API_KEY",
-    "zhipu": "ZHIPU_API_KEY", "custom": "CUSTOM_API_KEY",
-    "ollama": "OLLAMA_BASE_URL",
-}
+# moved to routes/settings_routes.py: api_fallback_config_post
 
 
-@app.route('/api/fallback_config', methods=['GET'])
-def api_fallback_config_get():
-    """Return current fallback configuration: enabled state, provider priority, model overrides."""
-    enabled = os.getenv("FALLBACK_ENABLED", "true").lower() not in ("false", "0", "no")
-
-    # Load custom priority / model overrides or use defaults
-    custom_priority = []
-    provider_models = {}
-    try:
-        if os.path.isfile(_FALLBACK_CONFIG_FILE):
-            with open(_FALLBACK_CONFIG_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            custom_priority = data.get("priority", [])
-            pm = data.get("provider_models", {})
-            if isinstance(pm, dict):
-                provider_models = {}
-                for k, v in pm.items():
-                    if not isinstance(k, str) or not isinstance(v, str):
-                        continue
-                    prov = str(k).strip().lower()
-                    mdl_raw = str(v).strip()
-                    if not prov or not mdl_raw:
-                        continue
-                    provider_models[prov] = normalize_model_name(mdl_raw)
-            # Backward compatibility with old experimental shape:
-            # model_priority: [{"provider":"anthropic","model":"claude-opus-4-6"}, ...]
-            if not provider_models:
-                mp = data.get("model_priority", [])
-                if isinstance(mp, list):
-                    for item in mp:
-                        if not isinstance(item, dict):
-                            continue
-                        prov = str(item.get("provider") or "").strip().lower()
-                        mdl = str(item.get("model") or "").strip()
-                        if prov and mdl:
-                            provider_models[prov] = normalize_model_name(mdl)
-            if "enabled" in data:
-                enabled = bool(data["enabled"])
-    except Exception:
-        pass
-
-    if isinstance(custom_priority, list) and custom_priority:
-        priority = [str(p).strip().lower() for p in custom_priority if isinstance(p, str) and str(p).strip()]
-    else:
-        priority = list(_FALLBACK_PRIORITY_DEFAULT)
-
-    # Build provider list with status
-    providers = []
-    seen = set()
-    for prov in priority:
-        env_var = _FALLBACK_KEY_ENV.get(prov, "")
-        has_key = bool(env_var and os.getenv(env_var, ""))
-        label = PROVIDER_DEFAULTS.get(prov, {}).get("name", prov)
-        providers.append({
-            "id": prov,
-            "configured": has_key,
-            "label": label,
-            "model": provider_models.get(prov, ""),
-        })
-        seen.add(prov)
-
-    # Add any configured providers not in the priority list
-    for prov in _FALLBACK_PRIORITY_DEFAULT:
-        if prov not in seen:
-            env_var = _FALLBACK_KEY_ENV.get(prov, "")
-            has_key = bool(env_var and os.getenv(env_var, ""))
-            label = PROVIDER_DEFAULTS.get(prov, {}).get("name", prov)
-            providers.append({
-                "id": prov,
-                "configured": has_key,
-                "label": label,
-                "model": provider_models.get(prov, ""),
-            })
-
-    return jsonify({
-        "success": True,
-        "enabled": enabled,
-        "providers": providers,
-        "priority": priority,
-        "provider_models": provider_models,
-    })
-
-
-@app.route('/api/fallback_config', methods=['POST'])
-def api_fallback_config_post():
-    """Save fallback configuration (priority order, enabled flag, model overrides)."""
-    data = request.get_json() or {}
-    priority = data.get("priority", [])
-    enabled = data.get("enabled", True)
-    provider_models = data.get("provider_models", {})
-
-    if not isinstance(priority, list):
-        return jsonify({"success": False, "error": "priority must be a list"}), 400
-    if provider_models is None:
-        provider_models = {}
-    if not isinstance(provider_models, dict):
-        return jsonify({"success": False, "error": "provider_models must be an object"}), 400
-
-    # Validate provider names
-    valid_providers = set(_FALLBACK_PRIORITY_DEFAULT) | set(_FALLBACK_KEY_ENV.keys())
-    clean_priority = [p for p in priority if isinstance(p, str) and p in valid_providers]
-    clean_provider_models = {}
-    for k, v in provider_models.items():
-        if not isinstance(k, str):
-            continue
-        prov = k.strip().lower()
-        if prov not in valid_providers:
-            continue
-        if v is None:
-            continue
-        mdl = normalize_model_name(str(v).strip())
-        if mdl:
-            clean_provider_models[prov] = mdl
-
-    config_data = {
-        "priority": clean_priority,
-        "enabled": bool(enabled),
-        "provider_models": clean_provider_models,
-    }
-
-    try:
-        os.makedirs(os.path.dirname(_FALLBACK_CONFIG_FILE), exist_ok=True)
-        with open(_FALLBACK_CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(config_data, f, indent=2)
-        logger.info(
-            f"Fallback config saved: enabled={enabled}, priority={clean_priority}, "
-            f"provider_models={list(clean_provider_models.keys())}"
-        )
-        return jsonify({"success": True})
-    except Exception as e:
-        logger.error(f"Failed to save fallback config: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-# ── Settings API ─────────────────────────────────────────────────────
-@app.route('/api/settings', methods=['GET'])
-def api_settings_get():
-    """Return all runtime settings with current values (merged: file > env > defaults)."""
-    saved = _load_settings()
-    _g = globals()
-    current = {}
-    for key, default in SETTINGS_DEFAULTS.items():
-        # Priority: saved file value > current global > default
-        if key in saved:
-            current[key] = saved[key]
-        else:
-            gvar = _SETTINGS_GLOBAL_MAP.get(key)
-            if gvar and gvar in _g:
-                val = _g[gvar]
-                # set is not JSON-serializable — convert back to comma-separated string
-                if isinstance(val, set):
-                    val = ",".join(str(i) for i in sorted(val))
-                current[key] = val
-            else:
-                current[key] = default
-
-    # Section metadata for UI rendering
-    sections = [
-        {
-            "id": "language", "icon": "\U0001F30D", "fields": [
-                {"key": "language", "type": "select",
-                 "options": [
-                     {"value": "en", "label": "English"},
-                     {"value": "it", "label": "Italiano"},
-                     {"value": "es", "label": "Español"},
-                     {"value": "fr", "label": "Français"},
-                 ]},
-                {"key": "interaction_mode", "type": "select",
-                 "options": [
-                     {"value": "strict", "label": "Strict (Safe)"},
-                     {"value": "lean", "label": "Lean (Natural)"},
-                 ]},
-            ],
-        },
-        {
-            "id": "features", "icon": "\u26A1", "fields": [
-                {"key": "enable_memory", "type": "toggle"},
-                {"key": "enable_file_access", "type": "toggle"},
-                {"key": "enable_file_upload", "type": "toggle"},
-                {"key": "enable_voice_input", "type": "toggle"},
-                {"key": "enable_rag", "type": "toggle"},
-                {"key": "enable_chat_bubble", "type": "toggle"},
-                {"key": "enable_amira_card_button", "type": "toggle"},
-                {"key": "enable_amira_automation_button", "type": "toggle"},
-            ],
-        },
-        {
-            "id": "ai", "icon": "\U0001F9E0", "fields": [
-                {"key": "anthropic_extended_thinking", "type": "toggle"},
-                {"key": "anthropic_prompt_caching", "type": "toggle"},
-                {"key": "openai_extended_thinking", "type": "toggle"},
-                {"key": "nvidia_thinking_mode", "type": "toggle"},
-            ],
-        },
-        {
-            "id": "voice", "icon": "\U0001F399\uFE0F", "fields": [
-                {"key": "tts_voice", "type": "select",
-                 "options": [
-                     {"value": "female", "label": "Female"},
-                     {"value": "male", "label": "Male"},
-                 ]},
-            ],
-        },
-        {
-            "id": "messaging", "icon": "\U0001F4F1", "fields": [
-                {"key": "enable_telegram", "type": "toggle"},
-                {"key": "telegram_bot_token", "type": "password"},
-                {"key": "telegram_allowed_ids", "type": "text"},
-                {"key": "enable_whatsapp", "type": "toggle"},
-                {"key": "twilio_account_sid", "type": "text"},
-                {"key": "twilio_auth_token", "type": "password"},
-                {"key": "twilio_whatsapp_from", "type": "text"},
-                {"key": "enable_discord", "type": "toggle"},
-                {"key": "discord_bot_token", "type": "password"},
-                {"key": "discord_allowed_channel_ids", "type": "text"},
-                {"key": "discord_allowed_user_ids", "type": "text"},
-            ],
-        },
-        {
-            "id": "advanced", "icon": "\u2699\uFE0F", "fields": [
-                {"key": "timeout", "type": "number", "min": 5, "max": 300, "step": 5},
-                {"key": "max_retries", "type": "number", "min": 0, "max": 10, "step": 1},
-                {"key": "max_conversations", "type": "number", "min": 1, "max": 100, "step": 1},
-                {"key": "max_snapshots_per_file", "type": "number", "min": 1, "max": 50, "step": 1},
-            ],
-        },
-        {
-            "id": "costs", "icon": "\U0001F4B0", "fields": [
-                {"key": "cost_currency", "type": "select",
-                 "options": [
-                     {"value": "USD", "label": "USD ($)"},
-                     {"value": "EUR", "label": "EUR (\u20AC)"},
-                     {"value": "GBP", "label": "GBP (\u00A3)"},
-                     {"value": "JPY", "label": "JPY (\u00A5)"},
-                 ]},
-            ],
-        },
-    ]
-
-    return jsonify({"success": True, "settings": current, "sections": sections})
+# moved to routes/settings_routes.py: api_settings_get
 
 
 # moved to routes/system_routes.py: api_addon_restart
 
 
-@app.route('/api/settings', methods=['POST'])
-def api_settings_post():
-    """Save runtime settings, apply immediately, persist to settings.json."""
-    data = request.get_json() or {}
-    if not data:
-        return jsonify({"success": False, "error": "No data provided"}), 400
-
-    # Only accept known keys
-    clean = {}
-    for key in SETTINGS_DEFAULTS:
-        if key in data:
-            clean[key] = data[key]
-
-    try:
-        # Merge with existing saved settings (partial updates allowed)
-        existing = _load_settings()
-        existing.update(clean)
-        _save_settings(existing)
-        _apply_settings(existing)
-        logger.info(f"Settings saved and applied: {list(clean.keys())}")
-
-        # React to specific settings that need runtime actions
-        if "enable_chat_bubble" in clean or "enable_amira_card_button" in clean or "enable_amira_automation_button" in clean:
-            global _chat_bubble_registered
-            _chat_bubble_registered = False  # force re-generation with new flag
-            setup_chat_bubble()
-            if ENABLE_CHAT_BUBBLE:
-                logger.info("Chat bubble: activated via settings UI")
-            else:
-                logger.info("Chat bubble: deactivated via settings UI")
-            if ENABLE_AMIRA_CARD_BUTTON:
-                logger.info("Amira card button: activated via settings UI")
-            else:
-                logger.info("Amira card button: deactivated via settings UI")
-            if ENABLE_AMIRA_AUTOMATION_BUTTON:
-                logger.info("Amira automation button: activated via settings UI")
-            else:
-                logger.info("Amira automation button: deactivated via settings UI")
-
-        return jsonify({"success": True})
-    except Exception as e:
-        logger.error(f"Failed to save settings: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/uninstall_cleanup', methods=['POST'])
-def api_uninstall_cleanup():
-    """Cleanup persisted Amira artifacts before uninstall.
-
-    Removes:
-    - Chat bubble resources/files
-    - /config/amira directory (all addon persistent data)
-    Optionally removes dashboards generated under /config/www/dashboards.
-    """
-    data = request.get_json(silent=True) or {}
-    include_dashboards = bool(data.get("include_dashboards", False))
-
-    removed: List[str] = []
-    errors: List[str] = []
-
-    # 1) Remove bubble resources and JS artifacts.
-    try:
-        cleanup_chat_bubble()
-        removed.append("bubble_resources_and_js")
-    except Exception as e:
-        errors.append(f"bubble_cleanup: {e}")
-
-    # 2) Clear in-memory conversation/session state.
-    try:
-        conversations.clear()
-        abort_streams.clear()
-        read_only_sessions.clear()
-        session_last_intent.clear()
-        session_last_preview.clear()
-        session_pending_context.clear()
-        session_active_skill.clear()
-        removed.append("runtime_memory_state")
-    except Exception as e:
-        errors.append(f"runtime_state: {e}")
-
-    # 3) Remove persisted addon data root.
-    amira_dir = os.path.join(HA_CONFIG_DIR, "amira")
-    try:
-        if os.path.isdir(amira_dir):
-            shutil.rmtree(amira_dir)
-            removed.append(amira_dir)
-    except Exception as e:
-        errors.append(f"{amira_dir}: {e}")
-
-    # 4) Optional: remove generated dashboards folder.
-    if include_dashboards:
-        dashboards_dir = os.path.join(HA_CONFIG_DIR, "www", "dashboards")
-        try:
-            if os.path.isdir(dashboards_dir):
-                shutil.rmtree(dashboards_dir)
-                removed.append(dashboards_dir)
-        except Exception as e:
-            errors.append(f"{dashboards_dir}: {e}")
-
-    logger.info(
-        f"Uninstall cleanup executed: removed={len(removed)} include_dashboards={include_dashboards} "
-        f"errors={len(errors)}"
-    )
-    return jsonify({
-        "success": len(errors) == 0,
-        "removed": removed,
-        "errors": errors,
-        "include_dashboards": include_dashboards,
-    }), (200 if len(errors) == 0 else 207)
+# moved to routes/settings_routes.py: api_settings_post
+# moved to routes/settings_routes.py: api_uninstall_cleanup
 
 
 # Register blueprints

@@ -47,6 +47,45 @@ _TOKEN_FILE  = "/data/session_claude_web.json"
 # ---------------------------------------------------------------------------
 _stored_session: Optional[Dict[str, Any]] = None   # {session_key, org_uuid, stored_at}
 
+# ---------------------------------------------------------------------------
+# Conversation reuse cache
+# Maps session_id → {conv_uuid, intent, model, org_uuid, expires_at}
+# Reusing the same claude.ai conversation across turns avoids creating a new
+# conversation on every request and eliminates [CONVERSATION HISTORY] re-injection.
+# ---------------------------------------------------------------------------
+_CONV_TTL = 12 * 3600  # seconds — discard cached conv after 12 hours
+_conv_cache: Dict[str, Dict[str, Any]] = {}
+
+
+def _conv_cache_get(session_id: str, intent: str, model: str, org_uuid: str) -> Optional[str]:
+    """Return cached conv_uuid if model/org match and hasn't expired, else None.
+
+    Intent changes within the same session do NOT invalidate the cache — the user
+    is continuing the same conversation and we must preserve context on claude.ai.
+    """
+    entry = _conv_cache.get(session_id)
+    if not entry:
+        return None
+    if (entry.get("model") != model
+            or entry.get("org_uuid") != org_uuid
+            or time.time() >= entry.get("expires_at", 0)):
+        return None
+    return entry["conv_uuid"]
+
+
+def _conv_cache_set(session_id: str, conv_uuid: str, intent: str, model: str, org_uuid: str) -> None:
+    _conv_cache[session_id] = {
+        "conv_uuid": conv_uuid,
+        "intent": intent,
+        "model": model,
+        "org_uuid": org_uuid,
+        "expires_at": time.time() + _CONV_TTL,
+    }
+
+
+def _conv_cache_invalidate(session_id: str) -> None:
+    _conv_cache.pop(session_id, None)
+
 
 def _load_session() -> Optional[Dict[str, Any]]:
     try:
@@ -123,6 +162,61 @@ def get_session_status() -> Dict[str, Any]:
         return {"configured": False}
     age_days = (int(time.time()) - s.get("stored_at", 0)) // 86400
     return {"configured": True, "age_days": age_days, "org_uuid": s.get("org_uuid", "")[:8] + "..."}
+
+
+def probe_usage_endpoints() -> Dict[str, Any]:
+    """Probe candidate claude.ai endpoints to discover usage/quota data.
+
+    Tries several undocumented endpoints and returns a dict with whatever each
+    one returns (status code + body). Use this once to discover which endpoints
+    expose remaining token/usage info, then build get_usage_info() on top.
+
+    Returns:
+        {
+          "<endpoint_path>": {"status": int, "data": any} | {"status": int, "error": str},
+          ...
+        }
+    """
+    if not HTTPX_AVAILABLE:
+        return {"error": "httpx not installed"}
+
+    s = _stored_session
+    if not s or not s.get("session_key"):
+        return {"error": "not authenticated"}
+
+    session_key = s["session_key"]
+    org_uuid    = s["org_uuid"]
+    headers     = _make_headers(session_key)
+    # Use Accept: application/json for these GET probes
+    headers["Accept"] = "application/json"
+
+    candidates = [
+        f"/api/organizations/{org_uuid}/limits",
+        f"/api/organizations/{org_uuid}/usage",
+        f"/api/organizations/{org_uuid}/entitlements",
+        f"/api/organizations/{org_uuid}/billing",
+        "/api/account/usage",
+        "/api/account/entitlements",
+        "/api/bootstrap",
+        "/api/auth/session",
+    ]
+
+    results: Dict[str, Any] = {}
+    for path in candidates:
+        url = f"https://claude.ai{path}"
+        try:
+            resp = httpx.get(url, headers=headers, timeout=10.0)
+            try:
+                data = resp.json()
+            except Exception:
+                data = resp.text[:500]
+            results[path] = {"status": resp.status_code, "data": data}
+            logger.info(f"ClaudeWeb probe {path} → HTTP {resp.status_code}")
+        except Exception as e:
+            results[path] = {"status": 0, "error": str(e)}
+            logger.warning(f"ClaudeWeb probe {path} → error: {e}")
+
+    return results
 
 
 def clear_session() -> None:
@@ -304,18 +398,33 @@ class ClaudeWebProvider(EnhancedProvider):
         system_prompt = _anti_artifact + system_prompt
         # ──────────────────────────────────────────────────────────────────────────────
 
-        # Create conversation now that we have the system_prompt — pass it at creation
-        # so Claude.ai stores it server-side and it never appears as visible text.
-        try:
-            conv_uuid = _create_conversation(session_key, org_uuid, model, system_prompt)
-        except Exception as e:
-            yield {"type": "error", "message": f"ClaudeWeb: {e}"}
-            return
+        # ── Conversation reuse: check cache before creating a new conversation ────────
+        # Cache key: session_id + intent + model. Invalidate on mismatch or TTL.
+        # When reusing, we skip [CONVERSATION HISTORY] — claude.ai already has the history.
+        session_id = (intent_info or {}).get("session_id", "")
+        _intent_key = (intent_info or {}).get("intent", "auto")
+        _cached_conv_uuid = _conv_cache_get(session_id, _intent_key, model, org_uuid) if session_id else None
+
+        if _cached_conv_uuid:
+            conv_uuid = _cached_conv_uuid
+            logger.debug(f"ClaudeWeb: reusing conv {conv_uuid[:8]}… (session={session_id}, intent={_intent_key})")
+        else:
+            # Create a new conversation — pass system_prompt at creation so Claude.ai
+            # stores it server-side and it never appears as visible text.
+            try:
+                conv_uuid = _create_conversation(session_key, org_uuid, model, system_prompt)
+            except Exception as e:
+                yield {"type": "error", "message": f"ClaudeWeb: {e}"}
+                return
+            if session_id:
+                _conv_cache_set(session_id, conv_uuid, _intent_key, model, org_uuid)
+            logger.debug(f"ClaudeWeb: new conv {conv_uuid[:8]}… (session={session_id})")
 
         # Build conversation history + last human message.
-        # claude_web creates a fresh conversation each call, so we must
-        # reconstruct the full dialogue in the prompt to preserve context.
-        # (Tool results are already merged into assistant turns by flatten_tool_messages above.)
+        # When reusing an existing conv: history is already on claude.ai — send only the
+        # new message. When starting fresh: reconstruct the full dialogue so the new conv
+        # has context from previous turns. Tool results are already merged into assistant
+        # turns by flatten_tool_messages above.
         history_parts = []
         last_human = ""
 
@@ -331,32 +440,34 @@ class ClaudeWebProvider(EnhancedProvider):
             elif role == "assistant":
                 history_parts.append(f"Assistant: {text}")
 
-        # If there is real history (more than just the last turn), prepend it
-        if len(history_parts) > 1:
-            history_block = "\n\n".join(history_parts[:-1])  # all turns except the last
-            conversation_context = (
-                f"[CONVERSATION HISTORY]\n{history_block}\n[/CONVERSATION HISTORY]\n\n"
-                f"Human: {last_human}"
-            )
-        else:
-            conversation_context = last_human
+        def _build_full_history_prompt() -> str:
+            """Reconstruct the full dialogue for a fresh conversation."""
+            if len(history_parts) > 1:
+                history_block = "\n\n".join(history_parts[:-1])
+                return (
+                    f"[CONVERSATION HISTORY]\n{history_block}\n[/CONVERSATION HISTORY]\n\n"
+                    f"Human: {last_human}"
+                )
+            return last_human
 
-        # System prompt is passed at conversation creation (server-side) — use plain prompt.
-        prompt_text = conversation_context
+        # When reusing: history is on claude.ai → just the new message.
+        # When fresh: reconstruct the full history block.
+        prompt_text = last_human if _cached_conv_uuid else _build_full_history_prompt()
 
         # When a skill is active, append a terse reminder directly in the user message.
         # The user-turn ending is where the model pays the most attention — this prevents
         # the model from ignoring the skill rules buried in the system prompt.
         _active_skill = (intent_info or {}).get("active_skill")
+        _skill_suffix = ""
         if _active_skill:
             skill_card_type = f"type: custom:{_active_skill}"
-            prompt_text = (
-                prompt_text
-                + f"\n\n[⚠️ SKILL ACTIVE: {_active_skill} — "
+            _skill_suffix = (
+                f"\n\n[⚠️ SKILL ACTIVE: {_active_skill} — "
                 f"ONLY output `{skill_card_type}` cards — "
                 f"NEVER use button-card, mushroom-*, power-flow-card-plus or any other type — "
                 f"ALWAYS wrap YAML in ```yaml fences]"
             )
+        prompt_text += _skill_suffix
 
         body = {
             "prompt": prompt_text,
@@ -371,6 +482,29 @@ class ClaudeWebProvider(EnhancedProvider):
 
         try:
             yield from self._stream_response(url, session_key, body)
+        except RuntimeError as e:
+            err_str = str(e)
+            # If the cached conv has expired on claude.ai (404/403), create a new one and retry.
+            if _cached_conv_uuid and any(s in err_str for s in ("404", "403", "not found", "Not Found")):
+                logger.warning(f"ClaudeWeb: cached conv {conv_uuid[:8]}… expired — creating new conv and retrying")
+                _conv_cache_invalidate(session_id)
+                try:
+                    conv_uuid = _create_conversation(session_key, org_uuid, model, system_prompt)
+                except Exception as e2:
+                    yield {"type": "error", "message": f"ClaudeWeb retry: {e2}"}
+                    return
+                if session_id:
+                    _conv_cache_set(session_id, conv_uuid, _intent_key, model, org_uuid)
+                body["prompt"] = _build_full_history_prompt() + _skill_suffix
+                url = f"{_CLAUDE_BASE}/organizations/{org_uuid}/chat_conversations/{conv_uuid}/completion"
+                try:
+                    yield from self._stream_response(url, session_key, body)
+                except Exception as e3:
+                    logger.error(f"ClaudeWeb retry failed: {e3}")
+                    yield {"type": "error", "message": f"Claude.ai Web error: {e3}"}
+            else:
+                logger.error(f"ClaudeWeb: Error during streaming: {e}")
+                yield {"type": "error", "message": f"Claude.ai Web error: {e}"}
         except Exception as e:
             logger.error(f"ClaudeWeb: Error during streaming: {e}")
             yield {"type": "error", "message": f"Claude.ai Web error: {e}"}

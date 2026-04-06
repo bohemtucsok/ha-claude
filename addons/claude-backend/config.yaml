@@ -1,6 +1,6 @@
 # Home Assistant Add-on configuration
 name: Amira
-version: "4.6.67"
+version: "4.6.95"
 slug: claude-backend
 description: >-
   Amira - AI-powered smart home assistant with Claude, ChatGPT, Gemini,
@@ -50,7 +50,7 @@ options:
   custom_api_key: ""
   custom_api_base: ""
   custom_model_name: ""
-  ollama_base_url: "http://localhost:11434"
+  ollama_base_url: ""
   ollama_api_key: ""
   colored_logs: true
   debug_mode: false

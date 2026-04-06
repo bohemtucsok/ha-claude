@@ -64,10 +64,24 @@ entities:                        # entities to inject (accessible via `entities`
 scripts:                         # external JS libraries to load (CDN URLs)
   - https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js
 content: |
-  <!-- HTML + CSS + JavaScript here -->
+  <!-- HTML + CSS here -->
+  <!-- JavaScript can go here inside <script> tags, OR in the separate js: field below -->
+js: |
+  // Optional — JavaScript executed after content: HTML is injected.
+  // Has access to the same variables: hass, entities, card, config, shadow, moreInfo.
+  // Useful to keep HTML and JS separated in YAML for readability.
+  window._hjc_hass = hass;
+  function updateCard(ents) { ... }
+  updateCard(entities);
+  card.addEventListener('hass-update', (e) => {
+    window._hjc_hass = e.detail.hass;
+    updateCard(e.detail.entities);
+  });
 ```
 
 The `content` field is **required**. All other fields are optional.
+
+> **`js:` field**: JavaScript in `js:` runs after `content:` HTML is injected and has the same context (`hass`, `entities`, `card`, `config`, `shadow`, `moreInfo`). It is equivalent to putting a `<script>` tag at the end of `content:` — use whichever keeps the YAML more readable. **Both styles are valid.**
 
 ## Height guidelines
 
@@ -562,26 +576,35 @@ updateCard(entities); // initial render
 card.addEventListener('hass-update', (e) => updateCard(e.detail.entities));
 ```
 
-### Wrong: using a separate `js:` YAML field (field does not exist)
+### `js:` field — supported, equivalent to `<script>` in `content:`
+
+The `js:` field **is supported** — JavaScript runs after `content:` HTML is injected, with the same variables (`hass`, `entities`, `card`, `config`, `shadow`, `moreInfo`). Use whichever style keeps the YAML more readable.
+
 ```yaml
-# ❌ WRONG — the `js:` field does NOT exist in html-js-card
-# Any JS written here is silently ignored — the card stays stuck on its initial HTML (e.g. "Loading...")
+# ✅ CORRECT — js: field (HTML and JS separated)
 type: custom:html-js-card
 content: |
   <div id="root">Loading...</div>
 js: |
-  (function() {
-    const hass = this.hass;   // ❌ also wrong: `this.hass` does not exist
-    ...
-  })()
+  window._hjc_hass = hass;
+
+  function updateCard(ents) {
+    card.querySelector('#root').textContent = ents['sensor.x']?.state || '—';
+  }
+
+  updateCard(entities);
+  card.addEventListener('hass-update', (e) => {
+    window._hjc_hass = e.detail.hass;
+    updateCard(e.detail.entities);
+  });
 ```
 ```yaml
-# ✅ CORRECT — JavaScript goes inside a <script> tag within `content:`
+# ✅ ALSO CORRECT — <script> inside content: (equivalent)
 type: custom:html-js-card
 content: |
   <div id="root">Loading...</div>
   <script>
-    window._hjc_hass = hass;  // ✅ `hass` is injected automatically
+    window._hjc_hass = hass;
 
     function updateCard(ents) {
       card.querySelector('#root').textContent = ents['sensor.x']?.state || '—';
@@ -594,6 +617,8 @@ content: |
     });
   </script>
 ```
+
+> ⚠️ In `js:`, never use `this.hass` or IIFE with `this` — `hass`, `entities`, `card` are injected directly.
 
 ### Wrong: `this.hass`, `this.querySelector`, or IIFE with `this`
 ```javascript

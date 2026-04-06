@@ -1891,11 +1891,12 @@ def get_chat_ui():
         .message.user .user-code-block pre {{ margin: 0; padding: 10px; max-height: 260px; overflow: auto; white-space: pre; font-size: 12px; line-height: 1.4; font-family: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }}
         .message.user img {{ max-width: 200px; max-height: 200px; border-radius: 8px; margin-top: 8px; display: block; }}
         .message.assistant {{ background: white; color: #333; align-self: flex-start; border-bottom-left-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
-        .code-block {{ position: relative; margin: 8px 0; max-height: 340px; overflow: hidden; }}
-        .code-block .copy-button {{ position: absolute; top: 8px; right: 8px; background: #667eea; color: white; border: none; border-radius: 6px; padding: 4px 10px; font-size: 11px; cursor: pointer; opacity: 0.8; transition: all 0.2s; z-index: 1; }}
+        .code-block {{ margin: 8px 0; }}
+        .code-block-header {{ position: sticky; top: 0; z-index: 5; background: #f5f5f5; border-radius: 8px 8px 0 0; display: flex; justify-content: flex-end; padding: 4px 8px; }}
+        .code-block .copy-button {{ background: #667eea; color: white; border: none; border-radius: 6px; padding: 4px 10px; font-size: 11px; cursor: pointer; opacity: 0.8; transition: all 0.2s; }}
         .code-block .copy-button:hover {{ opacity: 1; background: #5a6fd6; }}
         .code-block .copy-button.copied {{ background: #10b981; }}
-        .code-block pre {{ max-height: 320px !important; overflow: auto !important; display: block; }}
+        .code-block pre {{ max-height: 320px !important; overflow: auto !important; display: block; border-radius: 0 0 8px 8px !important; }}
         .message.assistant pre {{ background: #f5f5f5; padding: 10px; border-radius: 8px; max-height: 320px; overflow: auto; margin: 0; font-size: 13px; white-space: pre; word-break: normal; overflow-wrap: normal; }}
         .message.assistant code {{ background: #f0f0f0; padding: 1px 5px; border-radius: 4px; font-size: 13px; }}
         .message.assistant pre code {{ background: none; padding: 0; }}
@@ -1933,7 +1934,7 @@ def get_chat_ui():
         .message.assistant .progress-steps {{ margin-bottom: 8px; font-size: 12px; color: #888; line-height: 1.35; }}
         .message.assistant .progress-steps div {{ white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
         @keyframes blink {{ 0%, 80%, 100% {{ opacity: 0; }} 40% {{ opacity: 1; }} }}
-        .input-area {{ padding: 12px 16px; background: white; border-top: 1px solid #e0e0e0; display: flex; flex-direction: column; gap: 8px; }}
+        .input-area {{ padding: 12px 16px; background: white; border-top: 1px solid #e0e0e0; display: flex; flex-direction: column; gap: 8px; position: relative; }}
         .image-preview-container {{ display: none; padding: 8px; background: #f8f9fa; border-radius: 8px; position: relative; }}
         .image-preview-container.visible {{ display: block; }}
         .image-preview {{ max-width: 150px; max-height: 150px; border-radius: 8px; border: 2px solid #667eea; }}
@@ -1985,6 +1986,12 @@ def get_chat_ui():
         .voice-speaking-bar .wave span:nth-child(4) {{ height: 16px; animation-delay: 0.3s; }}
         .voice-speaking-bar .wave span:nth-child(5) {{ height: 8px; animation-delay: 0.4s; }}
         @keyframes wave-bar {{ 0%, 100% {{ transform: scaleY(1); }} 50% {{ transform: scaleY(0.4); }} }}
+        .skill-slash-menu {{ display:none; position:absolute; bottom:calc(100% + 4px); left:16px; right:16px; background:var(--card-background-color,#fff); border:1px solid #e0e0e0; border-radius:10px; box-shadow:0 4px 20px rgba(0,0,0,0.12); z-index:1000; overflow:hidden; }}
+        .skill-slash-menu.visible {{ display:block; }}
+        .skill-slash-item {{ padding:8px 12px; cursor:pointer; display:flex; align-items:center; gap:10px; }}
+        .skill-slash-item:hover, .skill-slash-item.active {{ background:#f0f0ff; }}
+        .skill-slash-item .ss-cmd {{ font-weight:600; color:#667eea; font-size:13px; white-space:nowrap; }}
+        .skill-slash-item .ss-desc {{ font-size:12px; color:#666; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
         .suggestions {{ display: flex; gap: 8px; padding: 0 16px 8px; flex-wrap: wrap; }}
         .suggestion {{ background: white; border: 1px solid #ddd; border-radius: 16px; padding: 6px 14px; font-size: 13px; cursor: pointer; transition: all 0.2s; white-space: nowrap; }}
         .suggestion:hover {{ background: #667eea; color: white; border-color: #667eea; }}
@@ -2522,6 +2529,46 @@ def get_chat_ui():
         .yaml-number {{ color: #d97706; }}
         .yaml-bool {{ color: #0369a1; font-weight: 600; }}
         .yaml-comment {{ color: #9ca3af; font-style: italic; }}
+        .yaml-ln {{
+            display: inline-block; min-width: 3ch; text-align: right;
+            color: #bbb; user-select: none; margin-right: 10px;
+            font-size: 10px; font-style: normal;
+        }}
+
+        /* File editor toolbar */
+        .file-editor-bar {{
+            position: sticky; top: 0; z-index: 2;
+            display: flex; align-items: center; justify-content: flex-end;
+            padding: 4px 8px; gap: 6px;
+            background: #f0f0f0; border-bottom: 1px solid #ddd;
+            flex-shrink: 0;
+        }}
+        .file-editor-btn {{
+            padding: 3px 10px; font-size: 11px; cursor: pointer;
+            border-radius: 4px; border: 1px solid; line-height: 1.5;
+        }}
+        .file-editor-btn.edit {{
+            background: #f0f4ff; color: #667eea; border-color: #c5d0ff;
+        }}
+        .file-editor-btn.edit:hover {{ background: #e0e8ff; }}
+        .file-editor-btn.save {{
+            background: #dcfce7; color: #16a34a; border-color: #86efac;
+        }}
+        .file-editor-btn.save:hover {{ background: #bbf7d0; }}
+        .file-editor-btn.save:disabled {{ opacity: 0.6; cursor: default; }}
+        .file-editor-btn.cancel {{
+            background: #fff; color: #666; border-color: #ddd;
+        }}
+        .file-editor-btn.cancel:hover {{ background: #f5f5f5; }}
+
+        /* Editor textarea */
+        .file-editor-textarea {{
+            flex: 1; min-height: 0; width: 100%; box-sizing: border-box;
+            font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+            font-size: 11.5px; line-height: 1.6;
+            padding: 10px 14px; border: none; outline: none; resize: none;
+            background: #fafafa; color: #333; tab-size: 2;
+        }}
 
         /* File panel splitter */
         .file-splitter {{
@@ -2696,6 +2743,15 @@ def get_chat_ui():
         body.dark-mode .yaml-number {{ color: #fbbf24; }}
         body.dark-mode .yaml-bool {{ color: #38bdf8; }}
         body.dark-mode .yaml-comment {{ color: #6b7280; }}
+        body.dark-mode .yaml-ln {{ color: #4a4a4a; }}
+        body.dark-mode .file-editor-bar {{ background: #252525; border-bottom-color: #3a3a3a; }}
+        body.dark-mode .file-editor-btn.edit {{ background: #1e2a4a; color: #8ab4f8; border-color: #2d4a8a; }}
+        body.dark-mode .file-editor-btn.edit:hover {{ background: #253a6a; }}
+        body.dark-mode .file-editor-btn.save {{ background: #052e16; color: #4ade80; border-color: #166534; }}
+        body.dark-mode .file-editor-btn.save:hover {{ background: #14532d; }}
+        body.dark-mode .file-editor-btn.cancel {{ background: #2a2a2a; color: #999; border-color: #3a3a3a; }}
+        body.dark-mode .file-editor-btn.cancel:hover {{ background: #333; }}
+        body.dark-mode .file-editor-textarea {{ background: #1e1e1e; color: #d0d0d0; }}
         body.dark-mode .file-splitter:hover {{ background: rgba(255,255,255,0.08); }}
         body.dark-mode .file-context-bar {{ background: #1e3a5f; border-top-color: #2563eb; color: #93c5fd; }}
         body.dark-mode .file-context-chip {{ background: #1e3a8a; color: #93c5fd; }}
@@ -2725,6 +2781,7 @@ def get_chat_ui():
             border-color: #7f1d1d;
         }}
 
+        body.dark-mode .code-block-header {{ background: #1a1a1a; }}
         body.dark-mode .message.assistant pre {{
             background: #1a1a1a;
             color: #e0e0e0;
@@ -3392,6 +3449,7 @@ def get_chat_ui():
                 <span style="font-size:14px;">🧩</span>
                 <span id="skillActiveName" style="flex:1;font-weight:600;"></span>
                 <span style="opacity:0.7;font-size:11px;">{ui_js.get('skill_mode_hint','Apri una nuova chat per cambiare argomento')}</span>
+                <button onclick="deactivateSkill()" style="background:none;color:#7b1fa2;border:1px solid #ce93d8;border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer;white-space:nowrap;">✕ {ui_js.get('skill_deactivate','Disattiva')}</button>
                 <button onclick="newChat()" style="background:#7b1fa2;color:#fff;border:none;border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer;white-space:nowrap;">{ui_js.get('new_chat','Nuova chat')}</button>
             </div>
             <div class="chat-container" id="chat">
@@ -3447,6 +3505,7 @@ def get_chat_ui():
                 </label>
             </div>
         </div>
+        <div id="skillSlashMenu" class="skill-slash-menu"></div>
         <div class="input-row">
             <input type="file" id="imageInput" accept="image/*" style="display: none;" />
             <button class="image-btn" title="{ui_js['upload_image']}">
@@ -3559,6 +3618,58 @@ def get_chat_ui():
 
         let sending = false;
         let currentReader = null;
+
+        // ---- Skill slash-command autocomplete ----
+        (function() {{
+          const menu = document.getElementById('skillSlashMenu');
+          let skills = [], activeIdx = -1;
+          fetch('/api/skills').then(r => r.json()).then(d => {{ skills = (d.skills || []).filter(s => s.installed !== false); }}).catch(() => {{}});
+          function _desc(s) {{
+            const d = s.description;
+            return (typeof d === 'object' ? d['{ui_lang}'] || d['en'] || Object.values(d)[0] : d) || '';
+          }}
+          function show(filter) {{
+            const q = filter.toLowerCase();
+            const matches = skills.filter(s => s.name.startsWith(q));
+            if (!matches.length) {{ hide(); return; }}
+            activeIdx = -1;
+            menu.innerHTML = matches.map(s =>
+              `<div class="skill-slash-item" data-cmd="/${{s.name}}">` +
+              `<span class="ss-cmd">/${{s.name}}</span>` +
+              `<span class="ss-desc">${{_desc(s)}}</span></div>`
+            ).join('');
+            menu.querySelectorAll('.skill-slash-item').forEach(el => {{
+              el.addEventListener('mousedown', e => {{ e.preventDefault(); insert(el.dataset.cmd); }});
+            }});
+            menu.classList.add('visible');
+          }}
+          function hide() {{ menu.classList.remove('visible'); activeIdx = -1; }}
+          function insert(cmd) {{
+            input.value = cmd + ' ';
+            input.focus();
+            hide();
+            input.dispatchEvent(new Event('input'));
+          }}
+          function setActive(idx) {{
+            const items = menu.querySelectorAll('.skill-slash-item');
+            items.forEach((el, i) => el.classList.toggle('active', i === idx));
+            activeIdx = idx;
+          }}
+          input.addEventListener('input', function() {{
+            const v = this.value;
+            if (v.startsWith('/') && !v.includes(' ')) show(v.slice(1));
+            else hide();
+          }});
+          input.addEventListener('keydown', function(e) {{
+            if (!menu.classList.contains('visible')) return;
+            const items = menu.querySelectorAll('.skill-slash-item');
+            if (e.key === 'ArrowDown') {{ e.preventDefault(); setActive(Math.min(activeIdx + 1, items.length - 1)); }}
+            else if (e.key === 'ArrowUp') {{ e.preventDefault(); setActive(Math.max(activeIdx - 1, -1)); }}
+            else if ((e.key === 'Enter' || e.key === 'Tab') && activeIdx >= 0) {{ e.preventDefault(); insert(items[activeIdx].dataset.cmd); }}
+            else if (e.key === 'Escape') hide();
+          }});
+          document.addEventListener('click', e => {{ if (!menu.contains(e.target) && e.target !== input) hide(); }});
+        }})();
 
         // ---- Voice Mode State ----
         const micBtn = document.getElementById('micBtn');
@@ -4105,6 +4216,17 @@ def get_chat_ui():
         let pendingDocument = null;  // Stores {{file, name, size}} for upload on send
         let readOnlyMode = safeLocalStorageGet('readOnlyMode') === 'true';
         let darkMode = safeLocalStorageGet('darkMode') === 'true';
+        // Sync dark mode from backend on load (overrides localStorage if backend has a value)
+        (async function() {{
+            try {{
+                const r = await fetch(apiUrl('api/settings'), {{credentials:'same-origin'}});
+                const d = await r.json();
+                if (d.success && typeof d.settings.dark_mode === 'boolean') {{
+                    darkMode = d.settings.dark_mode;
+                    safeLocalStorageSet('darkMode', darkMode ? 'true' : 'false');
+                }}
+            }} catch(e) {{}}
+        }})();
         let currentProviderId = '{ai_provider}' || 'anthropic';
         let currentModelDisplay = '{model_name}';  // Updated by loadModels() and changeModel()
         const WEB_DASH_WARN_PROVIDERS = new Set(['claude_web', 'chatgpt_web', 'gemini_web', 'perplexity_web', 'github_copilot']);
@@ -4380,7 +4502,7 @@ def get_chat_ui():
                 fileOpenTabs.shift();
                 if (fileActiveTabIdx > 0) fileActiveTabIdx--;
             }}
-            fileOpenTabs.push({{ path, name, content: null, loading: true, offset: 0, hasMore: false, size: 0 }});
+            fileOpenTabs.push({{ path, name, content: null, loading: true, offset: 0, hasMore: false, size: 0, editMode: false, editBuffer: null }});
             const newIdx = fileOpenTabs.length - 1;
             setActivePanelTab(newIdx);
             openFilePanel();
@@ -4490,44 +4612,175 @@ def get_chat_ui():
         function renderActivePanelContent() {{
             if (!filePanelContentEl) return;
             if (fileActiveTabIdx < 0 || fileActiveTabIdx >= fileOpenTabs.length) {{
-                filePanelContentEl.innerHTML = ''; return;
+                filePanelContentEl.innerHTML = '';
+                filePanelContentEl.style.cssText = '';
+                return;
             }}
             const tab = fileOpenTabs[fileActiveTabIdx];
-            if (tab.loading) {{ filePanelContentEl.innerHTML = '<div class="file-panel-loading">Loading...</div>'; return; }}
-            if (tab.error)   {{ filePanelContentEl.innerHTML = '<div class="file-panel-error">Error: ' + tab.error + '</div>'; return; }}
+            if (tab.loading) {{
+                filePanelContentEl.innerHTML = '<div class="file-panel-loading">Loading...</div>';
+                filePanelContentEl.style.cssText = '';
+                return;
+            }}
+            if (tab.error) {{
+                filePanelContentEl.innerHTML = '<div class="file-panel-error">Error: ' + tab.error + '</div>';
+                filePanelContentEl.style.cssText = '';
+                return;
+            }}
             filePanelContentEl.innerHTML = '';
-            const viewer = document.createElement('div');
-            viewer.className = 'yaml-viewer';
-            viewer.innerHTML = syntaxHighlightYaml(tab.content || '');
-            filePanelContentEl.appendChild(viewer);
-            if (tab.hasMore) {{
-                const loaded = tab.offset || 0;
-                const total  = tab.size || 0;
-                const pct    = total > 0 ? Math.round(loaded / total * 100) : '';
-                const btn = document.createElement('button');
-                btn.className = 'file-load-more';
-                btn.textContent = '\u2b07 Load more' + (pct ? ' (' + pct + '% loaded)' : '');
-                btn.onclick = () => loadMoreFileContent(fileActiveTabIdx);
-                filePanelContentEl.appendChild(btn);
+
+            // Toolbar con bottone Modifica / Salva + Annulla
+            const bar = document.createElement('div');
+            bar.className = 'file-editor-bar';
+            if (tab.editMode) {{
+                const saveBtn = document.createElement('button');
+                saveBtn.className = 'file-editor-btn save';
+                saveBtn.textContent = '\U0001f4be Salva';
+                saveBtn.onclick = () => saveFileContent(fileActiveTabIdx);
+                const cancelBtn = document.createElement('button');
+                cancelBtn.className = 'file-editor-btn cancel';
+                cancelBtn.textContent = 'Annulla';
+                cancelBtn.onclick = () => {{
+                    tab.editMode = false; tab.editBuffer = null;
+                    renderActivePanelContent();
+                }};
+                bar.appendChild(saveBtn);
+                bar.appendChild(cancelBtn);
+            }} else {{
+                const editBtn = document.createElement('button');
+                editBtn.className = 'file-editor-btn edit';
+                editBtn.textContent = '\u270f\ufe0f Modifica';
+                editBtn.onclick = async () => {{
+                    if (tab.hasMore) {{
+                        // Load full file before editing to avoid truncation
+                        editBtn.disabled = true;
+                        editBtn.textContent = 'Caricamento...';
+                        try {{
+                            const url = apiUrl('api/files/read') + '?file=' + encodeURIComponent(tab.path);
+                            const resp = await fetch(url, {{credentials:'same-origin'}});
+                            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                            const data = await resp.json();
+                            if (data.error) throw new Error(data.error);
+                            tab.content = data.content;
+                            tab.offset = data.size;
+                            tab.hasMore = false;
+                            tab.size = data.size;
+                        }} catch(e) {{
+                            editBtn.disabled = false;
+                            editBtn.textContent = '\u270f\ufe0f Modifica';
+                            alert('Errore nel caricamento completo del file: ' + (e.message || e));
+                            return;
+                        }}
+                    }}
+                    tab.editMode = true;
+                    tab.editBuffer = tab.content || '';
+                    renderActivePanelContent();
+                }};
+                bar.appendChild(editBtn);
+            }}
+            filePanelContentEl.appendChild(bar);
+
+            if (tab.editMode) {{
+                // Modalità modifica: textarea
+                filePanelContentEl.style.display = 'flex';
+                filePanelContentEl.style.flexDirection = 'column';
+                filePanelContentEl.style.overflow = 'hidden';
+                const ta = document.createElement('textarea');
+                ta.className = 'file-editor-textarea';
+                ta.value = tab.editBuffer !== null ? tab.editBuffer : (tab.content || '');
+                ta.oninput = () => {{ tab.editBuffer = ta.value; }};
+                ta.onkeydown = (e) => {{
+                    if (e.key === 'Tab') {{
+                        e.preventDefault();
+                        const s = ta.selectionStart, end = ta.selectionEnd;
+                        ta.value = ta.value.slice(0, s) + '  ' + ta.value.slice(end);
+                        ta.selectionStart = ta.selectionEnd = s + 2;
+                        tab.editBuffer = ta.value;
+                    }}
+                }};
+                filePanelContentEl.appendChild(ta);
+                ta.focus();
+            }} else {{
+                // Modalità visualizzazione: viewer con numeri di riga
+                filePanelContentEl.style.display = '';
+                filePanelContentEl.style.flexDirection = '';
+                filePanelContentEl.style.overflow = '';
+                const viewer = document.createElement('div');
+                viewer.className = 'yaml-viewer';
+                viewer.innerHTML = syntaxHighlightYaml(tab.content || '');
+                filePanelContentEl.appendChild(viewer);
+                if (tab.hasMore) {{
+                    const loaded = tab.offset || 0;
+                    const total  = tab.size || 0;
+                    const pct    = total > 0 ? Math.round(loaded / total * 100) : '';
+                    const btn = document.createElement('button');
+                    btn.className = 'file-load-more';
+                    btn.textContent = '\u2b07 Load more' + (pct ? ' (' + pct + '% loaded)' : '');
+                    btn.onclick = () => loadMoreFileContent(fileActiveTabIdx);
+                    filePanelContentEl.appendChild(btn);
+                }}
+            }}
+        }}
+
+        async function saveFileContent(idx, force) {{
+            const tab = fileOpenTabs[idx];
+            if (!tab || !tab.editMode) return;
+            const content = tab.editBuffer !== null ? tab.editBuffer : (tab.content || '');
+            const saveBtn = filePanelContentEl.querySelector('.file-editor-btn.save');
+            if (saveBtn) {{ saveBtn.disabled = true; saveBtn.textContent = 'Salvataggio...'; }}
+            try {{
+                const body = {{file: tab.path, content}};
+                if (force) body.force = true;
+                const resp = await fetch(apiUrl('api/files/write'), {{
+                    method: 'POST', credentials: 'same-origin',
+                    headers: {{'Content-Type': 'application/json'}},
+                    body: JSON.stringify(body)
+                }});
+                const data = await resp.json();
+                if (data.truncation_warning) {{
+                    if (saveBtn) {{ saveBtn.disabled = false; saveBtn.textContent = '\U0001f4be Salva'; }}
+                    const kb = n => Math.round(n / 1024 * 10) / 10;
+                    const msg = "Attenzione: il nuovo contenuto (" + kb(data.new_size) + " KB) \u00e8 molto pi\u00f9 corto del file originale (" + kb(data.original_size) + " KB).\\n\\nPotrebbe essere contenuto troncato. Procedere comunque?";
+                    if (confirm(msg)) saveFileContent(idx, true);
+                    return;
+                }}
+                if (!resp.ok || data.error) throw new Error(data.error || 'HTTP ' + resp.status);
+                tab.content = content;
+                tab.size = content.length;
+                tab.editMode = false;
+                tab.editBuffer = null;
+                renderActivePanelContent();
+            }} catch(e) {{
+                if (saveBtn) {{ saveBtn.disabled = false; saveBtn.textContent = '\U0001f4be Salva'; }}
+                alert('Errore nel salvataggio: ' + (e.message || e));
             }}
         }}
 
         // ===== YAML SYNTAX HIGHLIGHT (lightweight, line-by-line) =====
         function syntaxHighlightYaml(text) {{
             if (!text) return '';
-            return text.split('\\n').map(line => {{
+            const lines = text.split('\\n');
+            const pad = String(lines.length).length;
+            return lines.map((line, i) => {{
+                const lineNum = String(i + 1).padStart(pad, ' ');
                 const esc = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-                if (/^\\s*#/.test(line)) return '<span class="yaml-comment">' + esc + '</span>';
-                const m = esc.match(/^(\\s*)([^#:][^:]*)(:\\s*)(.*)$/);
-                if (m) {{
-                    const [, indent, key, colon, val] = m;
-                    let v = val;
-                    if (/^(true|false|yes|no|on|off)$/i.test(val.trim())) v = '<span class="yaml-bool">' + val + '</span>';
-                    else if (/^-?[0-9]+(\\.[0-9]+)?$/.test(val.trim())) v = '<span class="yaml-number">' + val + '</span>';
-                    else if (val.trim()) v = '<span class="yaml-string">' + val + '</span>';
-                    return indent + '<span class="yaml-key">' + key + '</span>' + colon + v;
+                let highlighted;
+                if (/^\\s*#/.test(line)) {{
+                    highlighted = '<span class="yaml-comment">' + esc + '</span>';
+                }} else {{
+                    const m = esc.match(/^(\\s*)([^#:][^:]*)(:\\s*)(.*)$/);
+                    if (m) {{
+                        const [, indent, key, colon, val] = m;
+                        let v = val;
+                        if (/^(true|false|yes|no|on|off)$/i.test(val.trim())) v = '<span class="yaml-bool">' + val + '</span>';
+                        else if (/^-?[0-9]+(\\.[0-9]+)?$/.test(val.trim())) v = '<span class="yaml-number">' + val + '</span>';
+                        else if (val.trim()) v = '<span class="yaml-string">' + val + '</span>';
+                        highlighted = indent + '<span class="yaml-key">' + key + '</span>' + colon + v;
+                    }} else {{
+                        highlighted = esc;
+                    }}
                 }}
-                return esc;
+                return '<span class="yaml-ln">' + lineNum + '</span>' + highlighted;
             }}).join('\\n');
         }}
 
@@ -4548,7 +4801,7 @@ def get_chat_ui():
         // ===== BUILD FILE CONTEXT STRING for sendMessage =====
         function buildFileContext() {{
             if (fileOpenTabs.length === 0) return '';
-            const MAX = 3000;
+            const MAX = 15000;
             return fileOpenTabs
                 .filter(t => t.content)
                 .map(t => {{
@@ -5441,9 +5694,11 @@ def get_chat_ui():
                     + '<div class="mcp-server-actions">'
                     + '<button class="mcp-start" title="Avvia" style="font-size:13px;background:none;border:none;cursor:pointer;padding:2px 5px;">▶</button>'
                     + '<button class="mcp-stop" title="Ferma" style="font-size:13px;background:none;border:none;cursor:pointer;padding:2px 5px;">⏹</button>'
+                    + '<button class="mcp-oauth" title="OAuth" style="font-size:13px;background:none;border:none;cursor:pointer;padding:2px 5px;display:' + (srv.url ? 'inline' : 'none') + '">🔑</button>'
                     + '<button class="delete" title="Delete">\U0001f5d1\ufe0f</button></div>';
                 const startBtn = header.querySelector('.mcp-start');
                 const stopBtn = header.querySelector('.mcp-stop');
+                const oauthBtn = header.querySelector('.mcp-oauth');
                 startBtn.disabled = isRunning;
                 stopBtn.disabled = !isRunning;
 
@@ -5489,6 +5744,43 @@ def get_chat_ui():
                     _renderMcpCards(container, servers, runtimeByName, onRuntimeChanged);
                 }});
 
+                if (oauthBtn) {{
+                    oauthBtn.addEventListener('click', async (e) => {{
+                        e.stopPropagation();
+                        oauthBtn.disabled = true;
+                        oauthBtn.textContent = '…';
+                        try {{
+                            const _oauthUrl = urlInp ? urlInp.value.trim() : '';
+                            // Use direct port (5010) for the callback to bypass HA ingress SameSite=Strict auth
+                            const _callbackUri = window.location.protocol + '//' + window.location.hostname + ':5010/api/mcp/oauth/callback';
+                            const _oauthQp = '?redirect_uri=' + encodeURIComponent(_callbackUri)
+                                + (_oauthUrl ? '&url=' + encodeURIComponent(_oauthUrl) : '');
+                            const resp = await fetch(apiUrl('api/mcp/server/' + encodeURIComponent(name) + '/oauth/start' + _oauthQp), {{
+                                credentials: 'same-origin'
+                            }});
+                            const data = await resp.json();
+                            if (!data.ok && !data.authorize_url) throw new Error(data.error || 'OAuth start failed');
+                            // Open the authorization URL in a popup
+                            const popup = window.open(data.authorize_url, 'mcp_oauth_' + name, 'width=600,height=700,menubar=no,toolbar=no');
+                            // Listen for postMessage from the OAuth callback page
+                            const _handler = (ev) => {{
+                                if (ev.data && ev.data.type === 'mcp_oauth_done' && ev.data.server === name) {{
+                                    window.removeEventListener('message', _handler);
+                                    if (popup && !popup.closed) popup.close();
+                                    oauthBtn.textContent = '🔑✓';
+                                    setTimeout(() => {{ oauthBtn.textContent = '🔑'; }}, 3000);
+                                }}
+                            }};
+                            window.addEventListener('message', _handler);
+                        }} catch(err) {{
+                            alert('MCP OAuth (' + name + '): ' + err.message);
+                        }} finally {{
+                            oauthBtn.disabled = false;
+                            if (oauthBtn.textContent === '…') oauthBtn.textContent = '🔑';
+                        }}
+                    }});
+                }}
+
                 // Toggle body
                 header.addEventListener('click', () => {{
                     const body = card.querySelector('.mcp-server-body');
@@ -5500,10 +5792,13 @@ def get_chat_ui():
                 const body = document.createElement('div');
                 body.className = 'mcp-server-body';
 
-                body.innerHTML = '<div class="agent-form-group"><label>'
+                body.innerHTML = '<div class="agent-form-group"><label>URL (HTTP)</label>'
+                    + '<input type="text" class="mcp-url" value="'
+                    + _escAttr(srv.url || '') + '" placeholder="https://mcp.example.com/mcp (leave empty for stdio)"></div>'
+                    + '<div class="agent-form-group"><label>'
                     + (T.mcp_command || 'Command') + _tipSpan('tip_mcp_command')
                     + '</label><input type="text" class="mcp-cmd" value="'
-                    + _escAttr(srv.command || '') + '" placeholder="python3, uvx, npx..."></div>'
+                    + _escAttr(srv.command || '') + '" placeholder="python3, uvx, npx... (stdio only)"></div>'
                     + '<div class="agent-form-group"><label>'
                     + (T.mcp_args || 'Arguments') + _tipSpan('tip_mcp_args')
                     + '</label><textarea class="mcp-args" rows="2" placeholder="-m\\nmcp.server.stdio">'
@@ -5513,6 +5808,14 @@ def get_chat_ui():
                     + '</label><textarea class="mcp-env" rows="2" placeholder="API_KEY=your_key_here">'
                     + _escHtml(Object.entries(srv.env || {{}}).map(([k,v]) => k + '=' + v).join('\\n'))
                     + '</textarea></div>';
+
+                // Show/hide OAuth button as user types the URL
+                const urlInp = body.querySelector('.mcp-url');
+                if (urlInp && oauthBtn) {{
+                    urlInp.addEventListener('input', () => {{
+                        oauthBtn.style.display = urlInp.value.trim() ? 'inline' : 'none';
+                    }});
+                }}
 
                 card.appendChild(header);
                 card.appendChild(body);
@@ -5524,6 +5827,7 @@ def get_chat_ui():
             const result = {{}};
             container.querySelectorAll('.mcp-server-card').forEach(card => {{
                 const name = card.dataset.serverName;
+                const urlVal = (card.querySelector('.mcp-url') || {{}}).value || '';
                 const cmd = (card.querySelector('.mcp-cmd') || {{}}).value || '';
                 const argsText = (card.querySelector('.mcp-args') || {{}}).value || '';
                 const envText = (card.querySelector('.mcp-env') || {{}}).value || '';
@@ -5533,8 +5837,14 @@ def get_chat_ui():
                     const idx = line.indexOf('=');
                     if (idx > 0) env[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
                 }});
-                const entry = {{ command: cmd.trim(), args: args, env: env }};
-                result[name] = entry;
+                // HTTP server: only url (and optional env for headers)
+                if (urlVal.trim()) {{
+                    const entry = {{ url: urlVal.trim(), env: env }};
+                    result[name] = entry;
+                }} else {{
+                    const entry = {{ command: cmd.trim(), args: args, env: env }};
+                    result[name] = entry;
+                }}
             }});
             return result;
         }}
@@ -6641,6 +6951,13 @@ def get_chat_ui():
             }}
             const wrapper = document.querySelector('.dark-mode-toggle');
             if (wrapper) wrapper.classList.toggle('active', checked);
+            // Persist to backend so the bubble can read it
+            fetch(apiUrl('api/settings'), {{
+                method: 'POST',
+                headers: {{'Content-Type': 'application/json'}},
+                credentials: 'same-origin',
+                body: JSON.stringify({{dark_mode: checked}})
+            }}).catch(() => {{}});
         }}
 
         // Initialize dark mode on page load
@@ -7377,7 +7694,7 @@ def get_chat_ui():
             var codeBlocks = [];
             text = text.replace(/```(\\w*)\\n([\\s\\S]*?)```/g, function(match, lang, code) {{
                 var escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                var html = '<div class="code-block"><button class="copy-button" type="button">\U0001F4CB ' + T.copy_btn + '</button><pre><code>' + escaped + '</code></pre></div>';
+                var html = '<div class="code-block"><div class="code-block-header"><button class="copy-button" type="button">\U0001F4CB ' + T.copy_btn + '</button></div><pre><code>' + escaped + '</code></pre></div>';
                 codeBlocks.push(html);
                 return '%%CODE_' + (codeBlocks.length - 1) + '%%';
             }});
@@ -8894,6 +9211,18 @@ def get_chat_ui():
             await loadConversation(currentSessionId);
         }}
 
+        async function deactivateSkill() {{
+            try {{
+                await fetch('/api/chat/skill/deactivate', {{
+                    method: 'POST',
+                    headers: {{'Content-Type': 'application/json'}},
+                    body: JSON.stringify({{session_id: currentSessionId}})
+                }});
+            }} catch(e) {{ /* ignore */ }}
+            const banner = document.getElementById('skillActiveBanner');
+            if (banner) banner.style.display = 'none';
+        }}
+
         async function newChat() {{
             currentSessionId = Date.now().toString();
             safeLocalStorageSet('currentSessionId', currentSessionId);
@@ -10374,6 +10703,7 @@ def get_chat_ui():
         window.openFileInPanel = openFileInPanel;
         window.closeFilePanelTab = closeFilePanelTab;
         window.closeFilePanel = closeFilePanel;
+        window.saveFileContent = saveFileContent;
         }}
         
     </script>

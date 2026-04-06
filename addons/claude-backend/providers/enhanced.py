@@ -536,10 +536,12 @@ class EnhancedProvider(BaseProvider):
                     continue
                 try:
                     event = json.loads(data_str)
-                    # Some providers (e.g. Groq) embed errors inside the SSE stream
-                    # as {"error": {"message": "...", "type": "..."}} instead of an
-                    # HTTP error status. Silently skipping these causes HTTP 200 with
-                    # no text in the UI. Detect and surface them explicitly.
+                    # Some providers (e.g. Groq, OpenRouter) embed errors inside the SSE
+                    # stream as {"error": {...}} instead of an HTTP error status.
+                    # If no content has been emitted yet, raise RuntimeError so the
+                    # retry logic in stream_chat_with_caching can retry the full request.
+                    # If content is already streaming, yield the error and stop instead
+                    # (can't retry mid-stream without duplicating output).
                     if "error" in event and "choices" not in event:
                         err = event["error"]
                         msg = (
@@ -547,6 +549,8 @@ class EnhancedProvider(BaseProvider):
                             or err.get("msg")
                             or str(err)
                         ) if isinstance(err, dict) else str(err)
+                        if not text_chunks:
+                            raise RuntimeError(f"HTTP 200 stream error: {msg}")
                         yield {"type": "error", "message": msg}
                         return
                     # Capture usage data — present in last chunk (or a usage-only chunk

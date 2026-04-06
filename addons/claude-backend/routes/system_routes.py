@@ -47,8 +47,9 @@ def api_system_features():
     }
 
     # SDK availability for the current provider
-    provider_sdk_ok, provider_sdk_msg = _api._check_provider_sdk(_api.AI_PROVIDER)
-    pkg_status = _api._check_optional_sdks()
+    from routes.ui_routes import _check_provider_sdk, _check_optional_sdks
+    provider_sdk_ok, provider_sdk_msg = _check_provider_sdk(_api.AI_PROVIDER)
+    pkg_status = _check_optional_sdks()
     missing = [k for k, v in pkg_status.items() if not v]
 
     return jsonify({

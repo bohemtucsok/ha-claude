@@ -3,6 +3,7 @@
 Endpoints:
 - GET /api/files/list
 - GET /api/files/read
+- POST /api/files/write
 """
 
 import logging
@@ -98,4 +99,53 @@ def api_files_read():
         })
     except Exception as e:
         logger.error(f"api_files_read error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@file_bp.route('/api/files/write', methods=['POST'])
+def api_files_write():
+    """Write content to a file in the HA config dir.
+
+    JSON body: {file, content, force (optional bool)}
+    Returns: {ok, filename, size} or {error, truncation_warning, original_size, new_size}
+
+    Safety: if new content is less than 60% of the original file size, the write
+    is rejected unless force=true is passed explicitly.
+    """
+    import api as _api
+    data = request.get_json(silent=True) or {}
+    filename = (data.get('file') or '').strip()
+    if not filename:
+        return jsonify({"error": "file parameter is required."}), 400
+    if '..' in filename or filename.startswith('/'):
+        return jsonify({"error": "Invalid filename. Use relative paths only."}), 400
+    content = data.get('content', '')
+    if not isinstance(content, str):
+        return jsonify({"error": "content must be a string."}), 400
+    force = bool(data.get('force', False))
+    filepath = os.path.join(_api.HA_CONFIG_DIR, filename)
+    if not os.path.isfile(filepath):
+        return jsonify({"error": f"File '{filename}' not found."}), 404
+    try:
+        original_size = os.path.getsize(filepath)
+        new_size = len(content.encode('utf-8'))
+        # Anti-truncation guard: reject if new content is less than 60% of original
+        if not force and original_size > 200 and new_size < original_size * 0.6:
+            logger.warning(
+                f"api_files_write: truncation guard triggered for {filename} "
+                f"(original={original_size}B, new={new_size}B)"
+            )
+            return jsonify({
+                "error": "Write rejected: new content is significantly shorter than the original file. "
+                         "This may indicate truncated content. Pass force=true to override.",
+                "truncation_warning": True,
+                "original_size": original_size,
+                "new_size": new_size,
+            }), 409
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(content)
+        logger.info(f"api_files_write: saved {filename} ({new_size}B, was {original_size}B)")
+        return jsonify({"ok": True, "filename": filename, "size": new_size})
+    except Exception as e:
+        logger.error(f"api_files_write error: {e}")
         return jsonify({"error": str(e)}), 500

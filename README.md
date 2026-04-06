@@ -115,6 +115,10 @@ Click the image to watch the video on YouTube.
 - **Enable in Settings**: Settings → Features → Memory (OFF by default)
 - **Storage**: `/config/amira/memory/`
 
+> **Memory vs Custom System Prompt** — two complementary tools:
+> - **Custom System Prompt** — fixed instructions on *how to behave*: tone, language, name, rules that always apply (e.g. "Always reply in English, your name is Amira").
+> - **Memory (`MEMORY.md`)** — dynamic context on *what you know*: facts about the user, discovered preferences, past decisions (e.g. "User has 3 Philips Hue lights in the living room, prefers simple automations"). Updated manually or by the AI itself via the `update_memory` tool.
+
 ### 💬 Interactive Chat Interface
 - **Chat History**: Keep last N conversations, switch between them
 - **Streaming Responses**: Real-time token-by-token output

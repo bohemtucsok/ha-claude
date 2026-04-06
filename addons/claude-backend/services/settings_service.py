@@ -17,6 +17,7 @@ MCP_RUNTIME_FILE = "/config/amira/mcp_runtime.json"
 SETTINGS_DEFAULTS = {
     "language": "en",
     "interaction_mode": "strict",
+    "dark_mode": False,
     "enable_memory": False,
     "enable_file_access": False,
     "enable_file_upload": True,
