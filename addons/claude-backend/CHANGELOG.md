@@ -2,6 +2,13 @@
 
 > **⚠️ After updating, rebuild the add-on** (Settings → Add-ons → Amira → Rebuild) to apply new dependencies.
 
+## 4.7.3 — Extend in-flight compaction to all rounds including the latest
+
+### Fix
+- **In-flight compaction now covers all rounds** (`api.py`): previously, the most recent batch of tool results was always kept intact in the live `messages` array. This meant that a large `get_available_services` call in round 4 would still cause a 2-minute timeout when sending round 5, because it was the "last batch" and not compressed. Now every tool result exceeding the threshold is condensed before each API call, regardless of which round produced it. The model has already processed the full data to generate the current round's tool calls, so re-reading it in full is not needed.
+
+---
+
 ## 4.7.2 — In-flight context compaction for multi-round tool calls
 
 ### Fix
