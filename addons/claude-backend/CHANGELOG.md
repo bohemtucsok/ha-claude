@@ -2,6 +2,18 @@
 
 > **⚠️ After updating, rebuild the add-on** (Settings → Add-ons → Amira → Rebuild) to apply new dependencies.
 
+## 4.7.0 — Conversation history compaction for large tool results
+
+### Improvement
+- **Tool result compaction** (`api.py`): large tool results (> 3000 chars) are now stored in conversation history as smart summaries instead of the raw full content. The full result is still used in the current round (the model works on the real data); only what goes into history is condensed. This prevents context window overflow on subsequent turns and avoids redundant re-fetches.
+  - `get_dashboard_config`: stores view names, card counts, card types used
+  - `get_entities` / `search_entities` / `get_integration_entities`: stores entity count + first 40 entity_ids
+  - `get_automations`: stores automation count + first 40 aliases
+  - All other tools: truncated to first 3000 chars with a note
+- Handles both Anthropic format (`role=user, content=[{type:tool_result}]`) and OpenAI/OpenRouter format (`role=tool, content=str`).
+
+---
+
 ## 4.6.99 — System prompt: avoid redundant tool calls
 
 ### Improvement

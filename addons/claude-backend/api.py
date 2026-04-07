@@ -3003,6 +3003,117 @@ def _clean_unnecessary_comments(text: str) -> str:
     return text
 
 
+# ── Conversation history compaction ───────────────────────────────────────────
+# Tool results can be enormous (e.g. get_dashboard_config returns the full
+# Lovelace YAML — easily 300k+ chars).  Storing the raw result in conversation
+# history means every subsequent turn re-sends that blob to the model, quickly
+# overflowing the context window and forcing the model to re-fetch.
+#
+# Solution: when saving messages to conversations[session_id], replace tool
+# results larger than MAX_TOOL_RESULT_HISTORY_CHARS with a smart condensed
+# summary.  The FULL result is still used in the current round (the model works
+# on the real data); only what goes into history is condensed.
+
+MAX_TOOL_RESULT_HISTORY_CHARS = 3000
+
+
+def _condense_tool_result_for_history(tool_name: str, result_str: str) -> str:
+    """Return a condensed version of a large tool result for history storage."""
+    if len(result_str) <= MAX_TOOL_RESULT_HISTORY_CHARS:
+        return result_str
+    note = f"[history-condensed — full result was {len(result_str)} chars; re-call the tool only if you need the complete data]"
+    try:
+        data = json.loads(result_str)
+    except Exception:
+        return result_str[:MAX_TOOL_RESULT_HISTORY_CHARS] + f" … {note}"
+
+    if tool_name == "get_dashboard_config":
+        views = data.get("views", [])
+        all_types: set = set()
+        view_info = []
+        for v in views:
+            cards = v.get("cards", [])
+            types = {c.get("type", "?") for c in cards if isinstance(c, dict)}
+            all_types |= types
+            view_info.append(f"{v.get('title', '?')} ({v.get('cards_count', len(cards))} cards)")
+        return json.dumps({
+            "url_path": data.get("url_path", "?"),
+            "views_count": len(views),
+            "views": view_info,
+            "card_types_used": sorted(all_types),
+            "_note": note,
+        }, ensure_ascii=False)
+
+    if tool_name in ("get_entities", "search_entities", "get_integration_entities"):
+        items = data if isinstance(data, list) else data.get("entities", data.get("result", []))
+        if isinstance(items, list):
+            return json.dumps({
+                "count": len(items),
+                "entity_ids": [e.get("entity_id", str(e)) for e in items[:40]],
+                "_note": note,
+            }, ensure_ascii=False)
+
+    if tool_name == "get_automations":
+        items = data if isinstance(data, list) else []
+        return json.dumps({
+            "count": len(items),
+            "automations": [a.get("alias", a.get("id", "?")) for a in items[:40]],
+            "_note": note,
+        }, ensure_ascii=False)
+
+    # Generic fallback: truncate
+    return result_str[:MAX_TOOL_RESULT_HISTORY_CHARS] + f" … {note}"
+
+
+def _compact_messages_for_history(messages: list) -> list:
+    """Condense large tool results in a message list before storing in history.
+
+    Handles both Anthropic format (role=user, content=[{type:tool_result}])
+    and OpenAI/OpenRouter format (role=tool, content=str).
+    """
+    # Build tool_use_id → tool_name map from assistant messages
+    tool_id_to_name: dict = {}
+    for msg in messages:
+        if msg.get("role") == "assistant":
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "tool_use":
+                        tool_id_to_name[block.get("id", "")] = block.get("name", "")
+            for tc in msg.get("tool_calls", []):
+                if isinstance(tc, dict):
+                    fn = tc.get("function", {})
+                    tool_id_to_name[tc.get("id", "")] = fn.get("name", "")
+
+    compacted = []
+    for msg in messages:
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+
+        # Anthropic format: role=user, content=[{type:tool_result, ...}]
+        if role == "user" and isinstance(content, list):
+            new_blocks = []
+            changed = False
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    rc = block.get("content", "")
+                    if isinstance(rc, str) and len(rc) > MAX_TOOL_RESULT_HISTORY_CHARS:
+                        tname = tool_id_to_name.get(block.get("tool_use_id", ""), "")
+                        block = {**block, "content": _condense_tool_result_for_history(tname, rc)}
+                        changed = True
+                new_blocks.append(block)
+            if changed:
+                msg = {**msg, "content": new_blocks}
+
+        # OpenAI/OpenRouter format: role=tool, content=str
+        elif role == "tool" and isinstance(content, str) and len(content) > MAX_TOOL_RESULT_HISTORY_CHARS:
+            tname = msg.get("name", tool_id_to_name.get(msg.get("tool_call_id", ""), ""))
+            msg = {**msg, "content": _condense_tool_result_for_history(tname, content)}
+
+        compacted.append(msg)
+    return compacted
+
+
 def _collect_from_stream(user_message: str, session_id: str) -> str:
     """Blocking wrapper: collects all text from stream_chat_with_ai.
     Used by Telegram/WhatsApp for manager.py providers (groq, mistral, claude_web, etc.)."""
@@ -5691,7 +5802,10 @@ def stream_chat_with_ai(user_message: str, session_id: str = "default", image_da
             and not (is_anthropic_or_google and isinstance(msg.get("content", ""), list))
         ]
         if new_msgs_from_provider:
-            for msg in new_msgs_from_provider:
+            # Condense large tool results before storing in history so subsequent
+            # turns don't re-send huge YAML blobs and overflow the context window.
+            _msgs_for_history = _compact_messages_for_history(new_msgs_from_provider)
+            for msg in _msgs_for_history:
                 if msg.get("role") == "assistant":
                     msg["model"] = get_active_model()
                     msg["provider"] = AI_PROVIDER
