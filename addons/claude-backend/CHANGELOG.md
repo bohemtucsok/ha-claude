@@ -2,6 +2,13 @@
 
 > **⚠️ After updating, rebuild the add-on** (Settings → Add-ons → Amira → Rebuild) to apply new dependencies.
 
+## 4.6.98 — Fix: partial response never cleared on mid-stream error or dropped tool calls
+
+### Bug fix
+- **Response no longer disappears after tool-call drops** (`chat_ui.py`): when the LLM produced text in round N followed by tool calls that were all dropped, the server emitted a `clear` event before round N+1. If round N+1 produced no new text, the `done` event arrived with an empty `fullText`, leaving an empty assistant bubble. Fix: on `clear`, the current `fullText` and `div` are saved. On `done` (or stream error), if `fullText` is still empty and a saved text exists, the saved text is restored and re-rendered — so the user always sees the last meaningful response.
+
+---
+
 ## 4.6.97 — New tool: get_attribute
 
 ### New feature

@@ -8069,6 +8069,8 @@ def get_chat_ui():
             let gotAnyToken = false;
             let pendingSteps = null;
             let shouldStop = false;
+            let savedText = '';   // last non-empty fullText before a 'clear' — used as fallback on done
+            let savedDiv = null;  // corresponding div reference
             addThinkingStep(T.connected || 'Connected');
             try {{
             while (true) {{
@@ -8090,7 +8092,10 @@ def get_chat_ui():
                                 updateThinkingBaseText('\U0001f527 ' + desc);
                                 addThinkingStep(desc);
                             }} else if (evt.type === 'clear') {{
-                                // Keep thinking visible; reset streamed text state
+                                // Keep thinking visible; reset streamed text state.
+                                // Save partial text so we can restore it at 'done' if the
+                                // next round produces no new content (e.g. all tool calls dropped).
+                                if (fullText) {{ savedText = fullText; savedDiv = div; }}
                                 if (div) {{ div.innerHTML = ''; }}
                                 fullText = '';
                                 hasTools = false;
@@ -8181,6 +8186,15 @@ def get_chat_ui():
                             }} else if (evt.type === 'done') {{
                                 removeThinking();
 
+                                // If the stream ended with no new content (e.g. all tool calls
+                                // were dropped in the last round), restore the last text that was
+                                // visible before the 'clear' event — so the response is never lost.
+                                if (!fullText && savedText) {{
+                                    fullText = savedText;
+                                    if (!div && savedDiv) {{ div = savedDiv; }}
+                                    if (div) {{ div.innerHTML = formatMarkdown(fullText); }}
+                                }}
+
                                 // After streaming completes, attach undo button if snapshot id is present
                                 if (div && fullText) {{
                                     const snap = extractSnapshotId(fullText);
@@ -8220,6 +8234,13 @@ def get_chat_ui():
                 }}
             }}
             removeThinking();
+            // If the stream ended abruptly with no new content, restore the last saved text
+            // so the response is never lost due to a mid-stream error or dropped tool calls.
+            if (!fullText && savedText) {{
+                fullText = savedText;
+                if (!div && savedDiv) {{ div = savedDiv; }}
+                if (div) {{ div.innerHTML = formatMarkdown(fullText); }}
+            }}
             if (!gotAnyEvent) {{
                 addMessage('\u274c ' + T.connection_lost, 'system');
             }}
