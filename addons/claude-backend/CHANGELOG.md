@@ -2,6 +2,13 @@
 
 > **⚠️ After updating, rebuild the add-on** (Settings → Add-ons → Amira → Rebuild) to apply new dependencies.
 
+## 4.6.99 — System prompt: avoid redundant tool calls
+
+### Improvement
+- **`HA_SYSTEM_GUIDANCE` updated** (`intent.py`): added explicit instruction to avoid calling the same tool twice if its result is already in conversation history. Models (especially non-Anthropic ones like Qwen) tend to re-fetch data already present in context, wasting tokens and slowing responses. The rule covers all tools generically (GENERAL RULES section) and is reinforced specifically for `get_dashboard_config` in the DASHBOARDS section.
+
+---
+
 ## 4.6.98 — Fix: partial response never cleared on mid-stream error or dropped tool calls
 
 ### Bug fix
