@@ -3692,7 +3692,7 @@ def _is_short_followup_reply(user_message: str) -> bool:
     words = [w for w in txt.split(" ") if w]
     if len(words) <= 8 and len(txt) <= 80:
         return True
-    followup_markers = ("manca", "seconda", "2", "continua", "vai avanti", "next", "missing")
+    followup_markers = ("manca", "seconda", "2", "continua", "vai avanti", "next", "missing", "folytasd", "tovább", "következő", "most próbáld", "hiányzik")
     return any(m in txt for m in followup_markers)
 
 
@@ -3700,7 +3700,7 @@ def _is_confirmation_reply(user_message: str) -> bool:
     txt = _normalize_user_message_for_routing(user_message)
     if not txt:
         return False
-    confirms = _all_lang_keywords("confirm") | {"yes", "ok", "okay", "si", "sì", "oui", "vale"}
+    confirms = _all_lang_keywords("confirm") | {"yes", "ok", "okay", "si", "sì", "oui", "vale", "igen", "rendben", "oké", "mehet", "csináld", "rajta", "persze", "próbáld", "tovább"}
     return txt in confirms
 
 
